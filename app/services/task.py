@@ -20,6 +20,7 @@ from app.services import bgm as bgm_service
 from app.services import (
     codex_image,
     codex_oauth,
+    determinism,
     elevenlabs_music,
     generation_progress,
     infistar_video,
@@ -30,6 +31,7 @@ from app.services import (
     metaso_minimax,
     muapi,
     ofox,
+    review,
     sonilo,
     subtitle,
     task_artifacts,
@@ -427,11 +429,28 @@ def generate_terms(task_id, params, video_script):
     return video_terms
 
 
+def _resolve_video_seed(task_id, params) -> int:
+    """
+    解析本次运行真正使用的种子。
+
+    旧任务持久化的 params 可能没有 video_seed 字段，/subtitle 和 /audio 这类
+    请求体也不携带它，因此统一用 getattr 取默认 None，让升级后的历史任务
+    仍能重跑而不报 AttributeError。
+    """
+    return determinism.resolve_effective_seed(
+        getattr(params, "video_seed", None), task_id
+    )
+
+
 def save_script_data(task_id, video_script, video_terms, params):
     script_data = {
         "script": video_script,
         "search_terms": video_terms,
         "params": params,
+        # 回显本次真正使用的种子。用户未指定时这里仍然有值（由 task_id 派生），
+        # 把该值填回请求体 video_seed 即可重放同一条编排；params.video_seed 保持
+        # 原样，因为它记录的是“用户是否真的指定过”，两者语义不能合并。
+        "video_seed": _resolve_video_seed(task_id, params),
     }
     task_artifacts.write_script_data(task_id, script_data)
 
@@ -838,6 +857,9 @@ def get_video_materials(
                 max_clip_duration=params.video_clip_duration,
                 match_script_order=params.match_materials_to_script,
                 image_motion=params.image_motion,
+                # 种子由 task_id 与用户显式值共同决定，素材下载与后续编排共用
+                # 同一个值，否则“同一轮运行”内部会使用两套不同的随机序列。
+                seed=_resolve_video_seed(task_id, params),
                 # 素材阶段占用 40%~50%：每下完一个文件推进一次，慢速网络下
                 # 进度条不再长时间停在 40%。
                 progress_callback=_stage_progress_reporter(task_id, 40, 50),
@@ -1009,7 +1031,7 @@ def _get_material_source_groups(task_id: str, video_paths: list[str]) -> dict[st
 
 def generate_final_videos(
     task_id, params, downloaded_videos, audio_file, subtitle_path, audio_duration,
-    *, partial_results: dict | None = None,
+    *, partial_results: dict | None = None, review_mode: str | None = None,
 ):
     """Record completed outputs even if a later clip raises before returning."""
     final_video_paths = []
@@ -1047,6 +1069,15 @@ def generate_final_videos(
         video_concat_mode = VideoConcatMode.random
     video_transition_mode = params.video_transition_mode
 
+    # 与素材阶段解析到同一个种子。每条片子按 video_index 派生自己的编排，
+    # 因此批量生成仍然互不相同，但第 k 条只由 (seed, k) 决定。
+    effective_seed = _resolve_video_seed(task_id, params)
+    logger.info(
+        f"video seed: {effective_seed}, "
+        f"explicit={getattr(params, 'video_seed', None) is not None}, "
+        f"count={params.video_count}"
+    )
+
     _progress = 50
     for i in range(params.video_count):
         index = i + 1
@@ -1079,6 +1110,8 @@ def generate_final_videos(
             max_clip_duration=params.video_clip_duration,
             threads=params.n_threads,
             clip_speed=params.video_clip_speed,
+            seed=effective_seed,
+            video_index=index,
             progress_callback=_stage_progress_reporter(
                 task_id, _progress, _progress + combine_share
             ),
@@ -1166,6 +1199,27 @@ def generate_final_videos(
 
         final_video_paths.append(final_video_path)
         combined_video_paths.append(combined_video_path)
+
+        # 成片审查。放在最终编码之后、状态写入之前，让 findings 与已有的
+        # 降级警告走同一条 warnings 通路，不新增任何状态字段。
+        # review_video 本身吞异常，这里再包一层是为了让“审查模块自身缺失”
+        # 这类导入/属性级故障也不能影响已经成功的任务。
+        # 先确认产物存在：编码失败时上游已有专属警告，审查再报一条“文件
+        # 不存在”只是噪声，还会抹平调用方对 warnings 的精确断言。
+        if path.isfile(final_video_path):
+            try:
+                for finding in review.review_video(
+                    final_video_path,
+                    audio_path=audio_file,
+                    mode=review_mode,
+                ):
+                    warnings.append(finding.to_warning(video_index=index))
+            except Exception as exc:
+                logger.warning(
+                    f"video review crashed, task_id={task_id}, "
+                    f"video_index={index}, error={exc}"
+                )
+
         _progress += 50 / params.video_count / 2
         sm.state.update_task(
             task_id, progress=_progress, videos=list(final_video_paths),

@@ -1108,7 +1108,7 @@ class TestVideoService(unittest.TestCase):
                 patch.object(
                     vd,
                     "_prioritize_unique_source_clips",
-                    side_effect=lambda subclipped_items, concat_mode: subclipped_items,
+                    side_effect=lambda subclipped_items, concat_mode, **_: subclipped_items,
                 ),
                 patch.object(vd, "concat_video_clips_with_ffmpeg"),
                 patch.object(vd, "delete_files"),

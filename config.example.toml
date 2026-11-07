@@ -619,6 +619,15 @@ subtitle_provider = "edge"
 # "h264_mf", "h264_videotoolbox".
 # video_codec = "libx264"
 
+# Machine review of each finished video: sampled frame scan (black frames, white
+# flashes, frozen picture, one-frame gaps) plus loudness and duration checks.
+# Findings are reported as task warnings and never fail a completed task.
+# Values: "sample" (default, 5 fps scan, sub-second cost), "full" (every frame,
+# can catch single-frame defects but costs more), "off", or true/false.
+# 成片机器审查：抽样逐帧检查黑帧/白闪/冻结/单帧空洞，并检查响度与时长。
+# 结论以任务警告形式返回，绝不会让已成功的任务变成失败。
+# video_review = "sample"
+
 # -----------------------------------------------------------------------------
 # Storage and Task Runtime / 存储与任务运行
 # -----------------------------------------------------------------------------

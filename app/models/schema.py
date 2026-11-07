@@ -120,6 +120,10 @@ class VideoParams(BaseModel):
     video_clip_speed: Optional[float] = 1.0
     match_materials_to_script: bool = False
     video_count: int = Field(default=1, ge=1)
+    # 随机决策的种子。None 表示“未指定”，编排分布与历史行为完全一致；
+    # 指定后，同一批素材下的片段顺序、转场方向与转场类型都可复现。
+    # 上限与 determinism 的 32 位归一化保持一致，避免持久化与回填写法不同。
+    video_seed: Optional[int] = Field(default=None, ge=0, le=0xFFFFFFFF)
 
     video_source: Optional[str] = "pexels"
     video_materials: Optional[List[MaterialInfo]] = (

@@ -4,7 +4,6 @@ from contextvars import copy_context
 import io
 import math
 import os
-import random
 import tempfile
 import threading
 import time
@@ -25,6 +24,7 @@ from app.config import config
 from app.models.schema import ImageMotion, MaterialInfo, VideoAspect, VideoConcatMode
 from app.services import (
     codex_image,
+    determinism,
     generation_progress,
     infistar_video,
     jalapeno_video,
@@ -2371,6 +2371,7 @@ def download_videos(
     image_motion: ImageMotion = ImageMotion.zoom,
     jalapeno_video_endpoint: volcengine_seedance.SeedanceEndpoint | None = None,
     codex_image_context=None,
+    seed: int | None = None,
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
@@ -2530,7 +2531,10 @@ def download_videos(
 
     concat_mode_value = getattr(video_concat_mode, "value", video_concat_mode)
     if concat_mode_value == VideoConcatMode.random.value:
-        random.shuffle(valid_video_items)
+        # 候选列表来自多个关键词的并行搜索，追加顺序取决于网络完成时序。
+        # 必须先按稳定键排序再打乱，否则同一个种子无法重放出同一批下载。
+        valid_video_items.sort(key=lambda item: (item.url, item.duration))
+        determinism.rng_for(seed, "material").shuffle(valid_video_items)
 
     total_duration = 0.0
     on_downloaded = _covered_duration_reporter(

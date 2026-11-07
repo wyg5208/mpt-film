@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 import io
 import math
 import os
-import random
 import gc
 import subprocess
 import sys
@@ -43,6 +42,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import determinism
 from app.services.utils import subtitle_shaping, video_effects
 from app.utils import file_security, logging_utils, utils
 from app.utils.subtitle_reader import moviepy_subtitles
@@ -234,6 +234,8 @@ def _prioritize_unique_source_clips(
     concat_mode: VideoConcatMode,
     source_usage: dict[str, int] | None = None,
     source_groups: dict[str, str] | None = None,
+    seed: int | None = None,
+    video_index: int = 1,
 ) -> List[SubClippedVideoClip]:
     """
     优先让每个源素材只出现一次，降低成片里同一素材反复出现的概率。
@@ -244,6 +246,9 @@ def _prioritize_unique_source_clips(
     先放每个源文件里最长的一个片段，剩余片段作为兜底；当素材总时长不足时，
     仍然允许后续片段补齐音频长度，避免破坏视频生成成功率。优先选择最长
     片段是为了避免随机选中视频尾部的零碎短片段，导致明明有足够素材却过早复用。
+
+    ``seed`` 决定打乱结果，``video_index`` 让批量生成的每条片子拿到互不相同的
+    编排。两者都不指定（默认值）时沿用进程级 ``random``，与历史行为一致。
     """
     if not subclipped_items:
         return []
@@ -282,8 +287,11 @@ def _prioritize_unique_source_clips(
         primary_items.append(primary_item)
         overflow_items.extend(item for item in items if item is not primary_item)
 
-    random.shuffle(primary_items)
-    random.shuffle(overflow_items)
+    # 编排打乱按成片序号派生独立 RNG：批量生成时每条片子都要不同，
+    # 但同一条片子重跑必须一致。共享序列会被前一次 shuffle 消耗掉。
+    order_rng = determinism.rng_for(seed, "order", video_index)
+    order_rng.shuffle(primary_items)
+    order_rng.shuffle(overflow_items)
     if source_usage is not None:
         # Stable sorting retains randomness among equally used sources.
         primary_items.sort(key=lambda item: source_usage.get(item.source_file_path, 0))
@@ -886,7 +894,7 @@ def delete_files(files: List[str] | str):
             logger.warning(f"failed to delete temporary file {file}: {str(e)}")
 
 
-def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
+def get_bgm_file(bgm_type: str = "random", bgm_file: str = "", seed: int | None = None):
     if not bgm_type:
         return ""
 
@@ -903,12 +911,14 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
         return resolved_bgm_file
 
     if bgm_type == "random":
-        files = bgm_service.list_bgm_files()
+        # 必须先排序再选曲：目录枚举顺序在不同文件系统上不保证一致，
+        # 直接对未排序的列表播种会让同一个种子在不同机器选出不同曲子。
+        files = sorted(bgm_service.list_bgm_files())
         # 当背景音乐目录为空时，直接回退为“不使用 BGM”，避免 random.choice([]) 抛异常。
         if not files:
             logger.warning("no background music files found")
             return ""
-        return random.choice(files)
+        return determinism.rng_for(seed, "bgm").choice(files)
 
     return ""
 
@@ -989,6 +999,8 @@ def combine_videos(
     source_groups: dict[str, str] | None = None,
     used_video_paths: List[str] | None = None,
     progress_callback: Callable[[float], None] | None = None,
+    seed: int | None = None,
+    video_index: int = 1,
 ) -> str:
     # Direct callers and persisted tasks can still supply the raw string.
     # Normalize it once for all downstream enum access.
@@ -1030,6 +1042,11 @@ def combine_videos(
     processed_clips = []
     subclipped_items = []
     video_duration = 0
+    if video_concat_mode.value == VideoConcatMode.random.value:
+        # 打乱的输入序列必须稳定。素材列表本身可能按下载完成时序到达，
+        # 不排序时同一个种子在不同机器上会切出完全不同的候选集。
+        # sequential 模式不排：那里的列表顺序就是关键词轮询顺序，是语义本身。
+        video_paths = sorted(video_paths)
     for video_path in video_paths:
         clip = None
         try:
@@ -1080,6 +1097,8 @@ def combine_videos(
     subclipped_items = _prioritize_unique_source_clips(
         subclipped_items=subclipped_items,
         concat_mode=video_concat_mode,
+        seed=seed,
+        video_index=video_index,
         **({"source_usage": source_usage, "source_groups": source_groups}
            if source_usage is not None else {}),
     )
@@ -1127,7 +1146,11 @@ def combine_videos(
                     fit_mode=fit_mode,
                 )
 
-            shuffle_side = random.choice(["left", "right", "top", "bottom"])
+            # 转场方向与类型属于“该片段自身的属性”。用片段在编排序列里的
+            # 下标派生独立 RNG，而不是共享一条序列：这样并发数、批次划分、
+            # 甚至前面某片段处理失败都不应改变其他片段的随机决策。
+            clip_rng = determinism.rng_for(seed, "clip", index)
+            shuffle_side = clip_rng.choice(["left", "right", "top", "bottom"])
             # Short footage and faster playback can leave less than one second.
             # Keep the chosen transition inside the rendered clip's timeline.
             transition_duration = min(1.0, clip.duration)
@@ -1152,7 +1175,7 @@ def combine_videos(
                     lambda c: video_effects.zoomin_transition(c, 1),
                     lambda c: video_effects.zoomout_transition(c, 1),
                 ]
-                shuffle_transition = random.choice(transition_funcs)
+                shuffle_transition = clip_rng.choice(transition_funcs)
                 clip = shuffle_transition(clip)
 
             if clip.duration > max_clip_duration:
@@ -1925,6 +1948,9 @@ def generate_video(
                 else get_bgm_file(
                     bgm_type=params.bgm_type,
                     bgm_file=params.bgm_file,
+                    # 旧任务持久化的 params 可能没有该字段，缺失时保持 None，
+                    # 即沿用历史的全局随机行为，不能让升级后的重跑直接报错。
+                    seed=getattr(params, "video_seed", None),
                 )
             )
         bgm_mix_succeeded = True

@@ -1,4 +1,3 @@
-import random
 import shutil
 import subprocess
 
@@ -40,17 +39,14 @@ def test_combined_short_footage_completes_its_transition(
     ], check=True)
     monkeypatch.setitem(video.config.app, "video_codec", "libx264")
     monkeypatch.setitem(video.config.app, "video_clip_concurrency", 1)
-    state = random.getstate()
-    try:
-        # The ordinary shuffle selection chooses FadeIn with this seed.
-        random.seed(2)
-        video.combine_videos(
-            str(output), [str(source)], str(speech), video_aspect=VideoAspect.square,
-            video_concat_mode=VideoConcatMode.sequential, video_transition_mode=transition,
-            threads=1, clip_speed=speed,
-        )
-    finally:
-        random.setstate(state)
+    # The ordinary shuffle selection chooses FadeIn with this seed. Passing it
+    # explicitly keeps the choice independent of the global random state, which
+    # any earlier test in the same process may have advanced.
+    video.combine_videos(
+        str(output), [str(source)], str(speech), video_aspect=VideoAspect.square,
+        video_concat_mode=VideoConcatMode.sequential, video_transition_mode=transition,
+        threads=1, clip_speed=speed, seed=2,
+    )
     with VideoFileClip(str(output), audio=False) as rendered:
         assert rendered.duration == pytest.approx(0.9, abs=0.04)
         frame = rendered.get_frame(0 if measure == "first" else 0.35)
