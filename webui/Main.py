@@ -1600,6 +1600,15 @@ def _apply_restored_params(params):
         utils.normalize_clip_speed(params.get("video_clip_speed", 1.0)),
     )
     _set_stable_widget_value("video_count_select", params.get("video_count", 1))
+    # video_seed_input 是不带语言后缀的纯 key，不能走 _set_stable_widget_value
+    # （它会给 key 追加语言后缀）；恢复历史任务时直接写 session_state。
+    try:
+        restored_seed_text = ""
+        if params.get("video_seed") is not None:
+            restored_seed_text = str(int(params["video_seed"]))
+    except (TypeError, ValueError):
+        restored_seed_text = ""
+    st.session_state["video_seed_input"] = restored_seed_text
     st.session_state["match_materials_to_script"] = bool(
         params.get("match_materials_to_script", False)
     )
@@ -2107,6 +2116,40 @@ def _render_generation_activity(task):
         st.caption(tr("Generation Remote Task").format(task_id=activity["remote_id"]))
 
 
+def _format_review_finding(warning):
+    """把一条成片审查 finding 压成单行文本：序号 + 检测项 + 时间窗 + 明细。"""
+    code = str(warning.get("code") or "review_unknown").removeprefix("review_")
+    parts = []
+    video_index = warning.get("video_index")
+    if video_index is not None:
+        parts.append(f"#{video_index}")
+    parts.append(code)
+    start = float(warning.get("start") or 0.0)
+    end = float(warning.get("end") or 0.0)
+    if end > 0:
+        parts.append(f"{start:.2f}s-{end:.2f}s")
+    detail = str(warning.get("detail") or "").strip()
+    if detail:
+        parts.append(detail)
+    return " · ".join(parts)
+
+
+def _render_review_findings(findings):
+    """按 severity 分层展示成片审查 findings：error 显性、warn 折叠、info 只进日志。"""
+    errors = [f for f in findings if f.get("severity") == "error"]
+    warns = [f for f in findings if f.get("severity") == "warn"]
+    infos = [f for f in findings if f.get("severity") not in {"error", "warn"}]
+    for finding in errors:
+        st.error(_format_review_finding(finding))
+    if warns:
+        with st.expander(tr("Review Findings (Warnings)"), expanded=False):
+            for finding in warns:
+                st.markdown(f"- {_format_review_finding(finding)}")
+    for finding in infos:
+        # info 级（例如 review_unavailable）不进入页面正文，只留在生成日志里。
+        logger.info(f"review finding (info): {_format_review_finding(finding)}")
+
+
 def _render_generation_task_snapshot(task_id, task):
     """根据状态存储中的快照渲染进度、失败原因或最终成片。"""
     if not task:
@@ -2151,7 +2194,19 @@ def _render_generation_task_snapshot(task_id, task):
 
     if state == const.TASK_STATE_COMPLETE:
         st.success(tr("Video Generation Completed"))
+    # 成片审查 findings 与降级警告共用同一条 warnings 通路，但展示按 severity
+    # 分层：error 显性提示，warn 折叠进单个 expander，info 只进生成日志。
+    review_findings = []
+    plain_warnings = []
     for warning in task.get("warnings") or []:
+        if (
+            isinstance(warning, Mapping)
+            and str(warning.get("code", "")).startswith("review_")
+        ):
+            review_findings.append(warning)
+        else:
+            plain_warnings.append(warning)
+    for warning in plain_warnings:
         if isinstance(warning, Mapping) and warning.get("code") == "batch_materials_reused":
             st.warning(
                 tr("Batch Material Reuse Warning").format(
@@ -2175,6 +2230,7 @@ def _render_generation_task_snapshot(task_id, task):
             )
         else:
             st.warning(str(warning))
+    _render_review_findings(review_findings)
 
     available_videos = [
         (index, url)
@@ -6330,6 +6386,32 @@ def _render_video_settings(panel, params):
                 key="video_count_select",
             )
             _set_runtime_config("ui", "video_count", params.video_count)
+
+            # 可复现编排的可选种子：留空保持历史随机行为，填整数后同一批素材
+            # 重放同一份剪辑决策。用文本框而非 number_input：0 本身是合法种子，
+            # “未指定”必须能用空串表达，数值控件做不到。
+            st.session_state.setdefault(
+                "video_seed_input", str(config.ui.get("video_seed", "") or "")
+            )
+            seed_raw = st.text_input(
+                tr("Video Seed"),
+                key="video_seed_input",
+                help=tr("Video Seed Help"),
+                placeholder="0-4294967295",
+            )
+            _set_runtime_config("ui", "video_seed", seed_raw)
+            seed_text = str(seed_raw or "").strip()
+            if not seed_text:
+                params.video_seed = None
+            else:
+                try:
+                    seed_value = int(seed_text, 10)
+                    if not 0 <= seed_value <= 0xFFFFFFFF:
+                        raise ValueError(seed_text)
+                    params.video_seed = seed_value
+                except ValueError:
+                    params.video_seed = None
+                    st.error(tr("Video Seed Invalid"))
 
             video_codec_options = [
                 (tr("Default Video Encoder"), DEFAULT_VIDEO_CODEC_OPTION),

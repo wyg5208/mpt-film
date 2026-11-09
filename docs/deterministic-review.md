@@ -59,6 +59,10 @@ transitions that "look like they repeat".
 The field is `video_seed` on `VideoParams` (`app/models/schema.py`), bounded to
 a 32-bit unsigned integer (`0 … 4294967295`), default `None`.
 
+- **WebUI**: the video settings panel has a **Video Seed** field
+  (`webui/Main.py`). Leave it blank for today's random behavior; entering an
+  integer seeds the run. A non-integer or out-of-range value is rejected with an
+  inline error and the run falls back to random.
 - **API**: `TaskVideoRequest` inherits `VideoParams`, so add `"video_seed": 12345`
   to the `POST /api/v1/videos` body.
 - **Programmatic / CLI pipeline**: set `params.video_seed` on a `VideoParams`.
@@ -66,9 +70,8 @@ a 32-bit unsigned integer (`0 … 4294967295`), default `None`.
   process-global `random` exactly as before. This is deliberate: an unseeded
   caller must keep today's distribution, not silently become deterministic.
 
-> The WebUI seed input box and a dedicated CLI flag are **not** part of this
-> change (they are the deferred P3 step). Today you set the seed through the API
-> body or a `VideoParams` object.
+> A dedicated CLI flag is **not** part of this change. Set the seed through the
+> WebUI field, the API body, or a `VideoParams` object.
 
 ### 1.3 The effective seed, and how a run records itself
 
@@ -122,7 +125,8 @@ transition directions, transition types and BGM pick reproduce. Cross-run
    `video_terms`, and point at the *same* material files — the reliable way is
    `video_source: "local"` with an explicit `video_materials` list, so the
    candidate set cannot drift with a provider response.
-4. **Re-submit with the seed.** Put the value from step 2 into `video_seed`.
+4. **Re-submit with the seed.** Put the value from step 2 into `video_seed` —
+   the API body or the WebUI **Video Seed** field both work.
 5. **Compare.** Clip ordering, per-clip transition direction, shuffle-transition
    choice, and the random BGM track should match. If they do not, the difference
    is coming from step 3 (materials/script drifted), not from the seed.
@@ -172,9 +176,10 @@ Every finding is appended as a warning dict:
 ```
 
 - `code` is namespaced `review_*` for the program.
-- `severity` is `error` | `warn` | `info`, so a client can tier display. (The
-  richer folded/expanded WebUI treatment is part of the deferred P3 step; today
-  every finding surfaces as a warning carrying its own `severity`.)
+- `severity` is `error` | `warn` | `info`, and the WebUI tiers the display:
+  `error` findings surface as inline error notices, `warn` findings are folded
+  into a single collapsed "Review Findings (Warnings)" expander, and `info`
+  findings (e.g. `review_unavailable`) go to the generation log only.
 - `detail` always embeds measured numbers and a timestamp — the same reason
   OpenFilm's `! jumping frame at 6.67s` is actionable at a glance.
 - Visual findings additionally carry `evidence`, a relative path to a timestamp
