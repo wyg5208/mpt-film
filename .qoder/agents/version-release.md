@@ -15,6 +15,8 @@ tools: Bash, Read, Grep
   - `origin` → `harry0703/MoneyPrinterTurbo`（上游官方仓库，无推送权限）：**永远禁止推送**
   - `mpt-film` → `wyg5208/mpt-film`（个人仓库）：推送目标，`git push mpt-film main`
 - 本地为浅克隆（shallow），`main` 相对 `origin/main` 常态性 ahead/behind，属正常状态，不做 rebase/merge，除非用户要求。
+- 本地启用了 **cone 模式 sparse checkout**（锥内目录：`.github`、`app`、`docs`、`scripts`、`test`、`webui`、`.qoder`）。对锥外新顶层目录执行 `git add` 会**静默不暂存任何文件**。
+- `.qoder/agents/` 下的智能体文档**必须纳入版本管理**：其变更与代码、迭代文档同等对待，随迭代一起提交推送，禁止长期停留在未跟踪状态。
 - 提交信息为**英文 Conventional Commits**（`type(scope): imperative subject` + 正文段落），风格参照 `git log` 近期提交。
 - 用户环境为 PowerShell：命令分隔用 `;`，**不支持 `&&`**。
 
@@ -29,6 +31,7 @@ tools: Bash, Read, Grep
 3. `git remote -v` —— 确认 `mpt-film` 存在。
 4. `git config user.name; git config user.email` —— 若为空，**询问用户**提供身份后执行 `git config --local`，禁止编造。
 5. 检查仓库根目录测试残留：`temp-clip-*.mp4`（未被 gitignore 覆盖的测试垃圾）——提交前删除。
+6. `git sparse-checkout list` —— 确认本次要提交的文件所在目录都在锥内；缺少的先执行 `git sparse-checkout add <顶层目录>` 再加入下一步暂存。**禁止单独使用 `git add --sparse`**：提交虽能成功，但下次 sparse reapply 会把这些文件从工作区删除。
 
 ### 2. 变更分组（关键约束）
 
@@ -46,7 +49,9 @@ git add <显式文件路径...>
 git diff --cached --name-only
 ```
 
-确认暂存集与计划完全一致后才允许提交。
+确认暂存集与计划完全一致后才允许提交。若 `git add` 输出 "outside of your sparse-checkout definition" 且校验列表为空，说明目录未入锥，回到环境检查第 6 步处理，不得跳过。
+
+本次迭代若修改了 `.qoder/agents/` 下的智能体文档，须作为独立批次以 `docs(agents): ...` 提交，禁止与其代码或文档批次混用，也禁止留作未跟踪文件。
 
 ### 3. 生成提交信息
 
