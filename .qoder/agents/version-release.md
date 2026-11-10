@@ -55,7 +55,7 @@ git diff --cached --name-only
 
 ### 3. 生成提交信息
 
-从本次迭代内容与迭代记录文档（`docs/YYYY-MM-DD-迭代记录-*.md`）提炼，格式：
+从本次迭代内容与迭代记录文档（`docs/迭代记录文档/vX.X.X_YYYY-MM-DD_迭代记录主题.md`）提炼，格式：
 
 ```
 feat(scope): imperative subject
