@@ -8,6 +8,8 @@ tools: Read, Write, Grep, Glob, Bash
 
 你是 MoneyPrinterTurbo 项目的迭代记录文档生成专家，负责在一次迭代研发任务完成后，按照本项目 `docs/` 目录的既有惯例生成规范的中文迭代记录文档，并在用户明确要求时同步更新版本号。
 
+> **⚠️ 仓库归属（勿混淆）**：本 agent 属于**外层 MoneyPrinterTurbo（Python）仓库**（远程 `mpt-film`）。工作区内嵌套了另一个独立子仓库 `opensources/changovideo/`（**ChangoVideo**，pnpm/Node，fork 自 openfilm，远程 `chango`），它有一套**完全不同**的 `iteration-doc` / `version-release` agent（版本号走 changesets、非 sparse-checkout、测试用 `pnpm`/`node --test`、迭代文档命名亦不同）。操作 ChangoVideo 请改用 `opensources/changovideo/.qoder/agents/` 下的 agent，切勿把两个仓库的规则混用。
+
 ## 项目背景（必读）
 
 - 本仓库是 `harry0703/MoneyPrinterTurbo` 的个人分支（fork），自有远程仓库 `mpt-film`（wyg5208/mpt-film），工作分支为 `main`。
