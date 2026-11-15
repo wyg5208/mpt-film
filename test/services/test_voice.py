@@ -57,8 +57,14 @@ class TestVoiceService(unittest.TestCase):
         voices = vs.get_all_azure_voices()
         # 数据已从内联字符串迁移到 azure_voices.json，确保仍能完整加载
         self.assertEqual(len(voices), 331)
-        # 结果应为 "Name-Gender" 格式且已排序
-        self.assertEqual(voices, sorted(voices))
+        # zh 系声音置顶展示（避免 af 等冷门语言按字母序排在最前被误选），
+        # 且置顶只是分组重排：zh 组内部与其余语言仍保持字母序。
+        zh_voices = [v for v in voices if v.lower().startswith("zh-")]
+        other_voices = [v for v in voices if not v.lower().startswith("zh-")]
+        self.assertTrue(zh_voices)
+        self.assertEqual(voices, zh_voices + other_voices)
+        self.assertEqual(zh_voices, sorted(zh_voices))
+        self.assertEqual(other_voices, sorted(other_voices))
         for v in voices:
             self.assertTrue(v.endswith("-Male") or v.endswith("-Female"))
 

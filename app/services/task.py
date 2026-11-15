@@ -573,6 +573,14 @@ def _resolve_reusable_voice_preview(
     return preview_file, math.ceil(duration), sub_maker
 
 
+# 音频时长健全性守卫阈值：长中文脚本（超过该字符数）正常配音至少几十秒；
+# 若实测音频低于该秒数，几乎必然是声音与脚本语言不匹配。
+_AUDIO_SANITY_GUARD_MIN_CJK_CHARS = 50
+_AUDIO_SANITY_GUARD_MIN_SECONDS = 5.0
+# CJK 统一表意文字基本区，用于估算脚本的中文体量。
+_CJK_CHAR_PATTERN = re.compile(r"[\u4e00-\u9fff]")
+
+
 def generate_audio(
     task_id,
     params,
@@ -640,7 +648,12 @@ def generate_audio(
             _mark_task_failed(
                 task_id,
                 "audio",
-                "failed to synthesize audio; verify the selected voice and TTS connectivity",
+                # 带上声音名并点出最常见诱因：NoAudioReceived 几乎都是
+                # 声音与脚本语言不匹配（如用非中文声音读中文脚本），
+                # 提示用户换配对的声音比笼统的“检查连接”更可操作。
+                "failed to synthesize audio with voice "
+                f"'{tts_kwargs['voice_name']}'; verify the voice matches "
+                "the script language and TTS connectivity",
             )
             return None, None, None
         # Measure the real written audio_file, not sub_maker.cues[-1].end:
@@ -651,11 +664,32 @@ def generate_audio(
         # audio_duration to the API/WebUI, and under-sources
         # download_videos() material, scaled by video_count.
         file_duration = voice.get_audio_duration(audio_file)
-        audio_duration = math.ceil(
+        measured_duration = (
             file_duration if file_duration > 0 else voice.get_audio_duration(sub_maker)
         )
+        audio_duration = math.ceil(measured_duration)
         if audio_duration == 0:
             _mark_task_failed(task_id, "audio", "generated audio duration is zero")
+            return None, None, None
+        # 音频时长健全性守卫：长中文脚本若只合成出几秒音频，几乎必然是声音
+        # 与脚本语言不匹配——例如南非荷兰语声音读中文脚本时只会念出夹杂的
+        # 英文单词，任务会“成功”产出一段近空视频。在音频阶段直接判失败并
+        # 点名声音，比静默产出短视频更好诊断。比较用取整前的实测秒数，避免
+        # ceil 把 4.1s 抬到 5 而漏判；自定义音频是用户自备的素材，不在此列。
+        cjk_char_count = len(_CJK_CHAR_PATTERN.findall(video_script or ""))
+        if (
+            cjk_char_count > _AUDIO_SANITY_GUARD_MIN_CJK_CHARS
+            and measured_duration < _AUDIO_SANITY_GUARD_MIN_SECONDS
+        ):
+            _mark_task_failed(
+                task_id,
+                "audio",
+                "synthesized audio is too short "
+                f"({measured_duration:.1f}s) for a script with {cjk_char_count} "
+                f"CJK characters; the voice '{tts_kwargs['voice_name']}' likely "
+                "does not match the script language — pick a voice that matches "
+                "the script language",
+            )
             return None, None, None
         return audio_file, audio_duration, sub_maker
     else:

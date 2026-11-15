@@ -23,6 +23,7 @@ from xml.sax.saxutils import escape, unescape
 import edge_tts
 import requests
 from edge_tts import SubMaker
+from edge_tts.exceptions import NoAudioReceived
 from edge_tts.srt_composer import Subtitle
 from loguru import logger
 
@@ -422,7 +423,14 @@ def get_all_azure_voices(filter_locals=None) -> list[str]:
         elif not filter_locals:
             voices.append(f"{name}-{gender}")
 
-    voices.sort()
+    # zh 系声音置顶展示：全量列表按纯字母序时 af-ZA（南非荷兰语）恰好排在
+    # 最前，中文用户打开下拉框首先看到的就是它。选错语言的声音会让合成
+    # 直接失败（NoAudioReceived），或者只把脚本里夹杂的英文单词念出来，
+    # 生成一段几秒钟的空视频。置顶只改变展示顺序：zh 组内部与其余语言
+    # 仍保持字母序，过滤与解析逻辑不受影响。
+    voices.sort(
+        key=lambda name: (0, name) if name.lower().startswith("zh-") else (1, name)
+    )
     return voices
 
 
@@ -1642,6 +1650,18 @@ def azure_tts_v1(
             temp_path = None
             logger.info(f"completed, output file: {voice_file}")
             return sub_maker
+        except NoAudioReceived:
+            # 服务端正常收尾但一个音频字节都没给。这不是网络抖动，重试
+            # 不会有不同结果；最常见原因是声音与文本语言不匹配（例如用
+            # 南非荷兰语声音朗读中文脚本，Microsoft 正常完成握手后返回
+            # 零字节音频流）。立即停止重试并给出可操作的提示，避免同
+            # 一个必然失败连跑三次。
+            logger.error(
+                "failed, the voice produced no audio for this text "
+                f"(voice={voice_name}); usually a voice/text language "
+                "mismatch — pick a voice that matches the script language"
+            )
+            break
         except Exception as e:
             logger.error(f"failed, error: {str(e)}")
         finally:
