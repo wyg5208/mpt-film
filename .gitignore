@@ -45,3 +45,17 @@ htmlcov/
 
 # Claude Code 订阅令牌（docker compose 自动读取），禁止提交
 .env
+
+# 本地克隆的上游开源项目，仅供学习参考；它们是嵌套 git 仓库，不纳入本仓库版本控制
+/opensources/
+
+# agent 工作草稿目录（提交信息草稿、日志、验证截图），不纳入版本控制
+.webchat-work/
+
+# 测试残留视频、流媒体下载残留与根目录验证截图
+temp-clip-*.mp4
+*.m4s
+/*-screenshot.png
+
+# 本地临时目录（含 Cloudflare Cookie 等敏感记录），禁止提交
+/temp/
