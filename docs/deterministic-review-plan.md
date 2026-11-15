@@ -388,6 +388,9 @@ def review_video(
   以及 review 的逐帧解码。
 - 该项与 P0/P1 无依赖，可最后做，也可只做 concat 不动 zoom 缓存。
 
+> 2026-11-09 更新：基于 OpenFilm `seekable.mjs` 实测溯源的具体设计（P2a writer 侧 `-g`、
+> P2b 源侧稠密 GOP 副本缓存、键生成与换入点、验证方案）见 [dense-gop-seek-cache-p2.md](dense-gop-seek-cache-p2.md)。
+
 ---
 
 ## 7. 测试方案

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MPT × OpenFilm — Path B Demo</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #232733;
+  --border: #2e3345;
+  --accent: #6c5ce7;
+  --accent2: #a29bfe;
+  --green: #00b894;
+  --orange: #fdcb6e;
+  --red: #e17055;
+  --blue: #74b9ff;
+  --pink: #fd79a8;
+  --text: #e8e8ee;
+  --text-dim: #8b8fa3;
+  --mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; overflow-x: hidden; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+
+/* Header */
+.header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.header h1 { font-size: 16px; font-weight: 600; }
+.header .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: #fff; }
+.header .topic { font-size: 13px; color: var(--text-dim); margin-left: auto; }
+
+/* Main layout */
+.main { display: grid; grid-template-columns: 340px 1fr 320px; overflow: hidden; }
+
+/* Left: film.html source */
+.source-panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.panel-header { padding: 10px 14px; font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+.code { font-family: var(--mono); font-size: 11px; line-height: 1.7; padding: 12px; overflow-y: auto; flex: 1; white-space: pre-wrap; color: var(--text-dim); }
+.code .tag { color: var(--green); }
+.code .attr { color: var(--orange); }
+.code .val { color: var(--blue); }
+.code .comment { color: #555; font-style: italic; }
+.code .highlight { background: rgba(108,92,231,0.15); display: inline; }
+
+/* Center: timeline + preview */
+.center { display: flex; flex-direction: column; overflow: hidden; }
+.preview-area { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; position: relative; min-height: 200px; }
+.canvas-frame { width: 320px; height: 568px; border-radius: 12px; overflow: hidden; position: relative; background: #111; box-shadow: 0 0 40px rgba(0,0,0,0.5); }
+.canvas-content { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s; }
+/* Scene states */
+.scene-stock { background: linear-gradient(135deg, #2d3436 0%, #000000 100%); }
+.scene-stock::after { content: '🎬 Pexels: city timelapse'; position: absolute; bottom: 40%; font-size: 12px; color: var(--text-dim); }
+.scene-kinetic { background: var(--bg); }
+.scene-chart { background: #1e272e; }
+.scene-caption-overlay { position: absolute; bottom: 15%; left: 10%; right: 10%; text-align: center; }
+.scene-caption-overlay p { font-size: 14px; font-weight: 600; line-height: 1.5; text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
+
+.time-indicator { position: absolute; top: 8px; right: 12px; font-size: 11px; color: var(--accent2); font-family: var(--mono); background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px; }
+.playhead-info { position: absolute; top: 8px; left: 12px; font-size: 10px; color: var(--text-dim); }
+
+/* Timeline */
+.timeline { background: var(--surface); border-top: 1px solid var(--border); padding: 8px 16px; flex-shrink: 0; }
+.timeline-ruler { display: flex; align-items: center; gap: 0; margin-bottom: 6px; height: 20px; position: relative; }
+.timeline-ruler .tick { font-size: 9px; color: var(--text-dim); position: absolute; top: 2px; }
+.timeline-tracks { position: relative; }
+.track { display: flex; align-items: center; height: 32px; margin-bottom: 4px; }
+.track-label { width: 80px; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.track-clips { flex: 1; position: relative; height: 24px; display: flex; gap: 2px; }
+.clip { height: 100%; border-radius: 4px; display: flex; align-items: center; padding: 0 6px; font-size: 9px; color: #fff; overflow: hidden; white-space: nowrap; cursor: pointer; transition: all 0.15s; border: 1px solid transparent; }
+.clip:hover { border-color: var(--accent2); transform: scaleY(1.1); }
+.clip.active { border-color: #fff; }
+.clip-stock { background: rgba(116,185,255,0.25); }
+.clip-scene { background: rgba(108,92,231,0.3); }
+.clip-caption { background: rgba(0,184,148,0.25); }
+.clip-audio { background: rgba(253,203,110,0.2); }
+.clip-bgm { background: rgba(253,121,168,0.2); }
+.playhead-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 10; transition: left 0.1s; }
+.playhead-line::before { content: ''; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px; background: var(--accent); border-radius: 50%; }
+
+/* Right panel: properties + comparison */
+.right-panel { border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; background: var(--surface); }
+.props { padding: 14px; }
+.prop-group { margin-bottom: 16px; }
+.prop-group h3 { font-size: 12px; color: var(--accent2); margin-bottom: 8px; }
+.prop-row { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+.prop-row .key { color: var(--text-dim); }
+.prop-row .value { color: var(--text); font-family: var(--mono); }
+
+.comparison { padding: 14px; border-top: 1px solid var(--border); }
+.comparison h3 { font-size: 12px; color: var(--orange); margin-bottom: 10px; }
+.comp-item { font-size: 11px; margin-bottom: 8px; padding: 6px 8px; border-radius: 4px; }
+.comp-old { background: rgba(225,112,85,0.1); border-left: 2px solid var(--red); }
+.comp-new { background: rgba(0,184,148,0.1); border-left: 2px solid var(--green); }
+.comp-item .label { color: var(--text-dim); font-size: 10px; }
+
+.btn-render { display: block; width: 100%; padding: 10px; margin-top: 12px; background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+.btn-render:hover { background: #5b4bd5; }
+
+/* Chart in scene */
+.mini-chart { display: flex; align-items: flex-end; gap: 6px; height: 100px; padding: 10px; }
+.bar { width: 24px; border-radius: 3px 3px 0 0; transition: height 0.5s; }
+.chart-title { font-size: 11px; color: var(--text-dim); text-align: center; margin-top: 4px; }
+
+/* Responsive hint */
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; }
+  .source-panel, .right-panel { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>OpenFilm Studio × MPT</h1>
+    <span class="badge">Path B Demo</span>
+    <span class="topic">主题：「2026年AI产业格局」· 60s 竖屏口播</span>
+  </div>
+
+  <div class="main">
+    <!-- Left: Generated film.html -->
+    <div class="source-panel">
+      <div class="panel-header">film.html — LLM 生成的影片源码</div>
+      <div class="code" id="code-panel"></div>
+    </div>
+
+    <!-- Center: Preview + Timeline -->
+    <div class="center">
+      <div class="preview-area">
+        <div class="canvas-frame" id="preview-canvas">
+          <div class="canvas-content scene-stock" id="scene-display">
+            <div class="scene-caption-overlay" id="caption-overlay">
+              <p id="caption-text">2026年，全球AI市场规模突破8000亿美元</p>
+            </div>
+          </div>
+          <div class="time-indicator" id="time-display">t = 2.3s</div>
+          <div class="playhead-info">1080×1920 · 30fps</div>
+        </div>
+      </div>
+      <div class="timeline">
+        <div class="timeline-ruler" id="ruler"></div>
+        <div class="timeline-tracks" id="tracks">
+          <div class="playhead-line" id="playhead" style="left: 38px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Properties + Comparison -->
+    <div class="right-panel">
+      <div class="props" id="props-panel">
+        <div class="panel-header">选中片段属性</div>
+        <div class="prop-group">
+          <h3>clip: city-timelapse.mp4</h3>
+          <div class="prop-row"><span class="key">来源</span><span class="value">Pexels #3842921</span></div>
+          <div class="prop-row"><span class="key">时间段</span><span class="value">0.0 – 5.2s</span></div>
+          <div class="prop-row"><span class="key">尺寸</span><span class="value">1920×1080 → cover</span></div>
+          <div class="prop-row"><span class="key">seek副本</span><span class="value">a3f29c1b4e07.mp4</span></div>
+          <div class="prop-row"><span class="key">关键帧间距</span><span class="value">0.26s</span></div>
+        </div>
+        <div class="prop-group">
+          <h3>scene: data-chart.html</h3>
+          <div class="prop-row"><span class="key">来源</span><span class="value">LLM 代码生成</span></div>
+          <div class="prop-row"><span class="key">时间段</span><span class="value">12.0 – 17.5s</span></div>
+          <div class="prop-row"><span class="key">渲染方式</span><span class="value">Canvas 2D + GSAP</span></div>
+          <div class="prop-row"><span class="key">确定性</span><span class="value">FILM_CLOCK ✓</span></div>
+          <div class="prop-row"><span class="key">look 验证</span><span class="value">3 pass, 0 mismatch</span></div>
+        </div>
+      </div>
+
+      <div class="comparison">
+        <h3>旧 MPT vs Path B</h3>
+        <div class="comp-item comp-old">
+          <div class="label">渲染层</div>
+          moviepy 三段 encode ×<br>Python 单线程合成
+        </div>
+        <div class="comp-item comp-new">
+          <div class="label">渲染层</div>
+          openfilm render · N worker<br>确定性 · 并行 · 一次编码
+        </div>
+        <div class="comp-item comp-old">
+          <div class="label">中间态</div>
+          script.json（不可视化）
+        </div>
+        <div class="comp-item comp-new">
+          <div class="label">中间态</div>
+          film.html（可编辑 + Studio 预览）
+        </div>
+        <div class="comp-item comp-old">
+          <div class="label">质量保障</div>
+          P1 review 事后告警
+        </div>
+        <div class="comp-item comp-new">
+          <div class="label">质量保障</div>
+          look 两遍乱序比对 + watch 分类
+        </div>
+        <div class="comp-item comp-old">
+          <div class="label">迭代方式</div>
+          重跑 pipeline，祈祷 seed
+        </div>
+        <div class="comp-item comp-new">
+          <div class="label">迭代方式</div>
+          改一行 HTML，重渲 5s 片段
+        </div>
+        <button class="btn-render" onclick="alert('真实产品中：openfilm render . --workers=4\n60s 竖屏 ≈ 22s 完成')">▶ 重新渲染全片</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// film.html source code display
+const codeContent = `<span class="comment">&lt;!-- LLM 根据脚本 + 素材匹配结果自动生成 --&gt;</span>
+<span class="tag">&lt;!doctype html&gt;</span>
+<span class="tag">&lt;html&gt;</span>
+<span class="tag">&lt;head&gt;</span>
+  <span class="tag">&lt;meta</span> <span class="attr">name</span>=<span class="val">"viewport"</span> <span class="attr">content</span>=<span class="val">"width=1080, height=1920"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;style&gt;</span>
+    .card { object-fit: cover; }
+    .caption { font: 600 36px/1.5 system-ui; }
+  <span class="tag">&lt;/style&gt;</span>
+<span class="tag">&lt;/head&gt;</span>
+<span class="tag">&lt;body&gt;</span>
+
+<span class="comment">&lt;!-- track 1: stock clips --&gt;</span>
+<span class="tag">&lt;section</span> <span class="attr">class</span>=<span class="val">"track"</span> <span class="attr">z</span>=<span class="val">"1"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;video</span> <span class="attr">class</span>=<span class="val">"card"</span>
+    <span class="attr">src</span>=<span class="val">"media/pexels-city-3842921.mp4"</span>
+    <span class="attr">at</span>=<span class="val">"0"</span> <span class="attr">out</span>=<span class="val">"5.2"</span><span class="tag">&gt;</span><span class="tag">&lt;/video&gt;</span>
+  <span class="tag">&lt;video</span> <span class="attr">class</span>=<span class="val">"card"</span>
+    <span class="attr">src</span>=<span class="val">"media/pexels-chip-7760913.mp4"</span>
+    <span class="attr">at</span>=<span class="val">"5.2"</span> <span class="attr">out</span>=<span class="val">"12"</span><span class="tag">&gt;</span><span class="tag">&lt;/video&gt;</span>
+<span class="tag">&lt;/section&gt;</span>
+
+<span class="comment">&lt;!-- track 2: code-generated scenes --&gt;</span>
+<span class="tag">&lt;section</span> <span class="attr">class</span>=<span class="val">"track"</span> <span class="attr">z</span>=<span class="val">"2"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;iframe</span> <span class="attr">src</span>=<span class="val">"scenes/kinetic-title.html"</span>
+    <span class="attr">at</span>=<span class="val">"1.5"</span> <span class="attr">out</span>=<span class="val">"4"</span> <span class="attr">style</span>=<span class="val">"left:80;top:400;width:920"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;/iframe&gt;</span>
+  <span class="tag">&lt;iframe</span> <span class="attr">src</span>=<span class="val">"scenes/data-chart.html"</span>
+    <span class="attr">at</span>=<span class="val">"12"</span> <span class="attr">out</span>=<span class="val">"17.5"</span> <span class="attr">style</span>=<span class="val">"left:120;top:600;width:840;height:500"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;/iframe&gt;</span>
+<span class="tag">&lt;/section&gt;</span>
+
+<span class="comment">&lt;!-- track 3: subtitles (declarative, NOT burned overlay) --&gt;</span>
+<span class="tag">&lt;section</span> <span class="attr">class</span>=<span class="val">"track"</span> <span class="attr">z</span>=<span class="val">"3"</span> <span class="attr">subtitles</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;p</span> <span class="attr">class</span>=<span class="val">"caption"</span> <span class="attr">at</span>=<span class="val">"0.5"</span> <span class="attr">out</span>=<span class="val">"3.8"</span><span class="tag">&gt;</span>
+    2026年，全球AI市场规模突破8000亿美元<span class="tag">&lt;/p&gt;</span>
+  <span class="tag">&lt;p</span> <span class="attr">class</span>=<span class="val">"caption"</span> <span class="attr">at</span>=<span class="val">"3.8"</span> <span class="attr">out</span>=<span class="val">"7.1"</span><span class="tag">&gt;</span>
+    其中大模型推理占据40%份额<span class="tag">&lt;/p&gt;</span>
+<span class="tag">&lt;/section&gt;</span>
+
+<span class="comment">&lt;!-- track 4: voiceover + BGM --&gt;</span>
+<span class="tag">&lt;section</span> <span class="attr">class</span>=<span class="val">"track"</span> <span class="attr">audio</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;audio</span> <span class="attr">src</span>=<span class="val">"voiceover.mp3"</span> <span class="attr">at</span>=<span class="val">"0"</span><span class="tag">&gt;&lt;/audio&gt;</span>
+  <span class="tag">&lt;audio</span> <span class="attr">src</span>=<span class="val">"bgm.mp3"</span> <span class="attr">at</span>=<span class="val">"0"</span> <span class="attr">volume</span>=<span class="val">"0.3"</span><span class="tag">&gt;&lt;/audio&gt;</span>
+<span class="tag">&lt;/section&gt;</span>
+
+<span class="tag">&lt;/body&gt;</span>
+<span class="tag">&lt;/html&gt;</span>`;
+
+document.getElementById('code-panel').innerHTML = codeContent;
+
+// Timeline data
+const tracks = [
+  { label: 'Video · stock', clips: [
+    { start: 0, end: 5.2, name: 'city-3842921', type: 'stock' },
+    { start: 5.2, end: 12, name: 'chip-7760913', type: 'stock' },
+    { start: 12, end: 17.5, name: 'pexels-office', type: 'stock' },
+    { start: 17.5, end: 25, name: 'robot-walk', type: 'stock' },
+  ]},
+  { label: 'Scene · code', clips: [
+    { start: 1.5, end: 4, name: 'kinetic-title', type: 'scene' },
+    { start: 12, end: 17.5, name: 'data-chart', type: 'scene' },
+    { start: 25, end: 30, name: 'comparison-anim', type: 'scene' },
+  ]},
+  { label: 'Caption', clips: [
+    { start: 0.5, end: 3.8, name: 'AI市场规模...', type: 'caption' },
+    { start: 3.8, end: 7.1, name: '大模型推理...', type: 'caption' },
+    { start: 7.1, end: 12, name: '芯片算力...', type: 'caption' },
+    { start: 12, end: 17.5, name: '40%份额...', type: 'caption' },
+  ]},
+  { label: 'Voiceover', clips: [
+    { start: 0, end: 30, name: 'TTS · 晓晓', type: 'audio' },
+  ]},
+  { label: 'BGM', clips: [
+    { start: 0, end: 30, name: 'inspire_01.mp3 · -18dB', type: 'bgm' },
+  ]},
+];
+
+const totalDuration = 30;
+const tracksEl = document.getElementById('tracks');
+const rulerEl = document.getElementById('ruler');
+
+// Draw ruler
+for (let s = 0; s <= totalDuration; s += 5) {
+  const tick = document.createElement('span');
+  tick.className = 'tick';
+  tick.textContent = s + 's';
+  tick.style.left = (s / totalDuration * 100) + '%';
+  rulerEl.appendChild(tick);
+}
+
+// Draw tracks
+tracks.forEach((track, ti) => {
+  const el = document.createElement('div');
+  el.className = 'track';
+  el.innerHTML = `<div class="track-label">${track.label}</div><div class="track-clips"></div>`;
+  const clipsEl = el.querySelector('.track-clips');
+  track.clips.forEach(clip => {
+    const c = document.createElement('div');
+    c.className = `clip clip-${clip.type}`;
+    c.style.width = ((clip.end - clip.start) / totalDuration * 100) + '%';
+    c.style.marginLeft = clip === track.clips[0] ? '0' : '0';
+    c.textContent = clip.name;
+    c.dataset.start = clip.start;
+    c.dataset.end = clip.end;
+    c.dataset.type = clip.type;
+    c.dataset.name = clip.name;
+    c.addEventListener('click', () => selectClip(clip, c));
+    clipsEl.appendChild(c);
+  });
+  tracksEl.appendChild(el);
+});
+
+// Interaction: click clip → update preview + time
+function selectClip(clip, el) {
+  document.querySelectorAll('.clip.active').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  
+  const midTime = (clip.start + clip.end) / 2;
+  document.getElementById('time-display').textContent = `t = ${midTime.toFixed(1)}s`;
+  
+  // Move playhead
+  const playhead = document.getElementById('playhead');
+  const pct = midTime / totalDuration * 100;
+  playhead.style.left = `calc(80px + ${pct}% * 0.85)`;
+  
+  // Update preview based on type
+  const scene = document.getElementById('scene-display');
+  const captionText = document.getElementById('caption-text');
+  const captionOverlay = document.getElementById('caption-overlay');
+  
+  if (clip.type === 'stock') {
+    scene.className = 'canvas-content scene-stock';
+    captionOverlay.style.display = 'block';
+    const captions = { 'city-3842921': '2026年，全球AI市场规模突破8000亿美元', 'chip-7760913': '其中大模型推理占据40%份额', 'pexels-office': '芯片算力需求同比增长200%', 'robot-walk': '人形机器人进入工厂实测阶段' };
+    captionText.textContent = captions[clip.name] || '字幕内容...';
+  } else if (clip.type === 'scene') {
+    if (clip.name === 'data-chart') {
+      scene.className = 'canvas-content scene-chart';
+      scene.innerHTML = `<div class="mini-chart">
+        <div class="bar" style="height:30%;background:var(--blue)"></div>
+        <div class="bar" style="height:50%;background:var(--accent)"></div>
+        <div class="bar" style="height:80%;background:var(--green)"></div>
+        <div class="bar" style="height:65%;background:var(--orange)"></div>
+        <div class="bar" style="height:95%;background:var(--pink)"></div>
+      </div><div class="chart-title">2022–2026 AI市场规模 (code-generated · deterministic)</div>`;
+    } else if (clip.name === 'kinetic-title') {
+      scene.className = 'canvas-content scene-kinetic';
+      scene.innerHTML = `<div style="font-size:24px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">AI产业格局</div><div style="font-size:12px;color:var(--text-dim);margin-top:8px;">kinetic typography · GSAP + CSS</div>`;
+    } else {
+      scene.className = 'canvas-content scene-kinetic';
+      scene.innerHTML = `<div style="font-size:14px;font-weight:700;color:var(--accent2);">${clip.name}</div><div style="font-size:11px;color:var(--text-dim);margin-top:6px;">code-generated scene · Canvas 2D</div>`;
+    }
+    captionOverlay.style.display = clip.name === 'comparison-anim' ? 'none' : 'none';
+  } else if (clip.type === 'caption') {
+    scene.className = 'canvas-content scene-stock';
+    captionOverlay.style.display = 'block';
+    captionText.textContent = clip.name.includes('...') ? clip.name.replace('...', '详细内容') : clip.name;
+  } else {
+    captionOverlay.style.display = 'none';
+    scene.className = 'canvas-content scene-kinetic';
+    scene.innerHTML = `<div style="text-align:center;"><div style="font-size:13px;color:var(--orange);">🎵 ${clip.name}</div><div style="font-size:10px;color:var(--text-dim);margin-top:6px;">audio track · 画面保持上一帧</div></div>`;
+  }
+}
+
+// Auto-select first clip
+setTimeout(() => {
+  const firstClip = document.querySelector('.clip');
+  if (firstClip) firstClip.click();
+}, 300);
+</script>
+</body>
+</html>
