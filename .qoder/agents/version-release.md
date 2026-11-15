@@ -68,7 +68,7 @@ topic per paragraph.
 
 - `scope` 取模块名，如 `video`、`webui`、`subtitle`、`tts`、`docs`。
 - 文档批次使用 `docs:` 前缀。
-- 版本发布批次（含版本号升级）使用 `release:` 前缀并在 subject 带版本号，如 `release: v1.3.10 - audio sanity guard`；未升版本时不强制。
+- 版本发布批次（含版本号升级）使用 `release:` 前缀并在 subject 带版本号，如 `release: v1.3.10 - audio sanity guard`。自 2026-11-16 起每次迭代默认升版（见 `iteration-doc` agent），升版产物（`app/__init__.py`、`pyproject.toml` 及硬编码引用修改）连同迭代记录文档纳入该批次；用户明确跳过升版时不强制。
 
 ### 4. 执行 Git 操作
 
