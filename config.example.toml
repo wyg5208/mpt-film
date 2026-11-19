@@ -654,10 +654,48 @@ max_concurrent_tasks = 5
 max_queued_tasks = 100
 
 # -----------------------------------------------------------------------------
-# Cross-platform Publishing / 跨平台发布
+# Domestic Publishing / 国内平台发布（social-auto-upload，免费）
 # -----------------------------------------------------------------------------
 
-# Upload-Post can publish generated videos to TikTok, Instagram, and YouTube.
+# Publish generated videos to Douyin, WeChat Channels, Xiaohongshu and Bilibili
+# through the free, MIT-licensed social-auto-upload CLI (sau):
+# https://github.com/dreammis/social-auto-upload
+# 通过免费开源的 social-auto-upload（sau CLI）发布到抖音、视频号、小红书、B站。
+# Install it in its own venv, then scan the QR code once per platform in a real
+# terminal: sau <platform> login --account default
+# 安装后需在真实终端逐平台扫码登录一次；WebUI 提供登录态体检按钮。
+# Publishing opens a visible browser on this machine; keep uploads low-frequency
+# to reduce platform risk-control triggers. 发布会打开可见浏览器，请低频发布。
+social_publish_enabled = false
+# Automatically publish successful video outputs after generation.
+social_publish_auto_upload = false
+# Local session alias created by `sau <platform> login --account <name>`.
+social_publish_account = "default"
+# Core four first; "kuaishou", "weibo", "baijiahao" are optional.
+# 视频号的平台 id 沿用上游 CLI 的 "tencent"。
+social_publish_platforms = ["douyin", "tencent", "xiaohongshu", "bilibili"]
+# Bilibili partition id (tid), e.g. 21 = Daily Life / 生活·日常.
+social_publish_bilibili_tid = 21
+# Absolute path to the sau executable, e.g. "D:\\social-auto-upload\\.venv\\Scripts\\sau.exe".
+# Keep "sau" when it is already on PATH.
+sau_cli_path = "sau"
+# Playwright browser directory for the sau channel. Empty = auto-detect the
+# bundled pw-browsers next to the project, then the Playwright default cache.
+# 留空即自动探测项目自带的 pw-browsers 目录。
+social_publish_browsers_path = ""
+# Run publishing browsers headed (visible window) by default: easier to handle
+# captchas manually and less likely to be flagged by domestic platforms.
+# Bilibili (biliup, no browser) is unaffected. 默认有头发布，降低风控概率。
+social_publish_headed = true
+
+# -----------------------------------------------------------------------------
+# Cross-platform Publishing / 跨平台发布（国外可选通道）
+# -----------------------------------------------------------------------------
+
+# Optional overseas channel. Upload-Post can publish generated videos to TikTok,
+# Instagram, and YouTube. Its free plan allows 10 uploads/month with 2 profiles
+# and full API access; paid plans lift the limits.
+# 国外可选通道；免费档每月 10 次上传、2 个发布档案、完整 API。
 # Create an account and API key at https://upload-post.com/
 # API documentation: https://docs.upload-post.com/
 upload_post_enabled = false
@@ -678,7 +716,7 @@ upload_post_youtube_privacy_status = "public"
 upload_post_youtube_made_for_kids = false
 # Maximum number of running and queued cross-post jobs per process. When the
 # limit is reached, video generation still succeeds and only cross-posting is
-# rejected.
+# rejected. Shared by both the domestic (sau) and overseas (Upload-Post) channels.
 # Cross-post jobs run in the current process and are not resumed after restart.
 upload_post_max_pending_tasks = 10
 

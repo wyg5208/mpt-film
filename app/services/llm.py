@@ -1162,6 +1162,15 @@ SOCIAL_PLATFORMS = {
     "youtube_shorts": {"title_max": 100, "caption_max": 5000, "hashtag_count": 3},
     "instagram_reels": {"title_max": 125, "caption_max": 2200, "hashtag_count": 8},
     "facebook_reels": {"title_max": 125, "caption_max": 2200, "hashtag_count": 5},
+    # 国内平台（social-auto-upload 通道）。上限取保守值，避免模型返回
+    # 过长内容后发布端二次裁剪；视频号标题另有 6 字下限。
+    "douyin": {"title_max": 30, "caption_max": 500, "hashtag_count": 5},
+    "tencent": {"title_max": 16, "title_min": 6, "caption_max": 1000, "hashtag_count": 5},
+    "xiaohongshu": {"title_max": 20, "caption_max": 1000, "hashtag_count": 10},
+    "bilibili": {"title_max": 80, "caption_max": 2000, "hashtag_count": 10},
+    "kuaishou": {"title_max": 30, "caption_max": 500, "hashtag_count": 5},
+    "weibo": {"title_max": 30, "caption_max": 2000, "hashtag_count": 5},
+    "baijiahao": {"title_max": 30, "caption_max": 2000, "hashtag_count": 5},
 }
 DEFAULT_SOCIAL_PLATFORM = "tiktok"
 DEFAULT_SOCIAL_LANGUAGE = "auto"
@@ -1174,6 +1183,13 @@ SOCIAL_PLATFORM_LABELS = {
     "youtube_shorts": "YouTube Shorts",
     "instagram_reels": "Instagram Reels",
     "facebook_reels": "Facebook Reels",
+    "douyin": "抖音 (Douyin)",
+    "tencent": "微信视频号 (WeChat Channels)",
+    "xiaohongshu": "小红书 (Xiaohongshu)",
+    "bilibili": "Bilibili",
+    "kuaishou": "快手 (Kuaishou)",
+    "weibo": "微博 (Weibo)",
+    "baijiahao": "百家号 (Baijiahao)",
 }
 
 # LLM 不可用时的通用兜底标签。这里故意不绑定某个国家或语种，保证 API
@@ -1305,6 +1321,13 @@ def build_social_metadata_prompt(
     label = SOCIAL_PLATFORM_LABELS.get(platform, platform)
     language_instruction = _social_language_instruction(language)
 
+    # 视频号等少数平台对标题还有下限要求；其它平台的 prompt 保持不变。
+    title_rule = f'at most {spec["title_max"]} characters'
+    if spec.get("title_min"):
+        title_rule = (
+            f'between {spec["title_min"]} and {spec["title_max"]} characters'
+        )
+
     prompt = f"""
 # Role: Short-Video Social Media Copywriter
 
@@ -1314,7 +1337,7 @@ Write engaging publishing metadata for a short video that will be posted on {lab
 ## Constraints
 1. Respond ONLY with a single valid minified JSON object. No markdown, no code fences, no commentary.
 2. The JSON must contain exactly these keys: "title", "caption", "hashtags".
-3. "title": a catchy hook, at most {spec["title_max"]} characters.
+3. "title": a catchy hook, {title_rule}.
 4. "caption": an engaging description that ends with a call to action, at most {spec["caption_max"]} characters. Do not put hashtags inside the caption.
 5. "hashtags": a JSON array of exactly {spec["hashtag_count"]} strings. Each must start with "#", contain no spaces, and be relevant to the topic and to {label}.
 6. {language_instruction}

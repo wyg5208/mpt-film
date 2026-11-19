@@ -57,7 +57,9 @@ from app.services import (
     infistar_video,
     jalapeno_video,
     ofox,
+    social_auto_upload,
     subtitle,
+    upload_post,
     video,
     volcengine_seedance,
     voice,
@@ -67,6 +69,7 @@ from app.services import elevenlabs_music as elevenlabs_music_service
 from app.services import sonilo as sonilo_service
 from app.services import state as sm
 from app.services import task as tm
+from app.services import publish_history
 from app.services import version_checker
 from app.utils.logging_utils import (
     LOG_LEVELS,
@@ -153,6 +156,21 @@ VIDEO_SOURCE_GROUPS = {
 # 也方便用户从 WebUI 直接完成首次配置和后续账号维护。
 UPLOAD_POST_API_KEYS_URL = "https://app.upload-post.com/api-keys"
 UPLOAD_POST_MANAGE_USERS_URL = "https://app.upload-post.com/manage-users"
+# 国内发布通道（social-auto-upload）的平台展示名。品牌名保持原文，
+# 不随界面语言翻译；任务卡发布徽标与设置页多选框共用同一份映射。
+SOCIAL_PUBLISH_PLATFORM_LABELS = {
+    "douyin": "抖音",
+    "tencent": "视频号",
+    "xiaohongshu": "小红书",
+    "bilibili": "B站",
+    "kuaishou": "快手",
+    "weibo": "微博",
+    "baijiahao": "百家号",
+    "tiktok": "TikTok",
+    "instagram": "Instagram",
+    "youtube": "YouTube",
+}
+SAU_REPO_URL = "https://github.com/dreammis/social-auto-upload"
 # 素材设置与视频来源说明共用推广入口，避免两个位置的链接参数不一致。
 OFOX_REFERRAL_URL = (
     "https://ofox.ai/?utm_source=github"
@@ -997,6 +1015,68 @@ def _task_state_filter_key(task):
     return "history"
 
 
+def _cross_post_status_caption(task):
+    """任务卡的发布状态徽标；未启用发布时返回 None，不影响旧渲染。"""
+    state = task.get("cross_post_state")
+    if not state:
+        return None
+    labels = {
+        "pending": tr("Publish Pending"),
+        "processing": tr("Publish Processing"),
+        "complete": tr("Publish Complete"),
+        "failed": tr("Publish Failed"),
+    }
+    text = labels.get(state, state)
+    if state == "processing":
+        # 进行中展示百分比与当前阶段，与生成进度一样可直观跟踪。
+        progress = task.get("cross_post_progress")
+        if isinstance(progress, (int, float)):
+            text += f" {int(progress)}%"
+        stage_labels = {
+            "queued": tr("Publish Stage Queued"),
+            "metadata": tr("Publish Stage Metadata"),
+            "uploading": tr("Publish Stage Uploading"),
+        }
+        details = []
+        platform = task.get("cross_post_platform")
+        if platform:
+            details.append(SOCIAL_PUBLISH_PLATFORM_LABELS.get(platform, platform))
+        stage = stage_labels.get(task.get("cross_post_stage"))
+        if stage:
+            details.append(stage)
+        if details:
+            text += " · " + " · ".join(details)
+    marks = []
+    for entry in task.get("cross_post_results") or []:
+        if not isinstance(entry, dict):
+            continue
+        platform = entry.get("platform")
+        if not platform:
+            continue
+        label = SOCIAL_PUBLISH_PLATFORM_LABELS.get(platform, platform)
+        marks.append(f"{label}{'✅' if entry.get('success') else '❌'}")
+    if marks:
+        text += " · " + " ".join(marks)
+    if state == "failed":
+        # 失败原因直接上任务卡：取错误尾部的最后一行（通常是异常消息），
+        # 避免用户只能去翻控制台才能知道为什么失败。
+        error = str(task.get("cross_post_error") or "").strip()
+        if error:
+            last_line = error.splitlines()[-1].strip()
+            if len(last_line) > 120:
+                last_line = last_line[:120] + "…"
+            text += f" · {last_line}"
+    return text
+
+
+def _publish_channel_configured():
+    """任一发布通道可用即允许手动触发；不要求 auto_upload 开关。"""
+    return (
+        social_auto_upload.social_auto_upload_service.is_configured()
+        or upload_post.upload_post_service.is_configured()
+    )
+
+
 def _scan_history_tasks(limit=30):
     tasks_root = utils.task_dir()
     if not os.path.isdir(tasks_root):
@@ -1117,6 +1197,13 @@ def _collect_task_summaries(limit=20):
             "subject": subject,
             "state": task.get("state"),
             "cross_post_state": task.get("cross_post_state"),
+            "cross_post_results": task.get("cross_post_results"),
+            "cross_post_error": task.get("cross_post_error"),
+            "cross_post_progress": task.get("cross_post_progress"),
+            "cross_post_stage": task.get("cross_post_stage"),
+            "cross_post_platform": task.get("cross_post_platform"),
+            "cross_post_platforms": task.get("cross_post_platforms"),
+            "cross_post_log": task.get("cross_post_log"),
             "progress": int(task.get("progress", 0) or 0),
             "mtime": task_mtime,
             "task_path": task_path,
@@ -1297,6 +1384,7 @@ def _render_task_table(filtered_tasks, key_prefix):
         return
 
     visible_tasks = filtered_tasks[:12]
+    publish_configured = _publish_channel_configured()
     list_height = min(390, max(96, len(visible_tasks) * 58))
     with st.container(height=list_height, border=False):
         for task in visible_tasks:
@@ -1320,12 +1408,15 @@ def _render_task_table(filtered_tasks, key_prefix):
                     vertical_alignment="center",
                 )
                 row_cols[0].write(_task_state_label(task["state"], has_video))
+                publish_caption = _cross_post_status_caption(task)
+                if publish_caption:
+                    row_cols[0].caption(publish_caption)
                 row_cols[1].write(_format_task_time(task["mtime"]))
                 row_cols[2].write(_format_task_subject(task["subject"]))
                 row_cols[3].write(f"{task['progress']}%")
 
                 action_cols = row_cols[4].columns(
-                    4,
+                    5,
                     vertical_alignment="center",
                     gap="small",
                 )
@@ -1353,6 +1444,44 @@ def _render_task_table(filtered_tasks, key_prefix):
                         _open_task_path(task["task_path"])
 
                 with action_cols[2]:
+                    publish_label = tr("Publish Now")
+                    publish_state = task.get("cross_post_state")
+                    publish_busy = publish_state in (
+                        const.CROSS_POST_STATE_PENDING,
+                        const.CROSS_POST_STATE_PROCESSING,
+                    )
+                    can_publish = (
+                        has_video
+                        and not is_busy
+                        and not publish_busy
+                        and publish_configured
+                        and _task_state_filter_key(task) == "complete"
+                    )
+                    if not publish_configured:
+                        publish_help = tr("Publish Not Configured Help")
+                    elif publish_busy:
+                        publish_help = tr("Publish Already Queued")
+                    else:
+                        publish_help = tr("Publish Now Help")
+                    if st.button(
+                        publish_label,
+                        key=f"publish_task_{key_prefix}_{task_id}",
+                        use_container_width=True,
+                        icon=":material/send:",
+                        help=publish_help,
+                        disabled=not can_publish,
+                    ):
+                        publish_error = tm.publish_task_now(task_id)
+                        if publish_error is None:
+                            st.toast(tr("Publish Queued Toast"), icon="🚀")
+                            st.rerun()
+                        else:
+                            st.toast(
+                                f"{tr('Publish Trigger Failed')}: {publish_error}",
+                                icon="⚠️",
+                            )
+
+                with action_cols[3]:
                     restore_label = tr("Regenerate Task")
                     if st.button(
                         restore_label,
@@ -1364,7 +1493,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                     ):
                         _queue_task_restore(task_id)
 
-                with action_cols[3]:
+                with action_cols[4]:
                     delete_label = tr("Delete Task")
                     delete_help = (
                         f"{delete_label} ({tr('Task Status Processing')})"
@@ -1386,11 +1515,150 @@ def _render_task_table(filtered_tasks, key_prefix):
                             st.error(tr("Task Delete Failed"))
 
 
+def _render_publish_queue(tasks):
+    """发布队列面板：排队中/进行中的发布任务，随 fragment 每 2 秒刷新。
+
+    发布线程池串行消化队列：触发时若有发布在跑，新任务自动排队，
+    这里按“进行中在前、排队在后”展示，并给出进度条与实时日志尾。
+    """
+    active = [
+        task
+        for task in tasks
+        if task.get("cross_post_state") in ("pending", "processing")
+    ]
+    if not active:
+        return
+    active.sort(
+        key=lambda task: (
+            0 if task.get("cross_post_state") == "processing" else 1,
+            -(task.get("mtime") or 0),
+        )
+    )
+    stage_labels = {
+        "queued": tr("Publish Stage Queued"),
+        "metadata": tr("Publish Stage Metadata"),
+        "uploading": tr("Publish Stage Uploading"),
+    }
+    with st.expander(f"{tr('Publish Queue')} ({len(active)})", expanded=True):
+        queue_position = 0
+        for task in active:
+            running = task.get("cross_post_state") == "processing"
+            if not running:
+                queue_position += 1
+            with st.container(border=True):
+                head_cols = st.columns([3, 2], vertical_alignment="center")
+                head_cols[0].write(_format_task_subject(task["subject"]))
+                platforms = task.get("cross_post_platforms") or []
+                platform_text = " ".join(
+                    SOCIAL_PUBLISH_PLATFORM_LABELS.get(p, p) for p in platforms
+                )
+                if running:
+                    badge = tr("Publish Processing")
+                else:
+                    badge = (
+                        f"{tr('Publish Pending')} · "
+                        f"{tr('Publish Queue Position')} #{queue_position}"
+                    )
+                head_cols[1].caption(
+                    f"{badge}{' · ' + platform_text if platform_text else ''}"
+                )
+                if running:
+                    progress = int(task.get("cross_post_progress") or 0)
+                    stage = stage_labels.get(task.get("cross_post_stage"), "")
+                    current = task.get("cross_post_platform")
+                    current_label = (
+                        SOCIAL_PUBLISH_PLATFORM_LABELS.get(current, current)
+                        if current
+                        else ""
+                    )
+                    progress_text = " · ".join(
+                        part for part in (current_label, stage) if part
+                    )
+                    st.progress(
+                        min(max(progress, 0), 100) / 100,
+                        text=f"{progress}%{' · ' + progress_text if progress_text else ''}",
+                    )
+                log_lines = task.get("cross_post_log") or []
+                if log_lines:
+                    with st.expander(tr("Publish Log")):
+                        st.code("\n".join(log_lines[-15:]), language="text")
+
+
+def _render_publish_history(entries):
+    """发布历史 TAB：自动/手动发布记录，含平台结果、耗时与重新发布。"""
+    if not entries:
+        st.info(tr("Publish History Empty"))
+        return
+    for entry in entries:
+        task_id = str(entry.get("task_id") or "")
+        finished = entry.get("finished_at") or entry.get("recorded_at")
+        with st.container(border=True):
+            cols = st.columns([3, 2, 1.6, 3, 1.2, 1.4], vertical_alignment="center")
+            subject = entry.get("video_subject") or task_id[:8]
+            cols[0].markdown(f"**{_format_task_subject(subject)}**")
+            videos = entry.get("videos") or []
+            video_text = "、".join(os.path.basename(str(v)) for v in videos[:3])
+            if video_text:
+                cols[0].caption(video_text)
+            cols[1].caption(
+                datetime.fromtimestamp(finished).strftime("%Y-%m-%d %H:%M:%S")
+                if finished
+                else "-"
+            )
+            cols[2].caption(
+                tr("Publish Trigger Manual")
+                if entry.get("trigger") == "manual"
+                else tr("Publish Trigger Auto")
+            )
+            results = entry.get("results") or []
+            marks = " ".join(
+                f"{SOCIAL_PUBLISH_PLATFORM_LABELS.get(r.get('platform'), r.get('platform'))}"
+                f"{'✅' if r.get('success') else '❌'}"
+                for r in results
+            )
+            state = entry.get("state")
+            badge = "✅" if state == "complete" else "❌"
+            cols[3].caption(f"{badge} {marks}".strip())
+            duration = entry.get("duration_seconds")
+            if duration is not None:
+                minutes, seconds = divmod(int(duration), 60)
+                cols[4].caption(f"{minutes}m{seconds:02d}s" if minutes else f"{seconds}s")
+            else:
+                cols[4].caption("-")
+            try:
+                live = sm.state.get_task(task_id) or {}
+            except Exception:
+                live = {}
+            busy = live.get("cross_post_state") in ("pending", "processing")
+            if cols[5].button(
+                tr("Republish"),
+                key=f"republish_history_{task_id}_{int(finished or 0)}",
+                use_container_width=True,
+                disabled=busy or not task_id,
+                icon=":material/send:",
+            ):
+                publish_error = tm.publish_task_now(task_id)
+                if publish_error is None:
+                    st.toast(tr("Publish Queued Toast"), icon="🚀")
+                    st.rerun()
+                else:
+                    st.toast(
+                        f"{tr('Publish Trigger Failed')}: {publish_error}",
+                        icon="⚠️",
+                    )
+            error = str(entry.get("error") or "").strip()
+            if state != "complete" and error:
+                st.caption(error.splitlines()[-1][:160])
+
+
 def _render_task_manager_panel(tasks=None):
     tasks = tasks if tasks is not None else _collect_task_summaries()
-    if not tasks:
+    history_entries = publish_history.list_publish_history(limit=100)
+    if not tasks and not history_entries:
         st.info(tr("No Tasks Yet"))
         return
+
+    _render_publish_queue(tasks)
 
     # Streamlit 1.59 支持有状态 Tabs 的惰性渲染。切换时只重新构建当前列表，
     # 避免定时 Fragment 每两秒重复创建四套任务行和操作按钮。
@@ -1399,6 +1667,7 @@ def _render_task_manager_panel(tasks=None):
         ("processing", tr("Task Status Processing")),
         ("complete", tr("Task Status Complete")),
         ("failed", tr("Task Status Failed")),
+        ("publish_history", tr("Publish History Tab")),
     ]
     tabs = st.tabs(
         [label for _, label in status_tabs],
@@ -1409,6 +1678,9 @@ def _render_task_manager_panel(tasks=None):
         if not tab.open:
             continue
         with tab:
+            if status_key == "publish_history":
+                _render_publish_history(history_entries)
+                continue
             filtered_tasks = [
                 task
                 for task in tasks
@@ -4253,6 +4525,214 @@ def _render_material_provider_settings(provider):
             )
 
 
+def _render_social_publish_settings(app_settings):
+    """国内平台发布区（免费 social-auto-upload 通道，主区）。"""
+    st.write(tr("Domestic Auto-Publish Intro").format(repo_url=SAU_REPO_URL))
+    with st.expander(tr("Social Auto Upload Setup Guide")):
+        st.markdown(tr("Social Auto Upload Setup Steps"))
+
+    is_enabled = app_settings.get("social_publish_enabled", False)
+    is_auto = app_settings.get("social_publish_auto_upload", False)
+
+    # 与 Upload-Post 区相同：enabled 与 auto_upload 两键各自独立，
+    # 合并成一个复选框会在两键不一致时擅自改写配置。
+    social_publish_enabled = st.checkbox(
+        tr("Enable Domestic Publishing"),
+        value=is_enabled,
+        key="social_publish_enabled_checkbox",
+        on_change=_save_settings_change,
+        args=(
+            "app",
+            "social_publish_enabled",
+            "social_publish_enabled_checkbox",
+            lambda value: value,
+        ),
+    )
+    if social_publish_enabled != is_enabled:
+        _set_runtime_config("app", "social_publish_enabled", social_publish_enabled)
+
+    social_publish_auto_upload = st.checkbox(
+        tr("Enable Domestic Auto-Publish"),
+        value=is_auto,
+        key="social_publish_auto_upload_checkbox",
+        on_change=_save_settings_change,
+        args=(
+            "app",
+            "social_publish_auto_upload",
+            "social_publish_auto_upload_checkbox",
+            lambda value: value,
+        ),
+    )
+    if social_publish_auto_upload != is_auto:
+        _set_runtime_config(
+            "app", "social_publish_auto_upload", social_publish_auto_upload
+        )
+
+    social_publish_account = st.text_input(
+        tr("Publish Account Name"),
+        value=app_settings.get("social_publish_account", "default"),
+        help=tr("Publish Account Name Help"),
+        key="social_publish_account_input",
+        on_change=_save_settings_change,
+        args=(
+            "app",
+            "social_publish_account",
+            "social_publish_account_input",
+            lambda value: value.strip() or "default",
+        ),
+    )
+    if social_publish_account != app_settings.get("social_publish_account", "default"):
+        _set_runtime_config(
+            "app", "social_publish_account", social_publish_account.strip() or "default"
+        )
+
+    platform_options = social_auto_upload.SAU_PLATFORM_ORDER
+    saved_platforms = app_settings.get(
+        "social_publish_platforms", social_auto_upload.DEFAULT_SAU_PLATFORMS
+    )
+    # 过滤非法 id，避免损坏的配置让 multiselect 直接报错；空选择保持为空。
+    default_platforms = [p for p in saved_platforms if p in platform_options]
+    social_publish_platforms = st.multiselect(
+        tr("Domestic Platforms"),
+        options=platform_options,
+        default=default_platforms,
+        format_func=lambda p: SOCIAL_PUBLISH_PLATFORM_LABELS.get(p, p),
+        key="social_publish_platforms_multiselect",
+        on_change=_save_settings_change,
+        args=(
+            "app",
+            "social_publish_platforms",
+            "social_publish_platforms_multiselect",
+            lambda value: value,
+        ),
+    )
+    if social_publish_platforms != saved_platforms:
+        _set_runtime_config(
+            "app", "social_publish_platforms", social_publish_platforms
+        )
+
+    if "bilibili" in social_publish_platforms:
+        saved_tid = app_settings.get("social_publish_bilibili_tid", 21)
+        try:
+            saved_tid = int(saved_tid)
+        except (TypeError, ValueError):
+            saved_tid = 21
+        social_publish_bilibili_tid = st.number_input(
+            tr("Bilibili Partition ID"),
+            min_value=1,
+            max_value=9999,
+            value=saved_tid,
+            step=1,
+            help=tr("Bilibili Partition Help"),
+            key="social_publish_bilibili_tid_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "social_publish_bilibili_tid",
+                "social_publish_bilibili_tid_input",
+                lambda value: int(value),
+            ),
+        )
+        if int(social_publish_bilibili_tid) != saved_tid:
+            _set_runtime_config(
+                "app",
+                "social_publish_bilibili_tid",
+                int(social_publish_bilibili_tid),
+            )
+
+    with st.expander(tr("Advanced Publish Settings")):
+        sau_cli_path = st.text_input(
+            tr("SAU CLI Path"),
+            value=app_settings.get("sau_cli_path", "sau"),
+            help=tr("SAU CLI Path Help"),
+            key="sau_cli_path_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "sau_cli_path",
+                "sau_cli_path_input",
+                lambda value: value.strip() or "sau",
+            ),
+        )
+        if sau_cli_path != app_settings.get("sau_cli_path", "sau"):
+            _set_runtime_config("app", "sau_cli_path", sau_cli_path.strip() or "sau")
+
+        # 浏览器目录由服务层注入 sau 子进程，无需 setx 或重启 WebUI。
+        social_publish_browsers_path = st.text_input(
+            tr("Publish Browsers Path"),
+            value=app_settings.get("social_publish_browsers_path", ""),
+            help=tr("Publish Browsers Path Help"),
+            key="social_publish_browsers_path_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "social_publish_browsers_path",
+                "social_publish_browsers_path_input",
+                lambda value: value.strip(),
+            ),
+        )
+        if social_publish_browsers_path != app_settings.get(
+            "social_publish_browsers_path", ""
+        ):
+            _set_runtime_config(
+                "app",
+                "social_publish_browsers_path",
+                social_publish_browsers_path.strip(),
+            )
+
+        # 有头模式让用户看到发布自动化全过程，验证码/短信拦截可人工处理；
+        # 无桌面的服务器部署才需要关闭。
+        social_publish_headed = st.checkbox(
+            tr("Publish Headed"),
+            value=app_settings.get("social_publish_headed", True),
+            help=tr("Publish Headed Help"),
+            key="social_publish_headed_checkbox",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "social_publish_headed",
+                "social_publish_headed_checkbox",
+                lambda value: value,
+            ),
+        )
+        if social_publish_headed != app_settings.get("social_publish_headed", True):
+            _set_runtime_config(
+                "app", "social_publish_headed", social_publish_headed
+            )
+
+    # 登录态体检：扫码登录必须在真实终端完成，UI 只负责体检和给出修复命令。
+    account_name = (social_publish_account or "default").strip() or "default"
+    if st.button(
+        tr("Check Login Sessions"),
+        key="social_publish_check_sessions_button",
+        disabled=not social_publish_enabled or not social_publish_platforms,
+    ):
+        with st.spinner(tr("Checking Login Sessions")):
+            report = social_auto_upload.social_auto_upload_service.check_sessions(
+                social_publish_platforms, account_name
+            )
+        if report is None:
+            st.toast(tr("Session Check Busy"), icon="⏳")
+        else:
+            st.session_state["social_publish_session_report"] = report
+
+    report = st.session_state.get("social_publish_session_report")
+    if report:
+        for platform in social_publish_platforms:
+            entry = report.get(platform)
+            if not isinstance(entry, dict):
+                continue
+            label = SOCIAL_PUBLISH_PLATFORM_LABELS.get(platform, platform)
+            if entry.get("ok"):
+                st.caption(f"✅ {label}")
+            else:
+                st.caption(f"❌ {label} — {entry.get('detail') or ''}")
+                st.code(
+                    f"sau {platform} login --account {account_name}",
+                    language="bash",
+                )
+
+
 @st.dialog(
     tr("Settings"),
     width="medium",
@@ -4312,182 +4792,185 @@ def _render_settings_dialog():
 
         with publish_config_panel:
             if publish_config_panel.open:
-                st.write(
-                    tr(
-                        "Automatically publish generated videos to social media using upload-post.com"
+                _render_social_publish_settings(app_settings)
+                with st.expander(tr("Overseas Platforms Optional UploadPost")):
+                    st.caption(tr("Upload-Post Free Tier Note"))
+                    st.write(
+                        tr(
+                            "Automatically publish generated videos to social media using upload-post.com"
+                        )
                     )
-                )
-                st.info(
-                    tr("Upload-Post Setup Guide").format(
-                        api_keys_url=UPLOAD_POST_API_KEYS_URL,
-                        manage_users_url=UPLOAD_POST_MANAGE_USERS_URL,
-                    )
-                )
-
-                is_enabled = app_settings.get("upload_post_enabled", False)
-                is_auto = app_settings.get("upload_post_auto_upload", False)
-
-                # 两个键各自独立:enabled 允许外部流程调用 Upload-Post,
-                # auto_upload 才决定渲染完成后是否自动发布。合并成一个复选框会在
-                # 两键不一致的配置下,仅打开设置对话框就把 enabled 改写为 False。
-                upload_post_enabled = st.checkbox(
-                    tr("Enable Upload-Post Integration"),
-                    value=is_enabled,
-                    key="upload_post_enabled_checkbox",
-                    on_change=_save_settings_change,
-                    args=(
-                        "app",
-                        "upload_post_enabled",
-                        "upload_post_enabled_checkbox",
-                        lambda value: value,
-                    ),
-                )
-                if upload_post_enabled != is_enabled:
-                    _set_runtime_config(
-                        "app", "upload_post_enabled", upload_post_enabled
+                    st.info(
+                        tr("Upload-Post Setup Guide").format(
+                            api_keys_url=UPLOAD_POST_API_KEYS_URL,
+                            manage_users_url=UPLOAD_POST_MANAGE_USERS_URL,
+                        )
                     )
 
-                upload_post_auto_upload = st.checkbox(
-                    tr("Enable Auto-Publish"),
-                    value=is_auto,
-                    key="upload_post_auto_upload_checkbox",
-                    on_change=_save_settings_change,
-                    args=(
-                        "app",
-                        "upload_post_auto_upload",
-                        "upload_post_auto_upload_checkbox",
-                        lambda value: value,
-                    ),
-                )
-                if upload_post_auto_upload != is_auto:
-                    _set_runtime_config(
-                        "app", "upload_post_auto_upload", upload_post_auto_upload
-                    )
+                    is_enabled = app_settings.get("upload_post_enabled", False)
+                    is_auto = app_settings.get("upload_post_auto_upload", False)
 
-                upload_post_api_key = st.text_input(
-                    tr("Upload-Post API Key"),
-                    value=app_settings.get("upload_post_api_key", ""),
-                    type="password",
-                    help=tr("Upload-Post API Key Help").format(
-                        api_keys_url=UPLOAD_POST_API_KEYS_URL
-                    ),
-                    key="upload_post_api_key_input",
-                    on_change=_save_settings_change,
-                    args=(
-                        "app",
-                        "upload_post_api_key",
-                        "upload_post_api_key_input",
-                        lambda value: value,
-                    ),
-                )
-                if upload_post_api_key != app_settings.get("upload_post_api_key", ""):
-                    _set_runtime_config(
-                        "app", "upload_post_api_key", upload_post_api_key
-                    )
-
-                upload_post_username = st.text_input(
-                    tr("Upload-Post Profile Username"),
-                    value=app_settings.get("upload_post_username", ""),
-                    help=tr("Upload-Post Profile Username Help").format(
-                        manage_users_url=UPLOAD_POST_MANAGE_USERS_URL
-                    ),
-                    key="upload_post_username_input",
-                    on_change=_save_settings_change,
-                    args=(
-                        "app",
-                        "upload_post_username",
-                        "upload_post_username_input",
-                        lambda value: value,
-                    ),
-                )
-                if upload_post_username != app_settings.get("upload_post_username", ""):
-                    _set_runtime_config(
-                        "app", "upload_post_username", upload_post_username
-                    )
-
-                upload_post_platforms = st.multiselect(
-                    tr("Platforms"),
-                    options=["tiktok", "instagram", "youtube"],
-                    default=app_settings.get(
-                        "upload_post_platforms", ["tiktok", "instagram"]
-                    ),
-                    help="Select platforms to publish to",
-                    key="upload_post_platforms_multiselect",
-                    on_change=_save_settings_change,
-                    args=(
-                        "app",
-                        "upload_post_platforms",
-                        "upload_post_platforms_multiselect",
-                        lambda value: value,
-                    ),
-                )
-                if upload_post_platforms != app_settings.get(
-                    "upload_post_platforms", ["tiktok", "instagram"]
-                ):
-                    _set_runtime_config(
-                        "app", "upload_post_platforms", upload_post_platforms
-                    )
-
-                if "youtube" in upload_post_platforms:
-                    yt_status_options = ["public", "private", "unlisted"]
-                    yt_saved = app_settings.get(
-                        "upload_post_youtube_privacy_status", "public"
-                    )
-                    if yt_saved not in yt_status_options:
-                        yt_saved = "public"
-                    upload_post_youtube_privacy_status = st.selectbox(
-                        tr("YouTube Privacy Status"),
-                        options=yt_status_options,
-                        index=yt_status_options.index(yt_saved),
-                        key="upload_post_youtube_privacy_status_selectbox",
+                    # 两个键各自独立:enabled 允许外部流程调用 Upload-Post,
+                    # auto_upload 才决定渲染完成后是否自动发布。合并成一个复选框会在
+                    # 两键不一致的配置下,仅打开设置对话框就把 enabled 改写为 False。
+                    upload_post_enabled = st.checkbox(
+                        tr("Enable Upload-Post Integration"),
+                        value=is_enabled,
+                        key="upload_post_enabled_checkbox",
                         on_change=_save_settings_change,
                         args=(
                             "app",
-                            "upload_post_youtube_privacy_status",
-                            "upload_post_youtube_privacy_status_selectbox",
+                            "upload_post_enabled",
+                            "upload_post_enabled_checkbox",
                             lambda value: value,
                         ),
                     )
-                    if upload_post_youtube_privacy_status != app_settings.get(
-                        "upload_post_youtube_privacy_status", "public"
+                    if upload_post_enabled != is_enabled:
+                        _set_runtime_config(
+                            "app", "upload_post_enabled", upload_post_enabled
+                        )
+
+                    upload_post_auto_upload = st.checkbox(
+                        tr("Enable Auto-Publish"),
+                        value=is_auto,
+                        key="upload_post_auto_upload_checkbox",
+                        on_change=_save_settings_change,
+                        args=(
+                            "app",
+                            "upload_post_auto_upload",
+                            "upload_post_auto_upload_checkbox",
+                            lambda value: value,
+                        ),
+                    )
+                    if upload_post_auto_upload != is_auto:
+                        _set_runtime_config(
+                            "app", "upload_post_auto_upload", upload_post_auto_upload
+                        )
+
+                    upload_post_api_key = st.text_input(
+                        tr("Upload-Post API Key"),
+                        value=app_settings.get("upload_post_api_key", ""),
+                        type="password",
+                        help=tr("Upload-Post API Key Help").format(
+                            api_keys_url=UPLOAD_POST_API_KEYS_URL
+                        ),
+                        key="upload_post_api_key_input",
+                        on_change=_save_settings_change,
+                        args=(
+                            "app",
+                            "upload_post_api_key",
+                            "upload_post_api_key_input",
+                            lambda value: value,
+                        ),
+                    )
+                    if upload_post_api_key != app_settings.get("upload_post_api_key", ""):
+                        _set_runtime_config(
+                            "app", "upload_post_api_key", upload_post_api_key
+                        )
+
+                    upload_post_username = st.text_input(
+                        tr("Upload-Post Profile Username"),
+                        value=app_settings.get("upload_post_username", ""),
+                        help=tr("Upload-Post Profile Username Help").format(
+                            manage_users_url=UPLOAD_POST_MANAGE_USERS_URL
+                        ),
+                        key="upload_post_username_input",
+                        on_change=_save_settings_change,
+                        args=(
+                            "app",
+                            "upload_post_username",
+                            "upload_post_username_input",
+                            lambda value: value,
+                        ),
+                    )
+                    if upload_post_username != app_settings.get("upload_post_username", ""):
+                        _set_runtime_config(
+                            "app", "upload_post_username", upload_post_username
+                        )
+
+                    upload_post_platforms = st.multiselect(
+                        tr("Platforms"),
+                        options=["tiktok", "instagram", "youtube"],
+                        default=app_settings.get(
+                            "upload_post_platforms", ["tiktok", "instagram"]
+                        ),
+                        help="Select platforms to publish to",
+                        key="upload_post_platforms_multiselect",
+                        on_change=_save_settings_change,
+                        args=(
+                            "app",
+                            "upload_post_platforms",
+                            "upload_post_platforms_multiselect",
+                            lambda value: value,
+                        ),
+                    )
+                    if upload_post_platforms != app_settings.get(
+                        "upload_post_platforms", ["tiktok", "instagram"]
                     ):
                         _set_runtime_config(
-                            "app",
-                            "upload_post_youtube_privacy_status",
-                            upload_post_youtube_privacy_status,
+                            "app", "upload_post_platforms", upload_post_platforms
                         )
 
-                    # 受众声明只影响 YouTube 发布，不改变生成内容或其它平台的请求。
-                    # 使用真正的布尔选项，避免把展示文字或字符串当成 API 参数。
-                    saved_audience = app_settings.get(
-                        "upload_post_youtube_made_for_kids", False
-                    )
-                    audience_labels = {
-                        False: tr("Not Made for Kids"),
-                        True: tr("Made for Kids"),
-                    }
-                    made_for_kids = st.selectbox(
-                        tr("YouTube Audience"),
-                        options=[False, True],
-                        # 非法配置保持未选择，不在打开设置时擅自改成非儿童声明。
-                        index=int(saved_audience)
-                        if isinstance(saved_audience, bool)
-                        else None,
-                        format_func=audience_labels.get,
-                        help=tr("YouTube Audience Help"),
-                        key="upload_post_youtube_made_for_kids_selectbox",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            "upload_post_youtube_made_for_kids",
-                            "upload_post_youtube_made_for_kids_selectbox",
-                            lambda value: value,
-                        ),
-                    )
-                    if isinstance(made_for_kids, bool):
-                        _set_runtime_config(
-                            "app", "upload_post_youtube_made_for_kids", made_for_kids
+                    if "youtube" in upload_post_platforms:
+                        yt_status_options = ["public", "private", "unlisted"]
+                        yt_saved = app_settings.get(
+                            "upload_post_youtube_privacy_status", "public"
                         )
+                        if yt_saved not in yt_status_options:
+                            yt_saved = "public"
+                        upload_post_youtube_privacy_status = st.selectbox(
+                            tr("YouTube Privacy Status"),
+                            options=yt_status_options,
+                            index=yt_status_options.index(yt_saved),
+                            key="upload_post_youtube_privacy_status_selectbox",
+                            on_change=_save_settings_change,
+                            args=(
+                                "app",
+                                "upload_post_youtube_privacy_status",
+                                "upload_post_youtube_privacy_status_selectbox",
+                                lambda value: value,
+                            ),
+                        )
+                        if upload_post_youtube_privacy_status != app_settings.get(
+                            "upload_post_youtube_privacy_status", "public"
+                        ):
+                            _set_runtime_config(
+                                "app",
+                                "upload_post_youtube_privacy_status",
+                                upload_post_youtube_privacy_status,
+                            )
+
+                        # 受众声明只影响 YouTube 发布，不改变生成内容或其它平台的请求。
+                        # 使用真正的布尔选项，避免把展示文字或字符串当成 API 参数。
+                        saved_audience = app_settings.get(
+                            "upload_post_youtube_made_for_kids", False
+                        )
+                        audience_labels = {
+                            False: tr("Not Made for Kids"),
+                            True: tr("Made for Kids"),
+                        }
+                        made_for_kids = st.selectbox(
+                            tr("YouTube Audience"),
+                            options=[False, True],
+                            # 非法配置保持未选择，不在打开设置时擅自改成非儿童声明。
+                            index=int(saved_audience)
+                            if isinstance(saved_audience, bool)
+                            else None,
+                            format_func=audience_labels.get,
+                            help=tr("YouTube Audience Help"),
+                            key="upload_post_youtube_made_for_kids_selectbox",
+                            on_change=_save_settings_change,
+                            args=(
+                                "app",
+                                "upload_post_youtube_made_for_kids",
+                                "upload_post_youtube_made_for_kids_selectbox",
+                                lambda value: value,
+                            ),
+                        )
+                        if isinstance(made_for_kids, bool):
+                            _set_runtime_config(
+                                "app", "upload_post_youtube_made_for_kids", made_for_kids
+                            )
 
         # 左侧面板 - 日志设置
         with left_config_panel:

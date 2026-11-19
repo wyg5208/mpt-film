@@ -41,6 +41,8 @@ from app.services import (
     voice,
 )
 from app.services import upload_post
+from app.services import social_auto_upload
+from app.services import publish_history
 from app.services import state as sm
 from app.utils import file_security, utils
 from app.utils.subtitle_writer import staged_subtitle_file
@@ -67,6 +69,9 @@ _ACTIVE_CROSS_POST_STATES = {
 }
 _CROSS_POST_STATE_WRITE_ATTEMPTS = 3
 _CROSS_POST_STATE_RETRY_DELAY_SECONDS = 0.1
+# 发布队列面板展示的实时日志行数上限；sau 输出可能很长，只保留尾部。
+_CROSS_POST_LOG_TAIL_LINES = 30
+_CROSS_POST_LOG_WRITE_INTERVAL_SECONDS = 1.0
 _TASK_FAILURE_STATE_WRITE_ATTEMPTS = 3
 _TASK_FAILURE_STATE_RETRY_DELAY_SECONDS = 0.1
 _LOOMLOOM_STATE_WRITE_ATTEMPTS = 3
@@ -79,6 +84,14 @@ _CROSS_POST_SOCIAL_PLATFORMS = {
     "tiktok": "tiktok",
     "instagram": "instagram_reels",
     "facebook": "facebook_reels",
+    # 国内通道（social-auto-upload）：平台 id 与 llm.py 规格表同名。
+    "douyin": "douyin",
+    "tencent": "tencent",
+    "xiaohongshu": "xiaohongshu",
+    "bilibili": "bilibili",
+    "kuaishou": "kuaishou",
+    "weibo": "weibo",
+    "baijiahao": "baijiahao",
 }
 # 视频配乐服务只需实现 ``is_enabled`` 和 ``generate_bgm``。供应商差异集中在
 # 文件扩展名、领域异常和 WebUI 警告代码；任务编排、0 音量短路及失败降级
@@ -1304,6 +1317,43 @@ def _record_cross_post_failure(
     )
     if updated is False:
         logger.warning(f"discard cross-post failure for missing task: {task_id}")
+    _record_publish_history(
+        task_id, const.CROSS_POST_STATE_FAILED, results, str(error)
+    )
+
+
+# 发布历史的运行元数据：worker 开始时记录，终态路径消费。状态机只保留
+# 最近一次结果，而历史需要触发类型、开始时间与视频清单。
+_cross_post_run_meta: dict[str, dict] = {}
+
+
+def _record_publish_history(
+    task_id: str,
+    state: str,
+    results: list[dict] | None,
+    error: str | None,
+) -> None:
+    """写一条发布历史；元数据缺失（如执行前被取消）时用默认值兜底。"""
+    meta = _cross_post_run_meta.pop(task_id, {})
+    finished_at = time.time()
+    started_at = meta.get("started_at")
+    publish_history.record_publish(
+        {
+            "task_id": task_id,
+            "video_subject": meta.get("video_subject") or "",
+            "videos": meta.get("videos") or [],
+            "trigger": meta.get("trigger") or "auto",
+            "account": meta.get("account"),
+            "state": state,
+            "results": results or [],
+            "error": error,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_seconds": (
+                round(finished_at - started_at, 1) if started_at else None
+            ),
+        }
+    )
 
 
 def _ensure_cross_post_terminal_state(task_id: str) -> None:
@@ -1384,8 +1434,17 @@ def _run_cross_post(
     youtube_privacy_status: str,
     youtube_made_for_kids: bool = False,
     upload_account: dict | None = None,
+    social_account: dict | None = None,
+    trigger: str = "auto",
 ) -> None:
     """后台执行跨平台发布，并只补充发布相关的任务字段。"""
+    _cross_post_run_meta[task_id] = {
+        "trigger": trigger,
+        "started_at": time.time(),
+        "videos": list(video_paths),
+        "video_subject": video_subject,
+        "account": (social_account or {}).get("social_publish_account"),
+    }
     results = []
     try:
         state_updated = _patch_cross_post_state(
@@ -1399,6 +1458,7 @@ def _run_cross_post(
             # 不应继续调用第三方接口，否则用户无法查询或控制这次发布。
             if state_updated is False:
                 logger.warning(f"skip cross-post for missing task: {task_id}")
+                _cross_post_run_meta.pop(task_id, None)
             else:
                 _record_cross_post_failure(
                     task_id,
@@ -1409,13 +1469,91 @@ def _run_cross_post(
         logger.info(
             f"cross-post started, task_id: {task_id}, platforms: {', '.join(platforms)}"
         )
+        # 按通道路由：国内平台走 sau 子进程，其余维持现有 Upload-Post 链路。
+        # 两组共用同一 results 与终态汇总，队列/owner/恢复机制不感知通道。
+        cn_platforms = tuple(
+            p for p in platforms if social_auto_upload.is_sau_platform(p)
+        )
+        overseas_platforms = tuple(
+            p for p in platforms if not social_auto_upload.is_sau_platform(p)
+        )
+
+        # 发布进度按“上传单元”（平台×视频）粗粒度推进；sau 子进程不暴露
+        # 细粒度百分比，实时日志尾写入任务状态供发布队列面板展示。
+        total_units = max(
+            1,
+            len(cn_platforms) * len(video_paths)
+            + (len(video_paths) if overseas_platforms else 0),
+        )
+        completed_units = 0
+        log_tail: list[str] = []
+        last_log_write = 0.0
+
+        def report_progress(stage=None, platform=None, log_line=None, force=False):
+            nonlocal last_log_write
+            if log_line:
+                log_tail.append(log_line)
+                del log_tail[:-_CROSS_POST_LOG_TAIL_LINES]
+            now = time.monotonic()
+            # 日志逐行到达，限频写状态；阶段/单元切换必须立即写入。
+            if log_line and not force and now - last_log_write < _CROSS_POST_LOG_WRITE_INTERVAL_SECONDS:
+                return
+            last_log_write = now
+            fields = {
+                "cross_post_progress": 5 + int(90 * completed_units / total_units),
+                "cross_post_log": list(log_tail),
+            }
+            if stage is not None:
+                fields["cross_post_stage"] = stage
+            if platform is not None:
+                fields["cross_post_platform"] = platform
+            _patch_cross_post_state(task_id, **fields)
+
+        report_progress(stage="queued", force=True)
+
+        # 国内通道：逐平台生成文案（各平台字数上限不同），逐视频串行发布，
+        # 同账号并发浏览器会抬高风控概率，故不并行。
+        for platform in cn_platforms:
+            report_progress(stage="metadata", platform=platform, force=True)
+            metadata = llm.generate_social_metadata(
+                video_subject=video_subject,
+                video_script=video_script,
+                language=video_language or "",
+                platform=_CROSS_POST_SOCIAL_PLATFORMS.get(platform, platform),
+            )
+            report_progress(stage="uploading", platform=platform, force=True)
+            for video_index, video_path in enumerate(video_paths, start=1):
+                result = social_auto_upload.cross_post_video(
+                    video_path=video_path,
+                    title=metadata.get("title") or video_subject,
+                    desc=metadata.get("caption", ""),
+                    tags=metadata.get("hashtags", []),
+                    platforms=[platform],
+                    account_snapshot=social_account,
+                    on_output=lambda line, p=platform: report_progress(
+                        log_line=f"[{p}] {line}"
+                    ),
+                )
+                if not isinstance(result, dict):
+                    result = {
+                        "success": False,
+                        "error": "social-auto-upload returned an invalid response",
+                    }
+                results.append(
+                    {"video_index": video_index, "platform": platform, **result}
+                )
+                completed_units += 1
+                report_progress(force=True)
+
         youtube_extra = None
         post_title = video_subject or "Check out this video! #shorts #viral"
-        if platforms:
-            has_youtube = any(platform.startswith("youtube") for platform in platforms)
+        if overseas_platforms:
+            has_youtube = any(
+                platform.startswith("youtube") for platform in overseas_platforms
+            )
             social_platform = "youtube_shorts"
             if not has_youtube:
-                first = (platforms[0] or "").strip().lower()
+                first = (overseas_platforms[0] or "").strip().lower()
                 # llm.py resolves unknown ids to its default platform.
                 social_platform = _CROSS_POST_SOCIAL_PLATFORMS.get(first, first)
             metadata = llm.generate_social_metadata(
@@ -1440,7 +1578,12 @@ def _run_cross_post(
                 or "Check out this video! #shorts #viral"
             )
 
-        for video_path in video_paths:
+        # 纯国内任务不得触碰 Upload-Post 链路（包括空调用）。
+        if overseas_platforms:
+            report_progress(
+                stage="uploading", platform=overseas_platforms[0], force=True
+            )
+        for video_path in video_paths if overseas_platforms else ():
             pending_result_index = None
 
             def record_background_request(request_id: str) -> None:
@@ -1469,7 +1612,7 @@ def _run_cross_post(
             result = upload_post.cross_post_video(
                 video_path=video_path,
                 title=post_title,
-                platforms=list(platforms),
+                platforms=list(overseas_platforms),
                 youtube_extra=youtube_extra,
                 on_background_start=record_background_request,
                 **upload_kwargs,
@@ -1483,6 +1626,8 @@ def _run_cross_post(
                 results.append(result)
             else:
                 results[pending_result_index] = result
+            completed_units += 1
+            report_progress(force=True)
 
         failures = [result for result in results if not result.get("success")]
         if failures:
@@ -1513,6 +1658,8 @@ def _run_cross_post(
             cross_post_results=results,
             cross_post_error=cross_post_error,
             cross_post_owner=None,
+            cross_post_progress=100,
+            cross_post_stage="done",
         )
         if state_updated is False:
             logger.warning(f"discard cross-post result for missing task: {task_id}")
@@ -1524,6 +1671,11 @@ def _run_cross_post(
                 RuntimeError("failed to persist final cross-post result"),
                 results,
             )
+        if state_updated is not None:
+            # 任务已删除（False）也要留历史：发布确实发生过。
+            _record_publish_history(
+                task_id, cross_post_state, results, cross_post_error
+            )
     except Exception as exc:
         # 发布失败只影响发布状态，不能反向覆盖已经完成的视频任务。
         # 异常原文写入任务状态，API 调用方无需访问服务端日志也能定位问题。
@@ -1531,10 +1683,10 @@ def _run_cross_post(
         _record_cross_post_failure(task_id, exc, results)
 
 
-def _run_cross_post_with_slot(*args) -> None:
+def _run_cross_post_with_slot(*args, **kwargs) -> None:
     """执行发布任务，并确保成功、失败或异常时都会归还队列容量。"""
     try:
-        _run_cross_post(*args)
+        _run_cross_post(*args, **kwargs)
     except Exception as exc:
         # _run_cross_post 已处理预期异常；这里是最后一道保护，避免未来新增
         # 逻辑抛出的异常只保存在无人读取的 Future 中。
@@ -1586,6 +1738,7 @@ def _schedule_cross_post(
     platforms: list[str],
     youtube_privacy_status: str,
     youtube_made_for_kids: bool = False,
+    trigger: str = "auto",
 ) -> str | None:
     """提交后台发布任务；成功返回 None，调度失败返回可查询的错误原因。"""
     if not _cross_post_slots.acquire(blocking=False):
@@ -1600,6 +1753,16 @@ def _schedule_cross_post(
             cross_post_error=error,
             cross_post_owner=None,
         )
+        _cross_post_run_meta[task_id] = {
+            "trigger": trigger,
+            "started_at": time.time(),
+            "videos": list(video_paths),
+            "video_subject": params.video_subject or "",
+            "account": social_auto_upload.social_auto_upload_service.snapshot_account().get(
+                "social_publish_account"
+            ),
+        }
+        _record_publish_history(task_id, const.CROSS_POST_STATE_FAILED, None, error)
         return error
 
     try:
@@ -1614,9 +1777,13 @@ def _schedule_cross_post(
             youtube_privacy_status,
             youtube_made_for_kids,
             upload_post.upload_post_service.snapshot_account(),
+            social_auto_upload.social_auto_upload_service.snapshot_account(),
+            trigger=trigger,
         )
         _register_cross_post_future(task_id, future)
         future.add_done_callback(partial(_finalize_cross_post_future, task_id))
+        # 发布队列面板需要展示每个排队任务的目标平台；排队时冻结。
+        _patch_cross_post_state(task_id, cross_post_platforms=list(platforms))
     except RuntimeError as exc:
         _unregister_cross_post_future(task_id)
         _cross_post_slots.release()
@@ -1629,9 +1796,176 @@ def _schedule_cross_post(
             cross_post_error=f"failed to schedule cross-post: {exc}",
             cross_post_owner=None,
         )
+        _cross_post_run_meta[task_id] = {
+            "trigger": trigger,
+            "started_at": time.time(),
+            "videos": list(video_paths),
+            "video_subject": params.video_subject or "",
+            "account": None,
+        }
+        _record_publish_history(
+            task_id,
+            const.CROSS_POST_STATE_FAILED,
+            None,
+            f"failed to schedule cross-post: {exc}",
+        )
         return f"failed to schedule cross-post: {exc}"
 
     return None
+
+
+def _restore_completed_task_from_disk(task_id: str) -> dict | None:
+    """重启后内存状态为空时，从任务目录重建最小已完成状态。
+
+    任务列表从磁盘扫描，而发布状态机在内存里；重启后手动发布历史
+    任务必须先重建状态记录，否则 patch_task 会因任务不存在而拒绝写入。
+    只接受 final-<序号>.mp4 成片；combined/临时文件不代表任务完成。
+    """
+    task_path = utils.task_dir(task_id)
+    if not path.isdir(task_path):
+        return None
+    candidates = []
+    try:
+        names = os.listdir(task_path)
+    except OSError:
+        return None
+    for name in names:
+        if not (name.startswith("final-") and name.endswith(".mp4")):
+            continue
+        index_part = name[len("final-") : -len(".mp4")]
+        full_path = path.join(task_path, name)
+        if index_part.isdigit() and path.isfile(full_path):
+            candidates.append((int(index_part), full_path))
+    if not candidates:
+        return None
+    video_paths = [video_path for _, video_path in sorted(candidates)]
+
+    subject = ""
+    language = ""
+    script_text = ""
+    try:
+        with open(path.join(task_path, "script.json"), encoding="utf-8") as file:
+            payload = json.load(file)
+        raw_params = payload.get("params")
+        if isinstance(raw_params, dict):
+            subject = raw_params.get("video_subject") or ""
+            language = raw_params.get("video_language") or ""
+        script_text = payload.get("script") or ""
+    except Exception as exc:
+        logger.warning(
+            f"failed to load script.json while restoring task {task_id}: {exc}"
+        )
+
+    restored = {
+        "task_id": task_id,
+        "state": const.TASK_STATE_COMPLETE,
+        "progress": 100,
+        "videos": video_paths,
+        "video_subject": subject,
+        "video_language": language,
+        "script": script_text,
+    }
+    # 用户显式点击发布才重建；目录已删除的任务不会走到这里。
+    sm.state.update_task(
+        task_id,
+        state=const.TASK_STATE_COMPLETE,
+        progress=100,
+        videos=video_paths,
+        video_subject=subject,
+        video_language=language,
+        script=script_text,
+    )
+    logger.info(f"restored completed task state from disk for manual publish: {task_id}")
+    return restored
+
+
+def publish_task_now(task_id: str) -> str | None:
+    """手动触发已完成任务的跨平台发布；成功返回 None，否则返回错误原因。
+
+    与自动发布共用同一队列与状态机，区别仅在于不受 auto_upload 开关
+    门控：任一通道配置可用即可手动触发。发布失败不影响已成片视频。
+    """
+    task = sm.state.get_task(task_id)
+    if not task:
+        # 重启后内存状态丢失，但成片仍在磁盘上：从任务目录兜底重建。
+        task = _restore_completed_task_from_disk(task_id)
+    if not task:
+        return "task state not found; cannot publish"
+    if task.get("state") != const.TASK_STATE_COMPLETE:
+        return "task is not complete; only finished videos can be published"
+    if task.get("cross_post_state") in (
+        const.CROSS_POST_STATE_PENDING,
+        const.CROSS_POST_STATE_PROCESSING,
+    ):
+        return "a publish job is already queued or running for this task"
+
+    video_paths = [p for p in (task.get("videos") or []) if path.isfile(p)]
+    if not video_paths:
+        return "no finished video files found for this task"
+
+    # 手动触发只要求通道可用（enabled + CLI/API Key），不要求 auto_upload。
+    platforms = []
+    if social_auto_upload.social_auto_upload_service.is_configured():
+        platforms += [
+            platform
+            for platform in social_auto_upload.social_auto_upload_service.platforms
+            if social_auto_upload.is_sau_platform(platform)
+        ]
+    if upload_post.upload_post_service.is_configured():
+        platforms += list(upload_post.upload_post_service.platforms)
+    if not platforms:
+        return (
+            "no publishing channel is configured; "
+            "enable domestic or overseas publishing in Settings first"
+        )
+
+    # 从 script.json 恢复生成时的参数与文案；元数据生成需要主题/语言/脚本。
+    params = None
+    video_script = task.get("script") or ""
+    try:
+        with open(
+            path.join(utils.task_dir(task_id), "script.json"), encoding="utf-8"
+        ) as file:
+            payload = json.load(file)
+        raw_params = payload.get("params")
+        if isinstance(raw_params, dict):
+            params = VideoParams.model_validate(raw_params)
+        video_script = payload.get("script") or video_script
+    except Exception as exc:
+        logger.warning(
+            f"failed to load script.json for manual publish, task_id: {task_id}, "
+            f"error: {exc}"
+        )
+    if params is None:
+        # 旧任务或清单损坏时用状态里的最小信息兜底，不阻断手动发布。
+        params = VideoParams(
+            video_subject=task.get("video_subject") or "",
+            video_language=task.get("video_language") or "",
+        )
+
+    # 排队窗口内任务卡应立即可见 pending；调度失败时 _schedule_cross_post
+    # 会自行改写为 failed，与自动发布链路的行为保持一致。
+    _patch_cross_post_state(
+        task_id,
+        cross_post_state=const.CROSS_POST_STATE_PENDING,
+        cross_post_results=None,
+        cross_post_error=None,
+        cross_post_owner=_cross_post_process_owner,
+        cross_post_progress=0,
+        cross_post_stage="queued",
+        cross_post_platform=None,
+        cross_post_log=[],
+    )
+    return _schedule_cross_post(
+        task_id=task_id,
+        video_paths=video_paths,
+        params=params,
+        video_script=video_script,
+        platforms=platforms,
+        youtube_privacy_status=upload_post.upload_post_service.youtube_privacy_status,
+        youtube_made_for_kids=upload_post.upload_post_service.youtube_made_for_kids,
+        trigger="manual",
+    )
 
 
 def _run_pipeline(
@@ -2011,13 +2345,26 @@ def _run_pipeline(
 
     # 7. 先完成视频生成任务，再按需提交跨平台发布。第三方上传可能耗时
     # 数分钟，不应阻塞视频结果返回，也不能反向影响已经生成的成片。
-    cross_post_enabled = (
+    # 两个通道各自独立开关：国内 sau 通道为主，Upload-Post 为可选国外通道。
+    upload_post_enabled = (
         upload_post.upload_post_service.is_configured()
         and upload_post.upload_post_service.auto_upload
     )
-    platforms = (
-        list(upload_post.upload_post_service.platforms) if cross_post_enabled else []
+    social_enabled = (
+        social_auto_upload.social_auto_upload_service.is_configured()
+        and social_auto_upload.social_auto_upload_service.auto_upload
     )
+    cross_post_enabled = upload_post_enabled or social_enabled
+    platforms = []
+    if social_enabled:
+        # 只接受 sau 支持的平台 id，防止误配把国外平台路由进子进程通道。
+        platforms += [
+            platform
+            for platform in social_auto_upload.social_auto_upload_service.platforms
+            if social_auto_upload.is_sau_platform(platform)
+        ]
+    if upload_post_enabled:
+        platforms += list(upload_post.upload_post_service.platforms)
     should_cross_post = cross_post_enabled and bool(platforms)
     if cross_post_enabled and not platforms:
         logger.warning(
