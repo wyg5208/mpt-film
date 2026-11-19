@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>国内平台自动发布 · UI Demo</title>
+<style>
+  :root {
+    --st-red: #ff4b4b;
+    --st-text: #31333f;
+    --st-secondary: #808495;
+    --st-bg: #ffffff;
+    --st-bg-secondary: #f0f2f6;
+    --st-border: rgba(49, 51, 63, 0.2);
+    --st-green: #21c354;
+    --st-yellow: #faca2b;
+    --st-font: "Source Sans Pro", "Microsoft YaHei", -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--st-font);
+    color: var(--st-text);
+    background: var(--st-bg-secondary);
+    padding: 32px 16px 64px;
+    line-height: 1.6;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  .demo-note {
+    background: #fff8e6; border: 1px solid #f0d48a; border-radius: 8px;
+    padding: 12px 16px; font-size: 13px; color: #7a6520; margin-bottom: 28px;
+  }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .subtitle { color: var(--st-secondary); font-size: 14px; margin-bottom: 28px; }
+  h2.section {
+    font-size: 19px; margin: 40px 0 14px;
+    padding-left: 10px; border-left: 4px solid var(--st-red);
+  }
+  /* ---- Streamlit 对话框 ---- */
+  .dialog {
+    background: var(--st-bg); border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+    padding: 28px 32px; border: 1px solid var(--st-border);
+  }
+  .dialog-title { font-size: 22px; font-weight: 700; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--st-border); margin-bottom: 20px; }
+  .tab { padding: 8px 2px; font-size: 14px; color: var(--st-secondary); cursor: default; }
+  .tab.active { color: var(--st-red); border-bottom: 2px solid var(--st-red); font-weight: 600; }
+  /* ---- 区块 ---- */
+  .zone-title { font-size: 16px; font-weight: 700; margin: 18px 0 4px; }
+  .caption { font-size: 13px; color: var(--st-secondary); margin-bottom: 12px; }
+  .caption a { color: var(--st-red); text-decoration: none; }
+  .expander {
+    border: 1px solid var(--st-border); border-radius: 8px;
+    margin: 12px 0; background: var(--st-bg);
+  }
+  .expander-head {
+    padding: 10px 14px; font-size: 14px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .expander-head .chev { color: var(--st-secondary); font-size: 12px; }
+  .expander-body { padding: 4px 14px 14px; border-top: 1px solid var(--st-border); }
+  pre.code {
+    background: var(--st-bg-secondary); border-radius: 6px;
+    font-family: Consolas, monospace; font-size: 12.5px;
+    padding: 10px 12px; overflow-x: auto; margin: 8px 0; color: #1f2430;
+  }
+  /* ---- 控件 ---- */
+  .field { margin: 14px 0; }
+  .label { font-size: 14px; font-weight: 600; margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
+  .help-icon {
+    width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--st-secondary);
+    color: var(--st-secondary); font-size: 10px; display: inline-flex;
+    align-items: center; justify-content: center; cursor: help;
+  }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 10px 0; }
+  .cb {
+    width: 16px; height: 16px; border-radius: 3px; border: 1.5px solid var(--st-secondary);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #fff; flex: none;
+  }
+  .cb.on { background: var(--st-red); border-color: var(--st-red); }
+  .text-input, .number-input {
+    width: 100%; background: var(--st-bg-secondary); border: 1px solid transparent;
+    border-radius: 8px; padding: 8px 12px; font-size: 14px; color: var(--st-text);
+  }
+  .number-input { width: 140px; }
+  .multiselect {
+    background: var(--st-bg-secondary); border-radius: 8px; padding: 6px 10px;
+    display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; align-items: center;
+  }
+  .chip {
+    background: rgba(255, 75, 75, 0.12); color: var(--st-red);
+    border-radius: 6px; padding: 2px 8px; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .chip .x { font-size: 11px; opacity: 0.7; }
+  .ms-caret { margin-left: auto; color: var(--st-secondary); font-size: 12px; }
+  .btn {
+    display: inline-block; border: 1px solid var(--st-border); background: var(--st-bg);
+    color: var(--st-text); border-radius: 8px; padding: 7px 16px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn.primary { background: var(--st-red); border-color: var(--st-red); color: #fff; }
+  .btn.disabled { opacity: 0.45; cursor: not-allowed; }
+  /* ---- 登录态 ---- */
+  .session-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+  .session-item {
+    display: flex; align-items: center; gap: 8px; font-size: 14px;
+    background: var(--st-bg-secondary); border-radius: 8px; padding: 8px 12px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .dot.ok { background: var(--st-green); }
+  .dot.bad { background: var(--st-red); }
+  .dot.warn { background: var(--st-yellow); }
+  .session-detail { font-size: 12px; color: var(--st-secondary); margin-left: auto; }
+  .alert {
+    border-radius: 8px; padding: 10px 14px; font-size: 13.5px; margin: 12px 0;
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+  .alert.warn { background: #fff9e0; border: 1px solid #ecd27a; color: #6d5a10; }
+  .alert.info { background: #e8f2ff; border: 1px solid #a9cbf5; color: #1c4e8a; }
+  /* ---- 任务卡 ---- */
+  .task-card {
+    background: var(--st-bg); border: 1px solid var(--st-border); border-radius: 10px;
+    padding: 14px 18px; margin: 10px 0;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .task-thumb {
+    width: 72px; height: 48px; border-radius: 6px; flex: none;
+    background: linear-gradient(135deg, #ffb199, #ff4b4b);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px;
+  }
+  .task-main { flex: 1; min-width: 0; }
+  .task-title { font-size: 14.5px; font-weight: 600; }
+  .task-meta { font-size: 12px; color: var(--st-secondary); }
+  .state-badge {
+    font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 12px; flex: none;
+  }
+  .state-badge.complete { background: #e6f7ec; color: #148a43; }
+  .state-badge.failed { background: #ffecec; color: #c62f2f; }
+  .state-badge.pending { background: #eef0f4; color: #565b6e; }
+  .state-badge.processing { background: #e8f2ff; color: #1c5eb8; }
+  .platform-marks { font-size: 12.5px; margin-top: 3px; color: var(--st-text); }
+  .platform-marks .sep { color: var(--st-secondary); margin: 0 4px; }
+  .spinner {
+    display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid #a9cbf5; border-top-color: #1c5eb8;
+    animation: spin 1s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footer-note { margin-top: 44px; font-size: 12.5px; color: var(--st-secondary); text-align: center; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>国内平台自动发布 · UI Demo</h1>
+  <div class="subtitle">MoneyPrinterTurbo · social-auto-upload 主通道 + Upload-Post 可选国外通道</div>
+  <div class="demo-note">
+    本页面为静态视觉验收基准（对应 webui/Main.py 实装）。三个部分：① 设置对话框「自动发布」Tab；② 任务卡发布状态四态；③ 登录态过期提示态。
+  </div>
+
+  <!-- ① 设置对话框 -->
+  <h2 class="section">① 设置对话框 ·「自动发布」Tab</h2>
+  <div class="dialog">
+    <div class="dialog-title">⚙️ 设置</div>
+    <div class="tabs">
+      <div class="tab">基础设置</div>
+      <div class="tab">视频设置</div>
+      <div class="tab">字幕设置</div>
+      <div class="tab active">自动发布</div>
+    </div>
+
+    <!-- 区 1：国内主区 -->
+    <div class="zone-title">🇨🇳 国内平台（免费 · social-auto-upload）</div>
+    <div class="caption">
+      通过本地 <a href="#">social-auto-upload</a> 工具自动发布到抖音、视频号、小红书、B站等平台。
+      完全免费，需一次性安装并扫码登录（发布使用有头浏览器，仅适合本机桌面部署）。
+    </div>
+
+    <div class="expander">
+      <div class="expander-head">📦 安装引导（一次性）<span class="chev">▼</span></div>
+      <div class="expander-body">
+        <pre class="code">git clone https://github.com/dreammis/social-auto-upload
+cd social-auto-upload
+uv venv
+uv pip install -e .
+copy conf.example.py conf.py
+.venv\Scripts\patchright install chromium</pre>
+        <div class="caption">
+          GitHub 慢时使用代理源 gitclone.com/github.com/dreammis/social-auto-upload（勿用 Gitee 旧版镜像，缺 sau CLI 与小红书/B站）；
+          浏览器下载慢可设置 PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright，
+          镜像 404 时见 docs/auto-publish-cn.md 兜底方案。
+          安装后在真实终端逐平台扫码登录：<b>sau douyin login --account default</b>。
+          抖音若触发短信验证，按提示将验证码写入 verify_code.txt。
+        </div>
+      </div>
+    </div>
+
+    <div class="checkbox-row"><span class="cb on">✓</span> 启用国内平台发布</div>
+    <div class="checkbox-row"><span class="cb">‎</span> 视频生成完成后自动发布（不勾选则仅保存设置，不自动触发）</div>
+
+    <div class="field">
+      <div class="label">发布账号名称 <span class="help-icon" title="对应 sau login --account 使用的账号名">?</span></div>
+      <div class="text-input">default</div>
+    </div>
+
+    <div class="field">
+      <div class="label">国内发布平台</div>
+      <div class="multiselect">
+        <span class="chip">抖音 <span class="x">✕</span></span>
+        <span class="chip">视频号 <span class="x">✕</span></span>
+        <span class="chip">小红书 <span class="x">✕</span></span>
+        <span class="chip">B站 <span class="x">✕</span></span>
+        <span class="ms-caret">▼</span>
+      </div>
+      <div class="caption" style="margin-top:4px">可选扩展：快手、微博、百家号（下拉中排在核心四项之后）</div>
+    </div>
+
+    <div class="field">
+      <div class="label">B站分区 ID (tid) <span class="help-icon" title="参考 biliup 分区文档；21 = 生活·日常">?</span></div>
+      <div class="number-input">21</div>
+      <div class="caption" style="margin-top:4px">仅在选中 B站 时显示；默认 21（生活·日常）</div>
+    </div>
+
+    <div class="expander">
+      <div class="expander-head">🔧 高级发布设置<span class="chev">▶</span></div>
+    </div>
+
+    <div class="field">
+      <span class="btn">🔍 检查登录态</span>
+    </div>
+    <div class="session-grid">
+      <div class="session-item"><span class="dot ok"></span>抖音<span class="session-detail">会话有效</span></div>
+      <div class="session-item"><span class="dot ok"></span>视频号<span class="session-detail">会话有效</span></div>
+      <div class="session-item"><span class="dot bad"></span>小红书<span class="session-detail">会话过期</span></div>
+      <div class="session-item"><span class="dot ok"></span>B站<span class="session-detail">会话有效</span></div>
+    </div>
+    <div class="alert warn">
+      ⚠️ 小红书登录态失效，请在真实终端重新扫码：
+    </div>
+    <pre class="code">sau xiaohongshu login --account default</pre>
+
+    <!-- 区 2：国外折叠区 -->
+    <div class="expander" style="margin-top:22px">
+      <div class="expander-head">🌍 国外平台（可选 · Upload-Post）<span class="chev">▶</span></div>
+    </div>
+    <div class="caption">
+      免费档额度：每月 10 次上传 · 2 个账号 Profile · 完整 API（TikTok / Instagram / YouTube）。
+      展开后可配置 API Key 与国外平台，配置项与旧版完全一致。
+    </div>
+  </div>
+
+  <!-- ② 任务卡四态 -->
+  <h2 class="section">② 任务卡 · 发布状态四态（含平台徽标）</h2>
+
+  <div class="task-card">
+    <div class="task-thumb">▶</div>
+    <div class="task-main">
+      <div class="task-title">家常红烧肉的三个关键步骤</div>
+      <div class="task-meta">2025-06-12 14:32 · 3 个视频 · final-1.mp4</div>
+      <div class="platform-marks">发布完成<span class="sep">·</span>抖音 ✅ 视频号 ✅ 小红书 ✅ B站 ✅</div>
+    </div>
+    <span class="state-badge complete">发布完成</span>
+  </div>
+
+  <div class="task-card">
+    <div class="task-thumb">▶</div>
+    <div class="task-main">
+      <div class="task-title">十分钟搞定的工作日早餐</div>
+      <div class="task-meta">2025-06-12 15:07 · 1 个视频 · final-1.mp4</div>
+      <div class="platform-marks">发布失败<span class="sep">·</span>抖音 ✅ 视频号 ✅ 小红书 ❌ B站 ✅</div>
+      <div class="task-meta" style="color:#c62f2f">sau xiaohongshu exited with code 1: 会话过期，请重新扫码登录</div>
+    </div>
+    <span class="state-badge failed">发布失败</span>
+  </div>
+
+  <div class="task-card">
+    <div class="task-thumb">▶</div>
+    <div class="task-main">
+      <div class="task-title">周末露营装备清单</div>
+      <div class="task-meta">2025-06-12 15:40 · 2 个视频 · 排队中（前方 1 个任务）</div>
+      <div class="platform-marks">等待发布<span class="sep">·</span>抖音 ⏳ 视频号 ⏳ 小红书 ⏳ B站 ⏳</div>
+    </div>
+    <span class="state-badge pending">等待发布</span>
+  </div>
+
+  <div class="task-card">
+    <div class="task-thumb">▶</div>
+    <div class="task-main">
+      <div class="task-title">新手也能学会的手机摄影构图</div>
+      <div class="task-meta">2025-06-12 15:41 · 1 个视频 · 逐平台串行发布中</div>
+      <div class="platform-marks"><span class="spinner"></span> 发布中<span class="sep">·</span>抖音 ✅ 视频号 ✅ 小红书 ❌ B站 ⏳</div>
+    </div>
+    <span class="state-badge processing">发布中</span>
+  </div>
+
+  <!-- ③ 登录态过期提示态 -->
+  <h2 class="section">③ 登录态过期 · 黄灯提示态</h2>
+  <div class="dialog">
+    <div class="zone-title" style="margin-top:0">🔍 检查登录态 · 结果</div>
+    <div class="session-grid">
+      <div class="session-item"><span class="dot ok"></span>抖音<span class="session-detail">会话有效</span></div>
+      <div class="session-item"><span class="dot warn"></span>视频号<span class="session-detail">即将过期（3 天）</span></div>
+      <div class="session-item"><span class="dot bad"></span>小红书<span class="session-detail">会话过期</span></div>
+      <div class="session-item"><span class="dot bad"></span>B站<span class="session-detail">未登录</span></div>
+    </div>
+    <div class="alert warn">
+      ⚠️ 2 个平台需要重新登录，1 个平台建议尽快续期。发布失败不会影响已生成的视频文件，重新扫码后可在任务卡重试发布。
+    </div>
+    <pre class="code">sau xiaohongshu login --account default
+sau bilibili login --account default
+sau tencent login --account default   # 建议：即将过期</pre>
+    <div class="alert info">
+      ℹ️ 扫码登录必须在真实终端执行（WebUI 内不提供扫码）。登录完成后可再次点击「检查登录态」验证。
+    </div>
+    <span class="btn disabled">🔍 检查登录态（体检进行中…）</span>
+  </div>
+
+  <div class="footer-note">
+    静态视觉稿 · 与 Streamlit 实装（webui/Main.py「自动发布」设置区）一一对应 · docs/ui-demo/auto-publish-cn.html
+  </div>
+</div>
+</body>
+</html>
