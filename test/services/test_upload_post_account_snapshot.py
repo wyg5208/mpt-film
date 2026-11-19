@@ -26,6 +26,14 @@ def _response(payload):
 
 
 class TestUploadPostAccountSnapshot(unittest.TestCase):
+    def setUp(self):
+        # 发布历史写盘隔离：快照测试不应向真实 storage 追加记录。
+        history_patcher = patch.object(tm.publish_history, "record_publish")
+        history_patcher.start()
+        self.addCleanup(history_patcher.stop)
+        tm._cross_post_run_meta.clear()
+        self.addCleanup(tm._cross_post_run_meta.clear)
+
     def test_queued_publish_keeps_original_account(self):
         released = threading.Event()
         state = sm.MemoryState()

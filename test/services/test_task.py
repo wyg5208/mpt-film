@@ -30,6 +30,12 @@ class TestTaskService(unittest.TestCase):
         # 影响后续恢复测试，同时不会触碰真正线程池中的生产任务。
         with tm._cross_post_registry_lock:
             tm._cross_post_futures.clear()
+        # 发布历史写盘隔离：状态机测试不应向真实 storage 追加记录。
+        history_patcher = patch.object(tm.publish_history, "record_publish")
+        history_patcher.start()
+        self.addCleanup(history_patcher.stop)
+        tm._cross_post_run_meta.clear()
+        self.addCleanup(tm._cross_post_run_meta.clear)
 
     def tearDown(self):
         with tm._cross_post_registry_lock:
@@ -1596,10 +1602,10 @@ class TestTaskService(unittest.TestCase):
         service = tm.upload_post.upload_post_service
         state = MemoryState()
 
-        def run_immediately(function, *args):
+        def run_immediately(function, *args, **kwargs):
             future = Future()
             try:
-                function(*args)
+                function(*args, **kwargs)
             except Exception as exc:
                 future.set_exception(exc)
             else:
@@ -1635,6 +1641,13 @@ class TestTaskService(unittest.TestCase):
             patch.object(type(service), "platforms", new_callable=PropertyMock, return_value=["youtube"]),
             patch.object(type(service), "youtube_privacy_status", new_callable=PropertyMock, return_value="unlisted"),
             patch.object(type(service), "youtube_made_for_kids", new_callable=PropertyMock, return_value=True),
+            # 隔离用户真实配置：本测试只验证国外通道，国内通道必须关闭，
+            # 否则 config.toml 里已启用的 sau 平台会混进路由并触发真实 LLM。
+            patch.object(
+                tm.social_auto_upload.social_auto_upload_service,
+                "is_configured",
+                return_value=False,
+            ),
             patch.object(
                 tm.llm,
                 "generate_social_metadata",
@@ -1700,8 +1713,8 @@ class TestTaskService(unittest.TestCase):
         state = MemoryState()
         submitted = []
 
-        def capture_submission(function, *args):
-            submitted.append((function, args))
+        def capture_submission(function, *args, **kwargs):
+            submitted.append((function, args, kwargs))
             return MagicMock(spec=Future)
 
         with (
@@ -1724,6 +1737,12 @@ class TestTaskService(unittest.TestCase):
             patch.object(type(service), "auto_upload", new_callable=PropertyMock, return_value=True),
             patch.object(type(service), "platforms", new_callable=PropertyMock, return_value=["tiktok"]),
             patch.object(type(service), "youtube_privacy_status", new_callable=PropertyMock, return_value="private"),
+            # 隔离用户真实配置：只验证国外通道的延迟提交语义。
+            patch.object(
+                tm.social_auto_upload.social_auto_upload_service,
+                "is_configured",
+                return_value=False,
+            ),
             patch.object(tm.upload_post, "cross_post_video") as cross_post,
             patch.object(tm.sm, "state", state),
             patch.object(
@@ -1742,16 +1761,22 @@ class TestTaskService(unittest.TestCase):
         self.assertEqual(completed_task["state"], tm.const.TASK_STATE_COMPLETE)
         self.assertEqual(completed_task["progress"], 100)
 
-        worker, worker_args = submitted[0]
+        worker, worker_args, worker_kwargs = submitted[0]
         with (
             patch.object(tm.sm, "state", state),
+            # worker 阶段同样不得触发真实 LLM 请求。
+            patch.object(
+                tm.llm,
+                "generate_social_metadata",
+                return_value={"title": "t", "caption": "c", "hashtags": []},
+            ),
             patch.object(
                 tm.upload_post,
                 "cross_post_video",
                 return_value={"success": True, "request_id": "upload-1"},
             ),
         ):
-            worker(*worker_args)
+            worker(*worker_args, **worker_kwargs)
 
         published_task = state.get_task("deferred-cross-post")
         self.assertEqual(published_task["videos"], ["final.mp4"])

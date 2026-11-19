@@ -17,6 +17,15 @@ from app.services.state import MemoryState
 from app.services.upload_post import UploadPostService
 
 
+@pytest.fixture(autouse=True)
+def _isolate_publish_history(monkeypatch):
+    """发布历史写盘隔离：受众声明测试不应向真实 storage 追加记录。"""
+    monkeypatch.setattr(task.publish_history, "record_publish", MagicMock())
+    task._cross_post_run_meta.clear()
+    yield
+    task._cross_post_run_meta.clear()
+
+
 @pytest.fixture
 def upload_config():
     """测试只使用虚构凭据，不能读取用户真实发布目标或发起真实上传。"""
