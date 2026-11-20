@@ -553,6 +553,7 @@
     "Configure Providers": "Настроить",
     "Active Provider": "Используется: {provider}",
     "No Configured Providers": "Пока нет настроенных провайдеров.",
-    "Provider Configuration Changed": "Конфигурация изменилась. Проверьте настройки этого провайдера."
+    "Provider Configuration Changed": "Конфигурация изменилась. Проверьте настройки этого провайдера.",
+    "Task Status Draft": "черновик"
   }
 }

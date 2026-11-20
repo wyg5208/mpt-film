@@ -553,6 +553,7 @@
     "Configure Providers": "Konfigurasi",
     "Active Provider": "Sedang digunakan: {provider}",
     "No Configured Providers": "Belum ada penyedia yang dikonfigurasi.",
-    "Provider Configuration Changed": "Konfigurasi berubah. Periksa pengaturan penyedia ini."
+    "Provider Configuration Changed": "Konfigurasi berubah. Periksa pengaturan penyedia ini.",
+    "Task Status Draft": "draf"
   }
 }

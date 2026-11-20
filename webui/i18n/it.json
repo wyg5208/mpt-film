@@ -553,6 +553,7 @@
     "Configure Providers": "Configura",
     "Active Provider": "In uso: {provider}",
     "No Configured Providers": "Nessun fornitore ancora configurato.",
-    "Provider Configuration Changed": "La configurazione è cambiata. Controlla le impostazioni di questo fornitore."
+    "Provider Configuration Changed": "La configurazione è cambiata. Controlla le impostazioni di questo fornitore.",
+    "Task Status Draft": "bozza"
   }
 }

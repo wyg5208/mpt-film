@@ -553,6 +553,7 @@
     "Configure Providers": "Cấu hình",
     "Active Provider": "Đang sử dụng: {provider}",
     "No Configured Providers": "Chưa có nhà cung cấp nào được cấu hình.",
-    "Provider Configuration Changed": "Cấu hình đã thay đổi. Hãy kiểm tra cài đặt của nhà cung cấp này."
+    "Provider Configuration Changed": "Cấu hình đã thay đổi. Hãy kiểm tra cài đặt của nhà cung cấp này.",
+    "Task Status Draft": "bản nháp"
   }
 }
