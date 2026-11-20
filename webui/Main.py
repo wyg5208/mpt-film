@@ -17,7 +17,9 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import requests
+import contextlib
 import streamlit as st
+import streamlit.components.v1 as components
 from loguru import logger
 from streamlit_tour import Tour
 
@@ -298,6 +300,68 @@ PRESET_EXCLUDED_PARAM_KEYS = frozenset(
         "custom_audio_file",
         "bgm_file",
     }
+)
+# 项目绑定：每个任务目录一份 params.json 生成参数快照。只有 params.json
+# 而没有 script.json 的目录是“草稿”（保存过但尚未提交生成）。
+PROJECT_PARAMS_SCHEMA = "moneyprinterturbo.project-params"
+PROJECT_PARAMS_VERSION = 1
+PROJECT_PARAMS_FILE_NAME = "params.json"
+# 预设库：storage/presets 下的具名预设，复用设置预设的 schema，导出文件
+# 可以直接在其它机器导入。内置预设是代码常量，不落盘、不可删除。
+PRESET_LIBRARY_DIR_NAME = "presets"
+BUILTIN_PRESETS = (
+    (
+        "builtin-knowledge",
+        "Builtin Preset Knowledge",
+        {
+            "video_aspect": "9:16",
+            "video_clip_duration": 5,
+            "image_motion": "zoom",
+            "subtitle_enabled": True,
+            "bgm_type": "random",
+            "bgm_volume": 0.2,
+        },
+    ),
+    (
+        "builtin-cinema",
+        "Builtin Preset Cinema",
+        {
+            "video_aspect": "16:9",
+            "video_clip_duration": 8,
+            "video_transition_mode": "FadeIn",
+            "image_motion": "zoom",
+            "subtitle_enabled": False,
+            "bgm_type": "random",
+            "bgm_volume": 0.35,
+        },
+    ),
+    (
+        "builtin-vlog",
+        "Builtin Preset Vlog",
+        {
+            "video_aspect": "9:16",
+            "video_clip_duration": 6,
+            "video_transition_mode": "Shuffle",
+            "image_motion": "static",
+            "subtitle_enabled": True,
+            "bgm_type": "random",
+            "bgm_volume": 0.25,
+        },
+    ),
+    (
+        "builtin-ambient",
+        "Builtin Preset Ambient",
+        {
+            "video_aspect": "16:9",
+            "video_clip_duration": 10,
+            "video_transition_mode": "FadeOut",
+            "image_motion": "zoom",
+            "subtitle_enabled": False,
+            "voice_name": "no-voice",
+            "bgm_type": "random",
+            "bgm_volume": 0.4,
+        },
+    ),
 )
 # 密钥按配置项名称后缀识别。新增 Provider 只要沿用现有命名，就会自动进入
 # 备份，不需要再维护第二份密钥清单。
@@ -993,6 +1057,8 @@ def _prepare_generation_task():
 
 def _task_state_label(state, has_video):
     normalized_state = _normalize_task_state(state)
+    if normalized_state == "draft":
+        return tr("Task Status Draft")
     if normalized_state == const.TASK_STATE_COMPLETE:
         return tr("Task Status Complete")
     if normalized_state == const.TASK_STATE_FAILED:
@@ -1006,6 +1072,8 @@ def _task_state_label(state, has_video):
 
 def _task_state_filter_key(task):
     normalized_state = _normalize_task_state(task.get("state"))
+    if normalized_state == "draft":
+        return "draft"
     if normalized_state == const.TASK_STATE_PROCESSING:
         return "processing"
     if normalized_state == const.TASK_STATE_FAILED:
@@ -1118,16 +1186,28 @@ def _scan_history_tasks(limit=30):
         if not isinstance(script_text, str):
             script_text = ""
         video_file = _find_final_task_video(task_path)
+        # 草稿目录没有 script.json；只在确认为草稿时才读 params.json，
+        # 避免给普通历史任务增加额外 IO。
+        is_draft = not script_data and os.path.isfile(
+            os.path.join(task_path, PROJECT_PARAMS_FILE_NAME)
+        )
         subject = (
             params_data.get("video_subject")
             or script_text[:40]
             or name
         )
+        if is_draft:
+            draft_params = _read_project_params(name) or {}
+            subject = draft_params.get("video_subject") or subject
         tasks.append(
             {
                 "task_id": name,
                 "subject": subject,
-                "state": const.TASK_STATE_COMPLETE if video_file else None,
+                "state": (
+                    const.TASK_STATE_COMPLETE
+                    if video_file
+                    else ("draft" if is_draft else None)
+                ),
                 "progress": 100 if video_file else 0,
                 "mtime": mtime,
                 "task_path": task_path,
@@ -1394,6 +1474,8 @@ def _render_task_table(filtered_tasks, key_prefix):
             is_busy = is_processing or tm.is_task_busy(task)
             has_restore_data = os.path.isfile(
                 os.path.join(task["task_path"], "script.json")
+            ) or os.path.isfile(
+                os.path.join(task["task_path"], PROJECT_PARAMS_FILE_NAME)
             )
             safe_task_key = "".join(ch if ch.isalnum() else "_" for ch in task_id)[:40]
 
@@ -1651,9 +1733,14 @@ def _render_publish_history(entries):
                 st.caption(error.splitlines()[-1][:160])
 
 
-def _render_task_manager_panel(tasks=None):
+def _render_task_manager_panel(tasks=None, include_publish_history=True):
     tasks = tasks if tasks is not None else _collect_task_summaries()
-    history_entries = publish_history.list_publish_history(limit=100)
+    # 发布历史提升为一级页后，任务页不再重复拉取和渲染历史记录。
+    history_entries = (
+        publish_history.list_publish_history(limit=100)
+        if include_publish_history
+        else []
+    )
     if not tasks and not history_entries:
         st.info(tr("No Tasks Yet"))
         return
@@ -1667,8 +1754,9 @@ def _render_task_manager_panel(tasks=None):
         ("processing", tr("Task Status Processing")),
         ("complete", tr("Task Status Complete")),
         ("failed", tr("Task Status Failed")),
-        ("publish_history", tr("Publish History Tab")),
     ]
+    if include_publish_history:
+        status_tabs.append(("publish_history", tr("Publish History Tab")))
     tabs = st.tabs(
         [label for _, label in status_tabs],
         key="task_manager_status_tabs",
@@ -1720,24 +1808,6 @@ def _render_task_video_preview():
     st.video(preview_file)
 
 
-@st.fragment(run_every="2s")
-def _render_task_manager_entry():
-    # 任务可能由当前页面或其它页面触发生成。入口单独用 fragment 定时刷新，
-    # 只更新任务数量和 popover 内容，不打断主页面表单输入。
-    task_summaries = _collect_task_summaries()
-    processing_task_count = _count_processing_tasks(task_summaries)
-    with st.container(key="task_manager_entry", width="content"):
-        with st.popover(
-            _task_manager_label(processing_task_count),
-            width="content",
-            key=(
-                "task_manager_popover_"
-                f"{st.session_state.get('task_manager_popover_nonce', 0)}"
-            ),
-        ):
-            _render_task_manager_panel(task_summaries)
-
-
 def _load_task_restore_payload(task_id):
     tasks_root = os.path.realpath(utils.task_dir())
     task_path = os.path.realpath(os.path.join(tasks_root, str(task_id)))
@@ -1747,6 +1817,15 @@ def _load_task_restore_payload(task_id):
     except ValueError as e:
         logger.warning(f"invalid task restore path: {task_id}, {e}")
         return None
+
+    # 项目快照优先：草稿没有 script.json，且快照比脚本文件更完整。
+    project_params = _read_project_params(task_id)
+    if project_params is not None:
+        return {
+            "task_id": str(task_id),
+            "subject": project_params.get("video_subject") or str(task_id),
+            "params": project_params,
+        }
 
     script_data = _safe_load_task_script(task_path)
     raw_params = script_data.get("params")
@@ -1771,6 +1850,389 @@ def _load_task_restore_payload(task_id):
         "subject": params.get("video_subject") or script_data.get("script") or task_id,
         "params": params,
     }
+
+
+def _project_params_path(task_id):
+    """任务目录内的 params.json 路径；非法或越界 ID 返回 None。"""
+    try:
+        normalized_task_id = str(UUID(str(task_id)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    tasks_root = os.path.realpath(utils.task_dir())
+    task_path = os.path.realpath(os.path.join(tasks_root, normalized_task_id))
+    try:
+        if os.path.commonpath([tasks_root, task_path]) != tasks_root:
+            return None
+    except ValueError:
+        return None
+    return os.path.join(task_path, PROJECT_PARAMS_FILE_NAME)
+
+
+def _write_project_params(task_id, params_dict):
+    """原子写入生成参数快照；失败只告警，不阻断生成或保存流程。"""
+    params_file = _project_params_path(task_id)
+    if not params_file:
+        return False
+    payload = {
+        "schema": PROJECT_PARAMS_SCHEMA,
+        "version": PROJECT_PARAMS_VERSION,
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "params": params_dict,
+    }
+    try:
+        os.makedirs(os.path.dirname(params_file), exist_ok=True)
+        tmp_file = params_file + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, params_file)
+        return True
+    except OSError as e:
+        logger.warning(f"failed to write project params: {task_id}, {e}")
+        return False
+
+
+def _read_project_params(task_id):
+    """读取并校验项目快照；缺失、损坏或 schema 不符时返回 None。"""
+    params_file = _project_params_path(task_id)
+    if not params_file or not os.path.isfile(params_file):
+        return None
+    try:
+        with open(params_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema") != PROJECT_PARAMS_SCHEMA:
+            return None
+        raw_params = payload.get("params")
+        if not isinstance(raw_params, dict):
+            return None
+        return VideoParams.model_validate(raw_params).model_dump(mode="json")
+    except Exception as e:
+        logger.warning(f"failed to read project params: {task_id}, {e}")
+        return None
+
+
+def _params_snapshot(params_dict):
+    """脏检测用的归一化快照：排除本机媒体路径、统一关键词形态、键排序。"""
+    filtered = {
+        key: value
+        for key, value in params_dict.items()
+        if key not in PRESET_EXCLUDED_PARAM_KEYS
+    }
+    terms = filtered.get("video_terms")
+    if isinstance(terms, list):
+        filtered["video_terms"] = ", ".join(str(term) for term in terms)
+    return json.dumps(filtered, ensure_ascii=False, sort_keys=True)
+
+
+def _bind_current_project(task_id, params_dict):
+    """把会话绑定到某个项目，并以当前参数作为干净基线。"""
+    st.session_state["current_project_id"] = str(task_id)
+    st.session_state["current_project_subject"] = str(
+        params_dict.get("video_subject") or ""
+    )
+    st.session_state["project_params_baseline"] = _params_snapshot(params_dict)
+
+
+def _current_project_id():
+    return st.session_state.get("current_project_id") or ""
+
+
+def _project_is_dirty():
+    """上一次整页 run 结束时的参数与基线不一致即为脏。"""
+    baseline = st.session_state.get("project_params_baseline")
+    last = st.session_state.get("project_params_last")
+    if not baseline or last is None:
+        return False
+    return last != baseline
+
+
+def _project_dirty_display():
+    """顶栏展示用的脏标记：本 run 已请求保存或正在回填时，结果必然干净，
+    不等下一 run 才消点，避免“已保存却仍带●”的一 run 滞后。"""
+    if st.session_state.get("project_save_requested"):
+        return False
+    if st.session_state.get("project_baseline_pending"):
+        return False
+    return _project_is_dirty()
+
+
+def _request_project_save():
+    """保存按钮回调：真正的写盘在 run 末尾参数组装完成后执行。"""
+    st.session_state["project_save_requested"] = True
+
+
+def _project_is_locked():
+    """绑定项目已出成片时锁定创作参数：已交付任务的快照不允许静默改写。"""
+    params_path = _project_params_path(_current_project_id())
+    if not params_path:
+        return False
+    return bool(_find_final_task_video(os.path.dirname(params_path)))
+
+
+def _finalize_project_binding(params):
+    """run 末尾记录参数快照，并处理保存请求与加载后的基线重置。
+
+    基线取“控件渲染完成后”的快照而不是加载 payload 本身：恢复回填会对
+    越界值限幅、把关键词列表转成字符串，用 payload 做基线会产生假脏。
+    """
+    params_dict = params.model_dump(mode="json")
+    snapshot = _params_snapshot(params_dict)
+    st.session_state["project_params_last"] = snapshot
+    # 切换确认选“保存”时回调拿不到组装后的参数，用上一 run 末尾的完整
+    # dump 写盘：控件自那以后未变，内容就是用户看到的当前状态。
+    st.session_state["project_params_last_full"] = params_dict
+    saved_now = False
+    if st.session_state.pop("project_save_requested", False):
+        task_id = _current_project_id()
+        if not task_id:
+            task_id = str(uuid4())
+            st.session_state["current_project_id"] = task_id
+            st.session_state["current_project_subject"] = str(
+                params_dict.get("video_subject") or ""
+            )
+        if _write_project_params(task_id, params_dict):
+            st.session_state["project_params_baseline"] = snapshot
+            # toast 必须在写盘的同一 run 发出：消息若留到下一 run 开头，
+            # 没有后续交互时就永远不显示。
+            st.toast(tr("Project Saved"), icon="✅")
+            saved_now = True
+    if st.session_state.pop("project_baseline_pending", False):
+        st.session_state["project_params_baseline"] = snapshot
+    elif "project_params_baseline" not in st.session_state:
+        # 未绑定会话也以首 run 的默认参数为基线：用户输入后同样算脏，
+        # 切换/新建前才会触发三选确认，不会静默丢编辑。
+        st.session_state["project_params_baseline"] = snapshot
+    if saved_now:
+        # 切换器列表在本 run 开头渲染，早于此处写盘；popover 开合不触发
+        # rerun，不补一次刷新的话新草稿要等下次无关交互才出现在列表里。
+        st.rerun(scope="app")
+
+
+def _project_switcher_entries(limit):
+    """顶栏切换器列表：只保留可恢复参数的任务/草稿，按最近更新排序。"""
+    entries = []
+    for task in _scan_history_tasks(limit=limit):
+        task_path = task["task_path"]
+        if os.path.isfile(
+            os.path.join(task_path, PROJECT_PARAMS_FILE_NAME)
+        ) or os.path.isfile(os.path.join(task_path, "script.json")):
+            entries.append(task)
+    return entries
+
+
+def _load_more_projects():
+    st.session_state["project_switcher_limit"] = (
+        int(st.session_state.get("project_switcher_limit", 20)) + 20
+    )
+    st.rerun(scope="app")
+
+
+def _request_project_switch(target_id):
+    """切换器条目回调：脏时先弹三选确认，干净时直接加载。"""
+    target_id = str(target_id)
+    if target_id == _current_project_id():
+        return
+    if _project_is_dirty():
+        st.session_state["project_switch_candidate"] = target_id
+        _invalidate_project_switcher_popover()
+    else:
+        payload = _load_task_restore_payload(target_id)
+        if payload:
+            st.session_state["task_restore_payload"] = payload
+        else:
+            st.session_state["project_switch_failed"] = True
+    st.rerun(scope="app")
+
+
+def _request_new_project():
+    if _project_is_dirty():
+        st.session_state["project_switch_candidate"] = "__new__"
+        _invalidate_project_switcher_popover()
+    else:
+        st.session_state["project_new_blank_requested"] = True
+    st.rerun(scope="app")
+
+
+def _invalidate_project_switcher_popover():
+    """三选弹窗出现前让 popover 换 key 重挂载（新实例默认关闭）。
+
+    Streamlit popover 点内部按钮后不会自动关闭，且其浮层 portal 在
+    rerun 后重新 append，会盖住后开的 st.dialog 拦截点击。"""
+    st.session_state["project_switcher_epoch"] = (
+        int(st.session_state.get("project_switcher_epoch", 0)) + 1
+    )
+
+
+def _request_save_as_new():
+    """锁定横幅的“另存为新任务”：克隆当前参数到新草稿并改绑解锁。"""
+    params_dict = dict(st.session_state.get("project_params_last_full") or {})
+    task_id = str(uuid4())
+    if _write_project_params(task_id, params_dict):
+        _bind_current_project(task_id, params_dict)
+        st.session_state["project_baseline_pending"] = True
+        st.session_state["project_save_as_new_done"] = True
+    else:
+        st.session_state["project_save_as_new_failed"] = True
+    st.rerun(scope="app")
+
+
+def _apply_pending_project_switch():
+    """在渲染任何控件前执行切换决议：保存/放弃当前修改后加载目标。"""
+    action = st.session_state.pop("project_switch_action", None)
+    candidate = st.session_state.get("project_switch_candidate")
+    if st.session_state.pop("project_new_blank_requested", False):
+        action, candidate = "discard", "__new__"
+    if action is None:
+        # 候选保留：本 run 还要渲染三选确认弹窗。
+        return
+    st.session_state.pop("project_switch_candidate", None)
+    if action == "cancel":
+        return
+    if action == "save":
+        last_full = st.session_state.get("project_params_last_full")
+        if last_full:
+            task_id = _current_project_id() or str(uuid4())
+            _write_project_params(task_id, last_full)
+    if candidate == "__new__":
+        st.session_state.pop("current_project_id", None)
+        st.session_state.pop("current_project_subject", None)
+        st.session_state.pop("project_params_baseline", None)
+        _apply_restored_params(VideoParams(video_subject="").model_dump(mode="json"))
+        st.session_state["project_baseline_pending"] = True
+        st.session_state["project_new_blank_done"] = True
+    elif candidate:
+        payload = _load_task_restore_payload(candidate)
+        if payload:
+            st.session_state["task_restore_payload"] = payload
+        else:
+            st.session_state["project_switch_failed"] = True
+
+
+def _dismiss_project_switch_dialog():
+    st.session_state.pop("project_switch_candidate", None)
+    st.session_state.pop("project_switch_action", None)
+
+
+@st.dialog(
+    tr("Project Switch Title"),
+    width="small",
+    on_dismiss=_dismiss_project_switch_dialog,
+)
+def _render_project_switch_dialog(candidate):
+    st.warning(tr("Project Switch Dirty Warning"))
+    if candidate == "__new__":
+        st.caption(tr("New Blank Project"))
+    else:
+        payload = _load_task_restore_payload(candidate)
+        st.caption(
+            _format_task_subject(
+                (payload or {}).get("subject") or candidate, max_length=60
+            )
+        )
+    save_col, discard_col, cancel_col = st.columns(3)
+    if save_col.button(
+        tr("Save And Switch"),
+        key="project_switch_save",
+        type="primary",
+        use_container_width=True,
+    ):
+        st.session_state["project_switch_action"] = "save"
+        st.rerun(scope="app")
+    if discard_col.button(
+        tr("Discard And Switch"),
+        key="project_switch_discard",
+        use_container_width=True,
+    ):
+        st.session_state["project_switch_action"] = "discard"
+        st.rerun(scope="app")
+    if cancel_col.button(
+        tr("Cancel Switch"),
+        key="project_switch_cancel",
+        use_container_width=True,
+    ):
+        st.session_state["project_switch_action"] = "cancel"
+        st.rerun(scope="app")
+
+
+def _render_project_lock_banner():
+    """已完成项目的锁定横幅：说明原因并给出唯一的解锁出口。"""
+    with st.container(key="project_lock_banner"):
+        st.warning(tr("Project Locked Banner"), icon=":material/lock:")
+        st.button(
+            tr("Save As New Task"),
+            key="project_save_as_new_button",
+            icon=":material/content_copy:",
+            type="primary",
+            width="stretch",
+            on_click=_request_save_as_new,
+        )
+
+
+def _render_project_switcher():
+    """顶栏项目切换器：当前项目名 + 脏标记 + 分批项目列表。"""
+    current_id = _current_project_id()
+    dirty = _project_dirty_display()
+    if current_id:
+        subject = st.session_state.get("current_project_subject") or ""
+    else:
+        # 未绑定时展示即将被保存的文案主题；绑定后改用存盘时的主题。
+        subject = str(st.session_state.get("video_subject") or "")
+    label = _format_task_subject(subject, max_length=18) if subject else tr("Unsaved Project")
+    if dirty:
+        label += " ●"
+    pop_key = "project_switcher"
+    if st.session_state.get("project_switch_candidate"):
+        # 弹窗打开期间用一次性 key，popover 重挂载为关闭态，
+        # 避免残留浮层盖住三选确认弹窗。
+        pop_key = f"project_switcher_{st.session_state.get('project_switcher_epoch', 0)}"
+    with st.popover(
+        label,
+        icon=":material/lock:" if _project_is_locked() else ":material/folder_open:",
+        key=pop_key,
+        help=tr("Project Dirty Help") if dirty else tr("Project Switcher Help"),
+    ):
+        st.caption(tr("Project Switcher Help"))
+        st.button(
+            tr("Save Current Project"),
+            key="project_save_button",
+            icon=":material/save:",
+            width="stretch",
+            on_click=_request_project_save,
+        )
+        st.button(
+            tr("New Blank Project"),
+            key="project_new_button",
+            icon=":material/add:",
+            width="stretch",
+            on_click=_request_new_project,
+        )
+        st.divider()
+        limit = int(st.session_state.get("project_switcher_limit", 20))
+        entries = _project_switcher_entries(limit)
+        if not entries:
+            st.caption(tr("No Saved Projects"))
+        for task in entries:
+            is_current = task["task_id"] == current_id
+            state_label = _task_state_label(task["state"], bool(task["video_file"]))
+            st.button(
+                _format_task_subject(task["subject"], max_length=24),
+                key=f"project_switch_{task['task_id']}",
+                icon=":material/check:" if is_current else ":material/description:",
+                width="stretch",
+                help=f"{state_label} · {_format_task_time(task['mtime'])}",
+                on_click=_request_project_switch,
+                args=(task["task_id"],),
+                disabled=is_current,
+            )
+        if len(entries) >= limit:
+            st.button(
+                tr("Load More Projects"),
+                key="project_switcher_more",
+                icon=":material/expand_more:",
+                width="stretch",
+                on_click=_load_more_projects,
+            )
 
 
 def _infer_tts_server_from_voice(voice_name):
@@ -1810,6 +2272,9 @@ def _apply_pending_task_restore():
         return False
 
     _apply_restored_params(payload["params"])
+    # 恢复历史任务即把会话绑定到该项目；基线在 run 末尾按回填后的控件值重置。
+    _bind_current_project(payload["task_id"], payload["params"])
+    st.session_state["project_baseline_pending"] = True
     st.session_state["task_restore_succeeded"] = True
     logger.info(f"restored task configuration: {payload['task_id']}")
     return True
@@ -2105,8 +2570,7 @@ def _render_top_bar():
             gap="small",
             width="stretch",
         ):
-            _render_task_manager_entry()
-
+            _render_project_switcher()
             st.button(
                 tr("Settings"),
                 key="open_settings_dialog_button",
@@ -3531,6 +3995,10 @@ def _apply_pending_settings_preset():
     preset_params = st.session_state.pop("settings_preset_payload", None)
     if not preset_params:
         return False
+    if _project_is_locked():
+        # 锁定项目的参数不允许被预设静默覆盖；提示后丢弃本次导入。
+        st.toast(tr("Project Locked Preset Refused"), icon="🔒")
+        return False
 
     _apply_restored_params(preset_params)
     logger.info("applied imported settings preset")
@@ -3577,6 +4045,387 @@ def _render_settings_transfer(params):
 
         st.session_state["settings_preset_payload"] = preset_params
         st.rerun()
+
+
+def _preset_library_dir():
+    return os.path.join(utils.storage_dir(), PRESET_LIBRARY_DIR_NAME)
+
+
+def _preset_library_path(preset_id):
+    """预设库文件路径；非法或越界 ID 返回 None（与项目快照同一防线）。"""
+    try:
+        normalized_id = str(UUID(str(preset_id)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    library_root = os.path.realpath(_preset_library_dir())
+    preset_path = os.path.realpath(
+        os.path.join(library_root, f"{normalized_id}.json")
+    )
+    try:
+        if os.path.commonpath([library_root, preset_path]) != library_root:
+            return None
+    except ValueError:
+        return None
+    return preset_path
+
+
+def _write_library_preset(preset_id, name, params_dict):
+    """原子写入具名预设；文件体复用设置预设 schema，额外携带名称与时间。"""
+    preset_file = _preset_library_path(preset_id)
+    if not preset_file:
+        return False
+    payload = _build_settings_preset_payload(params_dict, config.project_version)
+    payload["name"] = str(name)
+    payload["saved_at"] = datetime.now().isoformat(timespec="seconds")
+    try:
+        os.makedirs(os.path.dirname(preset_file), exist_ok=True)
+        tmp_file = preset_file + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, preset_file)
+        return True
+    except OSError as e:
+        logger.warning(f"failed to write library preset: {preset_id}, {e}")
+        return False
+
+
+def _read_library_preset(preset_id):
+    """读取并校验库预设；损坏或 schema 不符的条目跳过，不拖垮整页。"""
+    preset_file = _preset_library_path(preset_id)
+    if not preset_file or not os.path.isfile(preset_file):
+        return None
+    try:
+        with open(preset_file, "rb") as f:
+            raw_bytes = f.read()
+        meta = _load_transfer_payload(
+            raw_bytes, SETTINGS_PRESET_SCHEMA, SETTINGS_PRESET_VERSION
+        )
+        params_dict = _parse_settings_preset(raw_bytes)
+    except Exception as e:
+        logger.warning(f"skip unreadable library preset: {preset_id}, {e}")
+        return None
+    return {
+        "preset_id": str(preset_id),
+        "name": str(meta.get("name") or preset_id),
+        "saved_at": str(meta.get("saved_at") or ""),
+        "params": params_dict,
+        "builtin": False,
+    }
+
+
+def _scan_library_presets():
+    """按最近保存排序扫描用户预设库。"""
+    library_root = _preset_library_dir()
+    if not os.path.isdir(library_root):
+        return []
+    entries = []
+    try:
+        with os.scandir(library_root) as files:
+            for entry in files:
+                if not entry.name.endswith(".json") or not entry.is_file(
+                    follow_symlinks=False
+                ):
+                    continue
+                preset = _read_library_preset(entry.name[:-5])
+                if preset:
+                    entries.append(
+                        (entry.stat(follow_symlinks=False).st_mtime, preset)
+                    )
+    except OSError as e:
+        logger.warning(f"failed to scan preset library: {library_root}, {e}")
+        return []
+    entries.sort(key=lambda item: item[0], reverse=True)
+    return [preset for _, preset in entries]
+
+
+def _builtin_preset_entries():
+    """内置预设同样走 VideoParams 校验，保证与控件回填链路一致。"""
+    entries = []
+    for preset_id, name_key, overrides in BUILTIN_PRESETS:
+        params_dict = VideoParams(video_subject="", **overrides).model_dump(
+            mode="json"
+        )
+        entries.append(
+            {
+                "preset_id": preset_id,
+                "name": tr(name_key),
+                "saved_at": "",
+                "params": params_dict,
+                "builtin": True,
+            }
+        )
+    return entries
+
+
+def _find_preset_entry(preset_id):
+    preset_id = str(preset_id)
+    if preset_id.startswith("builtin-"):
+        for entry in _builtin_preset_entries():
+            if entry["preset_id"] == preset_id:
+                return entry
+        return None
+    return _read_library_preset(preset_id)
+
+
+def _save_current_as_preset():
+    """把当前创作参数存为具名预设；不改变项目绑定与脏状态。"""
+    name = str(st.session_state.get("preset_name_input") or "").strip()
+    if not name:
+        st.session_state["preset_name_missing"] = True
+        return
+    params_dict = dict(st.session_state.get("project_params_last_full") or {})
+    if not params_dict:
+        params_dict = VideoParams(video_subject="").model_dump(mode="json")
+    if _write_library_preset(str(uuid4()), name[:60], params_dict):
+        st.session_state["preset_saved_name"] = name[:60]
+        st.session_state["preset_name_input"] = ""
+    else:
+        st.session_state["preset_save_failed"] = True
+
+
+def _request_apply_preset(preset_id):
+    """一键应用：锁定时拒绝，脏时先弹三选确认，干净时直接回填。"""
+    if _project_is_locked():
+        st.session_state["preset_apply_refused"] = True
+        return
+    if _project_is_dirty():
+        st.session_state["preset_apply_candidate"] = str(preset_id)
+        return
+    entry = _find_preset_entry(preset_id)
+    if entry:
+        st.session_state["settings_preset_payload"] = entry["params"]
+        st.session_state["preset_applied_name"] = entry["name"]
+    else:
+        st.session_state["preset_apply_failed"] = True
+
+
+def _apply_pending_preset_apply():
+    """在渲染任何控件前执行预设应用决议：保存/放弃当前修改后回填。"""
+    action = st.session_state.pop("preset_apply_action", None)
+    candidate = st.session_state.get("preset_apply_candidate")
+    if action is None:
+        # 候选保留：本 run 还要渲染三选确认弹窗。
+        return
+    st.session_state.pop("preset_apply_candidate", None)
+    if action == "cancel":
+        return
+    if action == "save":
+        last_full = st.session_state.get("project_params_last_full")
+        if last_full:
+            task_id = _current_project_id() or str(uuid4())
+            _write_project_params(task_id, last_full)
+    entry = _find_preset_entry(candidate)
+    if entry:
+        st.session_state["settings_preset_payload"] = entry["params"]
+        st.session_state["preset_applied_name"] = entry["name"]
+    else:
+        st.session_state["preset_apply_failed"] = True
+
+
+def _dismiss_preset_apply_dialog():
+    st.session_state.pop("preset_apply_candidate", None)
+    st.session_state.pop("preset_apply_action", None)
+
+
+@st.dialog(
+    tr("Preset Apply Title"),
+    width="small",
+    on_dismiss=_dismiss_preset_apply_dialog,
+)
+def _render_preset_apply_dialog(candidate):
+    st.warning(tr("Preset Apply Dirty Warning"))
+    entry = _find_preset_entry(candidate)
+    st.caption((entry or {}).get("name") or candidate)
+    save_col, discard_col, cancel_col = st.columns(3)
+    if save_col.button(
+        tr("Save And Apply"),
+        key="preset_apply_save",
+        type="primary",
+        use_container_width=True,
+    ):
+        st.session_state["preset_apply_action"] = "save"
+        st.rerun(scope="app")
+    if discard_col.button(
+        tr("Discard And Apply"),
+        key="preset_apply_discard",
+        use_container_width=True,
+    ):
+        st.session_state["preset_apply_action"] = "discard"
+        st.rerun(scope="app")
+    if cancel_col.button(
+        tr("Cancel Switch"),
+        key="preset_apply_cancel",
+        use_container_width=True,
+    ):
+        st.session_state["preset_apply_action"] = "cancel"
+        st.rerun(scope="app")
+
+
+def _request_delete_preset(preset_id):
+    st.session_state["preset_delete_candidate"] = str(preset_id)
+
+
+def _dismiss_preset_delete_dialog():
+    st.session_state.pop("preset_delete_candidate", None)
+
+
+@st.dialog(
+    tr("Preset Delete Title"),
+    width="small",
+    on_dismiss=_dismiss_preset_delete_dialog,
+)
+def _render_preset_delete_dialog(candidate):
+    entry = _read_library_preset(candidate)
+    name = (entry or {}).get("name") or candidate
+    st.warning(tr("Preset Delete Warning").format(name=name))
+    confirm_col, cancel_col = st.columns(2)
+    if confirm_col.button(
+        tr("Confirm Delete"),
+        key="preset_delete_confirm",
+        type="primary",
+        icon=":material/delete:",
+        use_container_width=True,
+    ):
+        preset_file = _preset_library_path(candidate)
+        try:
+            if not preset_file:
+                raise OSError("invalid preset id")
+            os.remove(preset_file)
+        except OSError as e:
+            logger.warning(f"failed to delete library preset: {candidate}, {e}")
+            st.session_state["preset_delete_failed"] = True
+        else:
+            st.session_state["preset_deleted_name"] = name
+        st.session_state.pop("preset_delete_candidate", None)
+        st.rerun(scope="app")
+    if cancel_col.button(
+        tr("Cancel Switch"),
+        key="preset_delete_cancel",
+        use_container_width=True,
+    ):
+        st.session_state.pop("preset_delete_candidate", None)
+        st.rerun(scope="app")
+
+
+def _render_presets_page():
+    """预设库一级页：存当前参数、导入导出、一键应用与删除。"""
+    st.caption(tr("Preset Library Help"))
+    with st.container(
+        key="preset_save_bar", horizontal=True, vertical_alignment="center"
+    ):
+        st.text_input(
+            tr("Preset Name Input"),
+            key="preset_name_input",
+            placeholder=tr("Preset Name Placeholder"),
+            label_visibility="collapsed",
+            max_chars=60,
+        )
+        st.button(
+            tr("Save Current As Preset"),
+            key="preset_save_current_button",
+            icon=":material/save:",
+            type="primary",
+            on_click=_save_current_as_preset,
+            help=tr("Save Current As Preset"),
+        )
+    if st.session_state.pop("preset_name_missing", False):
+        st.warning(tr("Preset Name Missing"))
+    saved_name = st.session_state.pop("preset_saved_name", None)
+    if saved_name:
+        st.success(tr("Preset Saved").format(name=saved_name))
+    if st.session_state.pop("preset_save_failed", False):
+        st.error(tr("Preset Save Failed"))
+    imported_name = st.session_state.pop("preset_imported_name", None)
+    if imported_name:
+        st.success(tr("Preset Import Saved").format(name=imported_name))
+    if st.session_state.pop("preset_import_failed", False):
+        st.error(tr("Settings Preset Import Failed"))
+
+    uploaded_preset = st.file_uploader(
+        tr("Import Preset To Library"),
+        type=["json"],
+        key="preset_library_uploader",
+    )
+    if uploaded_preset is not None:
+        # 与设置导入同样的文件标识去重：避免后续 rerun 反复入库。
+        if st.session_state.get("preset_library_file_id") != uploaded_preset.file_id:
+            st.session_state["preset_library_file_id"] = uploaded_preset.file_id
+            try:
+                raw_bytes = uploaded_preset.getvalue()
+                meta = _load_transfer_payload(
+                    raw_bytes, SETTINGS_PRESET_SCHEMA, SETTINGS_PRESET_VERSION
+                )
+                params_dict = _parse_settings_preset(raw_bytes)
+            except Exception as e:
+                logger.warning(f"failed to import library preset: {e}")
+                st.session_state["preset_import_failed"] = True
+            else:
+                name = str(
+                    meta.get("name") or Path(uploaded_preset.name).stem or ""
+                ).strip()[:60] or tr("Preset Library")
+                if _write_library_preset(str(uuid4()), name, params_dict):
+                    st.session_state["preset_imported_name"] = name
+                else:
+                    st.session_state["preset_import_failed"] = True
+            st.rerun(scope="app")
+
+    st.divider()
+    library_entries = _scan_library_presets()
+    for entry in _builtin_preset_entries() + library_entries:
+        preset_id = entry["preset_id"]
+        with st.container(key=f"preset_row_{preset_id}", border=True):
+            st.markdown(f"**{_format_task_subject(entry['name'], max_length=60)}**")
+            caption_bits = []
+            subject = str(entry["params"].get("video_subject") or "")
+            if subject:
+                caption_bits.append(_format_task_subject(subject, max_length=30))
+            if entry["saved_at"]:
+                caption_bits.append(entry["saved_at"].replace("T", " "))
+            if entry["builtin"]:
+                caption_bits.append(tr("Builtin Preset Tag"))
+            if caption_bits:
+                st.caption(" · ".join(caption_bits))
+            with st.container(
+                key=f"preset_actions_{preset_id}", horizontal=True, gap="small"
+            ):
+                st.button(
+                    tr("Apply Preset"),
+                    key=f"preset_apply_{preset_id}",
+                    icon=":material/bolt:",
+                    type="primary",
+                    on_click=_request_apply_preset,
+                    args=(preset_id,),
+                    width="stretch",
+                    help=tr("Apply Preset"),
+                )
+                export_payload = _build_settings_preset_payload(
+                    entry["params"], config.project_version
+                )
+                export_payload["name"] = entry["name"]
+                st.download_button(
+                    tr("Export Preset"),
+                    data=json.dumps(
+                        export_payload, ensure_ascii=False, indent=2
+                    ).encode("utf-8"),
+                    file_name=f"moneyprinterturbo-preset-{preset_id}.json",
+                    mime="application/json",
+                    key=f"preset_export_{preset_id}",
+                    icon=":material/download:",
+                    use_container_width=True,
+                    help=tr("Export Preset"),
+                )
+                if not entry["builtin"]:
+                    st.button(
+                        tr("Delete Preset"),
+                        key=f"preset_delete_{preset_id}",
+                        icon=":material/delete:",
+                        on_click=_request_delete_preset,
+                        args=(preset_id,),
+                        width="stretch",
+                        help=tr("Delete Preset"),
+                    )
+    if not library_entries:
+        st.caption(tr("Preset Empty"))
 
 
 def _render_key_backup_settings(panel):
@@ -4733,6 +5582,680 @@ def _render_social_publish_settings(app_settings):
                 )
 
 
+def _render_publish_settings_body(app_settings):
+    """国内发布 + Upload-Post 设置体；设置弹窗与一级发布渠道页共用。
+
+    注意：这里必须是普通函数——一级页内联调用；若带 @st.dialog
+    装饰器，页面切换会弹出模态框而不是渲染页面内容。
+    """
+    _render_social_publish_settings(app_settings)
+    with st.expander(tr("Overseas Platforms Optional UploadPost")):
+        st.caption(tr("Upload-Post Free Tier Note"))
+        st.write(
+            tr(
+                "Automatically publish generated videos to social media using upload-post.com"
+            )
+        )
+        st.info(
+            tr("Upload-Post Setup Guide").format(
+                api_keys_url=UPLOAD_POST_API_KEYS_URL,
+                manage_users_url=UPLOAD_POST_MANAGE_USERS_URL,
+            )
+        )
+
+        is_enabled = app_settings.get("upload_post_enabled", False)
+        is_auto = app_settings.get("upload_post_auto_upload", False)
+
+        # 两个键各自独立:enabled 允许外部流程调用 Upload-Post,
+        # auto_upload 才决定渲染完成后是否自动发布。合并成一个复选框会在
+        # 两键不一致的配置下,仅打开设置对话框就把 enabled 改写为 False。
+        upload_post_enabled = st.checkbox(
+            tr("Enable Upload-Post Integration"),
+            value=is_enabled,
+            key="upload_post_enabled_checkbox",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "upload_post_enabled",
+                "upload_post_enabled_checkbox",
+                lambda value: value,
+            ),
+        )
+        if upload_post_enabled != is_enabled:
+            _set_runtime_config(
+                "app", "upload_post_enabled", upload_post_enabled
+            )
+
+        upload_post_auto_upload = st.checkbox(
+            tr("Enable Auto-Publish"),
+            value=is_auto,
+            key="upload_post_auto_upload_checkbox",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "upload_post_auto_upload",
+                "upload_post_auto_upload_checkbox",
+                lambda value: value,
+            ),
+        )
+        if upload_post_auto_upload != is_auto:
+            _set_runtime_config(
+                "app", "upload_post_auto_upload", upload_post_auto_upload
+            )
+
+        upload_post_api_key = st.text_input(
+            tr("Upload-Post API Key"),
+            value=app_settings.get("upload_post_api_key", ""),
+            type="password",
+            help=tr("Upload-Post API Key Help").format(
+                api_keys_url=UPLOAD_POST_API_KEYS_URL
+            ),
+            key="upload_post_api_key_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "upload_post_api_key",
+                "upload_post_api_key_input",
+                lambda value: value,
+            ),
+        )
+        if upload_post_api_key != app_settings.get("upload_post_api_key", ""):
+            _set_runtime_config(
+                "app", "upload_post_api_key", upload_post_api_key
+            )
+
+        upload_post_username = st.text_input(
+            tr("Upload-Post Profile Username"),
+            value=app_settings.get("upload_post_username", ""),
+            help=tr("Upload-Post Profile Username Help").format(
+                manage_users_url=UPLOAD_POST_MANAGE_USERS_URL
+            ),
+            key="upload_post_username_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "upload_post_username",
+                "upload_post_username_input",
+                lambda value: value,
+            ),
+        )
+        if upload_post_username != app_settings.get("upload_post_username", ""):
+            _set_runtime_config(
+                "app", "upload_post_username", upload_post_username
+            )
+
+        upload_post_platforms = st.multiselect(
+            tr("Platforms"),
+            options=["tiktok", "instagram", "youtube"],
+            default=app_settings.get(
+                "upload_post_platforms", ["tiktok", "instagram"]
+            ),
+            help="Select platforms to publish to",
+            key="upload_post_platforms_multiselect",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                "upload_post_platforms",
+                "upload_post_platforms_multiselect",
+                lambda value: value,
+            ),
+        )
+        if upload_post_platforms != app_settings.get(
+            "upload_post_platforms", ["tiktok", "instagram"]
+        ):
+            _set_runtime_config(
+                "app", "upload_post_platforms", upload_post_platforms
+            )
+
+        if "youtube" in upload_post_platforms:
+            yt_status_options = ["public", "private", "unlisted"]
+            yt_saved = app_settings.get(
+                "upload_post_youtube_privacy_status", "public"
+            )
+            if yt_saved not in yt_status_options:
+                yt_saved = "public"
+            upload_post_youtube_privacy_status = st.selectbox(
+                tr("YouTube Privacy Status"),
+                options=yt_status_options,
+                index=yt_status_options.index(yt_saved),
+                key="upload_post_youtube_privacy_status_selectbox",
+                on_change=_save_settings_change,
+                args=(
+                    "app",
+                    "upload_post_youtube_privacy_status",
+                    "upload_post_youtube_privacy_status_selectbox",
+                    lambda value: value,
+                ),
+            )
+            if upload_post_youtube_privacy_status != app_settings.get(
+                "upload_post_youtube_privacy_status", "public"
+            ):
+                _set_runtime_config(
+                    "app",
+                    "upload_post_youtube_privacy_status",
+                    upload_post_youtube_privacy_status,
+                )
+
+            # 受众声明只影响 YouTube 发布，不改变生成内容或其它平台的请求。
+            # 使用真正的布尔选项，避免把展示文字或字符串当成 API 参数。
+            saved_audience = app_settings.get(
+                "upload_post_youtube_made_for_kids", False
+            )
+            audience_labels = {
+                False: tr("Not Made for Kids"),
+                True: tr("Made for Kids"),
+            }
+            made_for_kids = st.selectbox(
+                tr("YouTube Audience"),
+                options=[False, True],
+                # 非法配置保持未选择，不在打开设置时擅自改成非儿童声明。
+                index=int(saved_audience)
+                if isinstance(saved_audience, bool)
+                else None,
+                format_func=audience_labels.get,
+                help=tr("YouTube Audience Help"),
+                key="upload_post_youtube_made_for_kids_selectbox",
+                on_change=_save_settings_change,
+                args=(
+                    "app",
+                    "upload_post_youtube_made_for_kids",
+                    "upload_post_youtube_made_for_kids_selectbox",
+                    lambda value: value,
+                ),
+            )
+            if isinstance(made_for_kids, bool):
+                _set_runtime_config(
+                    "app", "upload_post_youtube_made_for_kids", made_for_kids
+                )
+
+
+def _render_interface_settings_body(ui_settings):
+    """界面设置体（日志开关 + 诊断日志）；弹窗与设置页共用。"""
+    hide_log = st.checkbox(
+        tr("Hide Log"),
+        value=ui_settings.get("hide_log", False),
+        key="hide_log_checkbox",
+        on_change=_save_settings_change,
+        args=("ui", "hide_log", "hide_log_checkbox", lambda value: value),
+    )
+    _set_runtime_config("ui", "hide_log", hide_log)
+    _render_logging_settings()
+
+
+def _render_llm_settings_body(app_settings, is_open=True):
+    """大模型设置体；设置弹窗与一级大模型页共用。"""
+    # 下拉顺序、默认 label 和稳定 provider id 全部来自 Registry；locale
+    # 只覆盖展示文案，不再让 Main.py 维护第二份 Provider 列表。
+    llm_provider_ids = [
+        provider.provider_id for provider in LLM_PROVIDER_REGISTRY
+    ]
+    llm_provider_labels = {
+        provider.provider_id: get_llm_provider_label(provider)
+        for provider in LLM_PROVIDER_REGISTRY
+    }
+    saved_llm_provider = app_settings.get(
+        "llm_provider", DEFAULT_LLM_PROVIDER_ID
+    ).lower()
+    if saved_llm_provider not in llm_provider_ids:
+        saved_llm_provider = DEFAULT_LLM_PROVIDER_ID
+
+    llm_provider = stable_selectbox(
+        tr("LLM Provider"),
+        options=llm_provider_ids,
+        default_value=saved_llm_provider,
+        key="llm_provider_select",
+        format_func=lambda provider_id: llm_provider_labels[provider_id],
+        on_change=_save_settings_change,
+        args=(
+            "app",
+            "llm_provider",
+            localized_widget_key("llm_provider_select"),
+            lambda value: value,
+        ),
+    )
+    # 配置表单和 Provider 说明并排展示，减少长说明在窄列中的换行，
+    # 同时充分利用基础设置面板的横向空间。
+    llm_form_panel, llm_help_panel = st.columns(
+        [0.9, 1.1],
+        gap="large",
+        vertical_alignment="top",
+    )
+    llm_helper = llm_help_panel.container()
+    _set_runtime_config("app", "llm_provider", llm_provider)
+    llm_provider_spec = get_llm_provider(llm_provider)
+    if llm_provider_spec is None:
+        # 正常情况下下拉选项全部来自 Registry，不会进入该分支；保留
+        # 明确错误用于诊断损坏的 session state 或后续接入遗漏。
+        raise RuntimeError(f"unsupported llm provider: {llm_provider}")
+
+    llm_api_key = app_settings.get(
+        llm_provider_spec.config_key("api_key"), ""
+    )
+    configured_llm_base_url = app_settings.get(
+        llm_provider_spec.config_key("base_url"), ""
+    )
+    llm_default_base_url = llm_provider_spec.effective_default_base_url
+    llm_base_url = configured_llm_base_url or llm_default_base_url
+    llm_model_name = llm_provider_spec.resolve_model_name(
+        app_settings.get(llm_provider_spec.config_key("model_name"), "")
+    )
+
+    provider_tip_context = {}
+    selected_service_endpoint = None
+    if llm_provider_spec.service_endpoints:
+        # Kimi 等 Provider 的中国站和国际站使用不同账号体系。只让用户
+        # 选择服务区域，再由 Registry 同步 API 申请入口和 Base URL，
+        # 避免手工组合错误。已有空 Base URL 配置继续沿用中国站，只有
+        # 尚未填写 Key 的全新配置才根据界面语言推荐对应入口。
+        selected_service_endpoint = (
+            llm_provider_spec.select_service_endpoint(
+                configured_llm_base_url,
+                has_api_key=bool(str(llm_api_key).strip()),
+                prefer_international=(
+                    st.session_state.get("ui_language", "en") != "zh"
+                ),
+            )
+        )
+        endpoint_options = [
+            endpoint.endpoint_id
+            for endpoint in llm_provider_spec.service_endpoints
+        ] + [CUSTOM_LLM_ENDPOINT_ID]
+        default_endpoint_id = (
+            selected_service_endpoint.endpoint_id
+            if selected_service_endpoint
+            else CUSTOM_LLM_ENDPOINT_ID
+        )
+        endpoint_labels = {
+            endpoint.endpoint_id: (
+                tr_optional(
+                    llm_provider_spec.endpoint_label_key(
+                        endpoint.endpoint_id
+                    ),
+                    fallback_language="en",
+                )
+                or endpoint.default_label
+            )
+            for endpoint in llm_provider_spec.service_endpoints
+        }
+        endpoint_labels[CUSTOM_LLM_ENDPOINT_ID] = (
+            tr_optional("Custom API Endpoint", fallback_language="en")
+            or "Custom API Endpoint"
+        )
+        with llm_form_panel:
+            selected_endpoint_id = stable_selectbox(
+                tr_optional(
+                    llm_provider_spec.endpoint_selector_label_key,
+                    fallback_language="en",
+                )
+                or tr("API Platform"),
+                options=endpoint_options,
+                default_value=default_endpoint_id,
+                key=f"{llm_provider}_service_endpoint_select",
+                on_change=_save_settings_endpoint,
+                args=(
+                    llm_provider_spec,
+                    localized_widget_key(
+                        f"{llm_provider}_service_endpoint_select"
+                    ),
+                ),
+                format_func=lambda endpoint_id: endpoint_labels[
+                    endpoint_id
+                ],
+                help=(
+                    tr_optional(
+                        llm_provider_spec.endpoint_selector_help_key,
+                        fallback_language="en",
+                    )
+                    or None
+                ),
+            )
+        selected_service_endpoint = next(
+            (
+                endpoint
+                for endpoint in llm_provider_spec.service_endpoints
+                if endpoint.endpoint_id == selected_endpoint_id
+            ),
+            None,
+        )
+        if selected_service_endpoint:
+            llm_base_url = selected_service_endpoint.base_url
+            provider_tip_context.update(
+                {
+                    "api_key_url": selected_service_endpoint.api_key_url,
+                    "default_base_url": selected_service_endpoint.base_url,
+                    "model_docs_url": selected_service_endpoint.model_docs_url,
+                }
+            )
+        else:
+            # 自定义模式只保留用户明确保存的地址，不将某个标准区域伪装
+            # 成自定义值。输入为空时配置不会持久化，下一次仍回到兼容默认。
+            llm_base_url = str(configured_llm_base_url or "").strip()
+
+    if llm_provider == "ollama":
+        llm_default_base_url = config.get_default_ollama_base_url()
+        if not llm_base_url:
+            llm_base_url = llm_default_base_url
+        docker_hint = ""
+        if config.is_running_in_container():
+            docker_hint = tr_optional(
+                "llm_provider_tips.ollama.docker_hint",
+                fallback_language="en",
+            )
+        provider_tip_context["docker_hint"] = docker_hint
+
+    tips = get_llm_provider_tips(llm_provider, **provider_tip_context)
+    if tips:
+        with llm_helper:
+            st.info(tips)
+
+    st_llm_api_key = llm_api_key
+    if llm_provider_spec.show_api_key:
+        st_llm_api_key = llm_form_panel.text_input(
+            tr("API Key"),
+            value=llm_api_key,
+            type="password",
+            key=f"{llm_provider}_api_key_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                llm_provider_spec.config_key("api_key"),
+                f"{llm_provider}_api_key_input",
+                lambda value: value,
+            ),
+        )
+
+    st_llm_base_url = llm_base_url
+    if llm_provider_spec.show_base_url:
+        st_llm_base_url = llm_form_panel.text_input(
+            tr("Base Url"),
+            value=llm_base_url,
+            key=(
+                f"{llm_provider}_base_url_"
+                f"{selected_service_endpoint.endpoint_id}_input"
+                if selected_service_endpoint
+                else f"{llm_provider}_base_url_custom_input"
+            ),
+            disabled=selected_service_endpoint is not None,
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                llm_provider_spec.config_key("base_url"),
+                f"{llm_provider}_base_url_"
+                f"{selected_service_endpoint.endpoint_id}_input"
+                if selected_service_endpoint
+                else f"{llm_provider}_base_url_custom_input",
+                lambda value, llm_default_base_url=llm_default_base_url: (
+                    normalize_provider_override(value, llm_default_base_url)
+                ),
+            ),
+        )
+    st_llm_model_name = ""
+    if llm_provider == "openai_codex":
+        from webui.codex_models import render_codex_model_selector
+
+        with llm_form_panel:
+            st_llm_model_name = render_codex_model_selector(
+                llm_model_name,
+                tr,
+                on_change=lambda model, provider=llm_provider_spec: (
+                    _set_runtime_config(
+                        "app",
+                        provider.config_key("model_name"),
+                        normalize_provider_override(
+                            model, provider.default_model
+                        ),
+                    )
+                ),
+            )
+    elif llm_provider == "openai_chatgpt":
+        from webui.chatgpt_login import render_chatgpt_login
+        from webui.chatgpt_models import render_chatgpt_model_selector
+
+        with llm_form_panel:
+            if is_open:
+                # Keep the nested polling fragment's delta paths separate
+                # from the model selector and connection-test controls.
+                with st.container(key="chatgpt_login_panel"):
+                    render_chatgpt_login(tr)
+            st_llm_model_name = render_chatgpt_model_selector(
+                llm_model_name,
+                tr,
+                on_change=lambda model, provider=llm_provider_spec: (
+                    _set_runtime_config(
+                        "app",
+                        provider.config_key("model_name"),
+                        normalize_provider_override(
+                            model, provider.default_model
+                        ),
+                    )
+                ),
+            )
+    elif llm_provider == "groq":
+        effective_api_key = st_llm_api_key or llm_api_key
+        effective_base_url = st_llm_base_url or llm_base_url
+        groq_models = get_groq_model_ids(
+            api_key=effective_api_key,
+            base_url=effective_base_url,
+        )
+
+        if groq_models:
+            selected_index = 0
+            if llm_model_name in groq_models:
+                selected_index = groq_models.index(llm_model_name)
+
+            st_llm_model_name = llm_form_panel.selectbox(
+                tr("Model Name"),
+                options=groq_models,
+                index=selected_index,
+                key="groq_model_name_select",
+                on_change=_save_settings_change,
+                args=(
+                    "app",
+                    llm_provider_spec.config_key("model_name"),
+                    "groq_model_name_select",
+                    lambda value, llm_provider_spec=llm_provider_spec: (
+                        normalize_provider_override(
+                            value, llm_provider_spec.default_model
+                        )
+                    ),
+                ),
+            )
+        else:
+            st_llm_model_name = llm_form_panel.text_input(
+                tr("Model Name"),
+                value=llm_model_name,
+                key="groq_model_name_input",
+                on_change=_save_settings_change,
+                args=(
+                    "app",
+                    llm_provider_spec.config_key("model_name"),
+                    "groq_model_name_input",
+                    lambda value, llm_provider_spec=llm_provider_spec: (
+                        normalize_provider_override(
+                            value, llm_provider_spec.default_model
+                        )
+                    ),
+                ),
+            )
+            if effective_api_key:
+                llm_form_panel.caption(tr("Groq Model List Load Failed"))
+            else:
+                llm_form_panel.caption(
+                    tr("Groq API Key Required for Model List")
+                )
+    else:
+        st_llm_model_name = llm_form_panel.text_input(
+            tr("Model Name"),
+            value=llm_model_name,
+            key=f"{llm_provider}_model_name_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                llm_provider_spec.config_key("model_name"),
+                f"{llm_provider}_model_name_input",
+                lambda value, llm_provider_spec=llm_provider_spec: (
+                    normalize_provider_override(
+                        value, llm_provider_spec.default_model
+                    )
+                ),
+            ),
+        )
+    # 输入框展示 Registry 默认值，但配置只保存真实的用户覆盖值。
+    # 这样默认模型、Base URL 更新后，未自定义的用户能够自动跟随。
+    _set_runtime_config(
+        "app",
+        llm_provider_spec.config_key("api_key"),
+        st_llm_api_key,
+    )
+    _set_runtime_config(
+        "app",
+        llm_provider_spec.config_key("base_url"),
+        normalize_provider_override(
+            st_llm_base_url,
+            llm_default_base_url,
+        ),
+    )
+    _set_runtime_config(
+        "app",
+        llm_provider_spec.config_key("model_name"),
+        normalize_provider_override(
+            st_llm_model_name,
+            llm_provider_spec.default_model,
+        ),
+    )
+
+    # Provider 专用字段也由 Registry 声明。例如 Cloudflare AI Gateway
+    # 需要 Account ID；以后新增类似字段时无需再在 Main.py 增加判断。
+    for field in llm_provider_spec.extra_fields:
+        field_config_key = llm_provider_spec.config_key(field.config_suffix)
+        field_value = llm_form_panel.text_input(
+            tr(field.label_key),
+            value=(
+                app_settings.get(field_config_key, "")
+                or field.default_value
+            ),
+            type="password" if field.secret else "default",
+            key=f"{llm_provider}_{field.config_suffix}_input",
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                field_config_key,
+                f"{llm_provider}_{field.config_suffix}_input",
+                lambda value, field=field: normalize_provider_override(
+                    value, field.default_value
+                ),
+            ),
+        )
+        _set_runtime_config(
+            "app",
+            field_config_key,
+            normalize_provider_override(
+                field_value,
+                field.default_value,
+            ),
+        )
+
+    if llm_provider == "openai_codex" and is_open:
+        from webui.codex_login import render_codex_login
+
+        with llm_form_panel.container():
+            render_codex_login(tr)
+
+    if llm_provider == "kimi_code" and is_open:
+        from app.services import kimi_code_oauth
+        from webui.kimi_login import render_kimi_login
+
+        # 给嵌套 fragment 独立的容器，轮询重绘不占用后续控件的位置。
+        with llm_form_panel.container():
+            render_kimi_login(
+                kimi_code_oauth.resolve_region(st_llm_base_url), tr
+            )
+
+    if llm_form_panel.button(
+        tr("Test LLM Connection"),
+        key="test_llm_connection_button",
+        use_container_width=True,
+        type="secondary",
+        icon=":material/network_check:",
+    ):
+        with config.try_runtime_config_lock() as lock_acquired:
+            if not lock_acquired:
+                llm_form_panel.warning(tr("Runtime Configuration Busy"))
+            else:
+                with llm_form_panel.spinner(tr("Testing LLM Connection")):
+                    connection_ok, connection_error, connection_elapsed = (
+                        llm.test_connection()
+                    )
+
+        if not lock_acquired:
+            connection_ok = None
+        elif connection_ok:
+            llm_form_panel.success(
+                tr("LLM Connection Test Succeeded").format(
+                    provider=llm_provider_labels[llm_provider],
+                    model=st_llm_model_name or "-",
+                    elapsed=f"{connection_elapsed:.2f}",
+                )
+            )
+        else:
+            connection_error = format_llm_connection_error(
+                llm_provider,
+                st_llm_base_url,
+                connection_error,
+            )
+            llm_form_panel.error(
+                tr("LLM Connection Test Failed").format(
+                    error=connection_error
+                )
+            )
+
+
+def _render_material_settings_body(app_settings):
+    """素材来源 API 设置体；设置弹窗与一级素材来源页共用。"""
+    if "settings_material_group" not in st.session_state:
+        _initialize_material_navigation("material", app_settings)
+    sections = (
+        (
+            "ai_video",
+            "AI Video Generation APIs",
+            "AI Video Generation APIs Help",
+        ),
+        (
+            "ai_image",
+            "AI Image Generation APIs",
+            "AI Image Generation APIs Help",
+        ),
+        ("stock_video", "Stock Video APIs", "Stock Video APIs Help"),
+    )
+    remembered = dict(
+        st.session_state.get("settings_material_providers", {})
+    )
+    for group, title_key, help_key in sections:
+        providers = VIDEO_SOURCE_GROUPS[group]
+        default_provider = remembered.get(group, providers[0])
+        if default_provider not in providers:
+            default_provider = providers[0]
+        provider_key = localized_widget_key(
+            f"settings_material_provider_{group}_select"
+        )
+        st.session_state[provider_key] = default_provider
+        with st.container(border=True):
+            st.subheader(tr(title_key))
+            st.caption(tr(help_key))
+            provider = st.selectbox(
+                tr(title_key),
+                options=providers,
+                key=provider_key,
+                format_func=_material_provider_labels().get,
+                label_visibility="collapsed",
+                on_change=_remember_material_provider,
+                args=(group, provider_key),
+            )
+            remembered[group] = provider
+            _render_material_provider_settings(provider)
+    st.session_state["settings_material_providers"] = remembered
+
+
 @st.dialog(
     tr("Settings"),
     width="medium",
@@ -4792,198 +6315,12 @@ def _render_settings_dialog():
 
         with publish_config_panel:
             if publish_config_panel.open:
-                _render_social_publish_settings(app_settings)
-                with st.expander(tr("Overseas Platforms Optional UploadPost")):
-                    st.caption(tr("Upload-Post Free Tier Note"))
-                    st.write(
-                        tr(
-                            "Automatically publish generated videos to social media using upload-post.com"
-                        )
-                    )
-                    st.info(
-                        tr("Upload-Post Setup Guide").format(
-                            api_keys_url=UPLOAD_POST_API_KEYS_URL,
-                            manage_users_url=UPLOAD_POST_MANAGE_USERS_URL,
-                        )
-                    )
-
-                    is_enabled = app_settings.get("upload_post_enabled", False)
-                    is_auto = app_settings.get("upload_post_auto_upload", False)
-
-                    # 两个键各自独立:enabled 允许外部流程调用 Upload-Post,
-                    # auto_upload 才决定渲染完成后是否自动发布。合并成一个复选框会在
-                    # 两键不一致的配置下,仅打开设置对话框就把 enabled 改写为 False。
-                    upload_post_enabled = st.checkbox(
-                        tr("Enable Upload-Post Integration"),
-                        value=is_enabled,
-                        key="upload_post_enabled_checkbox",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            "upload_post_enabled",
-                            "upload_post_enabled_checkbox",
-                            lambda value: value,
-                        ),
-                    )
-                    if upload_post_enabled != is_enabled:
-                        _set_runtime_config(
-                            "app", "upload_post_enabled", upload_post_enabled
-                        )
-
-                    upload_post_auto_upload = st.checkbox(
-                        tr("Enable Auto-Publish"),
-                        value=is_auto,
-                        key="upload_post_auto_upload_checkbox",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            "upload_post_auto_upload",
-                            "upload_post_auto_upload_checkbox",
-                            lambda value: value,
-                        ),
-                    )
-                    if upload_post_auto_upload != is_auto:
-                        _set_runtime_config(
-                            "app", "upload_post_auto_upload", upload_post_auto_upload
-                        )
-
-                    upload_post_api_key = st.text_input(
-                        tr("Upload-Post API Key"),
-                        value=app_settings.get("upload_post_api_key", ""),
-                        type="password",
-                        help=tr("Upload-Post API Key Help").format(
-                            api_keys_url=UPLOAD_POST_API_KEYS_URL
-                        ),
-                        key="upload_post_api_key_input",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            "upload_post_api_key",
-                            "upload_post_api_key_input",
-                            lambda value: value,
-                        ),
-                    )
-                    if upload_post_api_key != app_settings.get("upload_post_api_key", ""):
-                        _set_runtime_config(
-                            "app", "upload_post_api_key", upload_post_api_key
-                        )
-
-                    upload_post_username = st.text_input(
-                        tr("Upload-Post Profile Username"),
-                        value=app_settings.get("upload_post_username", ""),
-                        help=tr("Upload-Post Profile Username Help").format(
-                            manage_users_url=UPLOAD_POST_MANAGE_USERS_URL
-                        ),
-                        key="upload_post_username_input",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            "upload_post_username",
-                            "upload_post_username_input",
-                            lambda value: value,
-                        ),
-                    )
-                    if upload_post_username != app_settings.get("upload_post_username", ""):
-                        _set_runtime_config(
-                            "app", "upload_post_username", upload_post_username
-                        )
-
-                    upload_post_platforms = st.multiselect(
-                        tr("Platforms"),
-                        options=["tiktok", "instagram", "youtube"],
-                        default=app_settings.get(
-                            "upload_post_platforms", ["tiktok", "instagram"]
-                        ),
-                        help="Select platforms to publish to",
-                        key="upload_post_platforms_multiselect",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            "upload_post_platforms",
-                            "upload_post_platforms_multiselect",
-                            lambda value: value,
-                        ),
-                    )
-                    if upload_post_platforms != app_settings.get(
-                        "upload_post_platforms", ["tiktok", "instagram"]
-                    ):
-                        _set_runtime_config(
-                            "app", "upload_post_platforms", upload_post_platforms
-                        )
-
-                    if "youtube" in upload_post_platforms:
-                        yt_status_options = ["public", "private", "unlisted"]
-                        yt_saved = app_settings.get(
-                            "upload_post_youtube_privacy_status", "public"
-                        )
-                        if yt_saved not in yt_status_options:
-                            yt_saved = "public"
-                        upload_post_youtube_privacy_status = st.selectbox(
-                            tr("YouTube Privacy Status"),
-                            options=yt_status_options,
-                            index=yt_status_options.index(yt_saved),
-                            key="upload_post_youtube_privacy_status_selectbox",
-                            on_change=_save_settings_change,
-                            args=(
-                                "app",
-                                "upload_post_youtube_privacy_status",
-                                "upload_post_youtube_privacy_status_selectbox",
-                                lambda value: value,
-                            ),
-                        )
-                        if upload_post_youtube_privacy_status != app_settings.get(
-                            "upload_post_youtube_privacy_status", "public"
-                        ):
-                            _set_runtime_config(
-                                "app",
-                                "upload_post_youtube_privacy_status",
-                                upload_post_youtube_privacy_status,
-                            )
-
-                        # 受众声明只影响 YouTube 发布，不改变生成内容或其它平台的请求。
-                        # 使用真正的布尔选项，避免把展示文字或字符串当成 API 参数。
-                        saved_audience = app_settings.get(
-                            "upload_post_youtube_made_for_kids", False
-                        )
-                        audience_labels = {
-                            False: tr("Not Made for Kids"),
-                            True: tr("Made for Kids"),
-                        }
-                        made_for_kids = st.selectbox(
-                            tr("YouTube Audience"),
-                            options=[False, True],
-                            # 非法配置保持未选择，不在打开设置时擅自改成非儿童声明。
-                            index=int(saved_audience)
-                            if isinstance(saved_audience, bool)
-                            else None,
-                            format_func=audience_labels.get,
-                            help=tr("YouTube Audience Help"),
-                            key="upload_post_youtube_made_for_kids_selectbox",
-                            on_change=_save_settings_change,
-                            args=(
-                                "app",
-                                "upload_post_youtube_made_for_kids",
-                                "upload_post_youtube_made_for_kids_selectbox",
-                                lambda value: value,
-                            ),
-                        )
-                        if isinstance(made_for_kids, bool):
-                            _set_runtime_config(
-                                "app", "upload_post_youtube_made_for_kids", made_for_kids
-                            )
+                _render_publish_settings_body(app_settings)
 
         # 左侧面板 - 日志设置
         with left_config_panel:
             if left_config_panel.open:
-                hide_log = st.checkbox(
-                    tr("Hide Log"),
-                    value=ui_settings.get("hide_log", False),
-                    key="hide_log_checkbox",
-                    on_change=_save_settings_change,
-                    args=("ui", "hide_log", "hide_log_checkbox", lambda value: value),
-                )
-                _set_runtime_config("ui", "hide_log", hide_log)
-                _render_logging_settings()
+                _render_interface_settings_body(ui_settings)
 
         if cache_config_panel.open:
             _render_cache_management_settings(cache_config_panel)
@@ -4991,480 +6328,16 @@ def _render_settings_dialog():
         if key_backup_panel.open:
             _render_key_backup_settings(key_backup_panel)
 
-        # 中间面板 - LLM 设置
 
+        # 中间面板 - LLM 设置
         with middle_config_panel:
             if middle_config_panel.open:
-                # 下拉顺序、默认 label 和稳定 provider id 全部来自 Registry；locale
-                # 只覆盖展示文案，不再让 Main.py 维护第二份 Provider 列表。
-                llm_provider_ids = [
-                    provider.provider_id for provider in LLM_PROVIDER_REGISTRY
-                ]
-                llm_provider_labels = {
-                    provider.provider_id: get_llm_provider_label(provider)
-                    for provider in LLM_PROVIDER_REGISTRY
-                }
-                saved_llm_provider = app_settings.get(
-                    "llm_provider", DEFAULT_LLM_PROVIDER_ID
-                ).lower()
-                if saved_llm_provider not in llm_provider_ids:
-                    saved_llm_provider = DEFAULT_LLM_PROVIDER_ID
-
-                llm_provider = stable_selectbox(
-                    tr("LLM Provider"),
-                    options=llm_provider_ids,
-                    default_value=saved_llm_provider,
-                    key="llm_provider_select",
-                    format_func=lambda provider_id: llm_provider_labels[provider_id],
-                    on_change=_save_settings_change,
-                    args=(
-                        "app",
-                        "llm_provider",
-                        localized_widget_key("llm_provider_select"),
-                        lambda value: value,
-                    ),
-                )
-                # 配置表单和 Provider 说明并排展示，减少长说明在窄列中的换行，
-                # 同时充分利用基础设置面板的横向空间。
-                llm_form_panel, llm_help_panel = st.columns(
-                    [0.9, 1.1],
-                    gap="large",
-                    vertical_alignment="top",
-                )
-                llm_helper = llm_help_panel.container()
-                _set_runtime_config("app", "llm_provider", llm_provider)
-                llm_provider_spec = get_llm_provider(llm_provider)
-                if llm_provider_spec is None:
-                    # 正常情况下下拉选项全部来自 Registry，不会进入该分支；保留
-                    # 明确错误用于诊断损坏的 session state 或后续接入遗漏。
-                    raise RuntimeError(f"unsupported llm provider: {llm_provider}")
-
-                llm_api_key = app_settings.get(
-                    llm_provider_spec.config_key("api_key"), ""
-                )
-                configured_llm_base_url = app_settings.get(
-                    llm_provider_spec.config_key("base_url"), ""
-                )
-                llm_default_base_url = llm_provider_spec.effective_default_base_url
-                llm_base_url = configured_llm_base_url or llm_default_base_url
-                llm_model_name = llm_provider_spec.resolve_model_name(
-                    app_settings.get(llm_provider_spec.config_key("model_name"), "")
-                )
-
-                provider_tip_context = {}
-                selected_service_endpoint = None
-                if llm_provider_spec.service_endpoints:
-                    # Kimi 等 Provider 的中国站和国际站使用不同账号体系。只让用户
-                    # 选择服务区域，再由 Registry 同步 API 申请入口和 Base URL，
-                    # 避免手工组合错误。已有空 Base URL 配置继续沿用中国站，只有
-                    # 尚未填写 Key 的全新配置才根据界面语言推荐对应入口。
-                    selected_service_endpoint = (
-                        llm_provider_spec.select_service_endpoint(
-                            configured_llm_base_url,
-                            has_api_key=bool(str(llm_api_key).strip()),
-                            prefer_international=(
-                                st.session_state.get("ui_language", "en") != "zh"
-                            ),
-                        )
-                    )
-                    endpoint_options = [
-                        endpoint.endpoint_id
-                        for endpoint in llm_provider_spec.service_endpoints
-                    ] + [CUSTOM_LLM_ENDPOINT_ID]
-                    default_endpoint_id = (
-                        selected_service_endpoint.endpoint_id
-                        if selected_service_endpoint
-                        else CUSTOM_LLM_ENDPOINT_ID
-                    )
-                    endpoint_labels = {
-                        endpoint.endpoint_id: (
-                            tr_optional(
-                                llm_provider_spec.endpoint_label_key(
-                                    endpoint.endpoint_id
-                                ),
-                                fallback_language="en",
-                            )
-                            or endpoint.default_label
-                        )
-                        for endpoint in llm_provider_spec.service_endpoints
-                    }
-                    endpoint_labels[CUSTOM_LLM_ENDPOINT_ID] = (
-                        tr_optional("Custom API Endpoint", fallback_language="en")
-                        or "Custom API Endpoint"
-                    )
-                    with llm_form_panel:
-                        selected_endpoint_id = stable_selectbox(
-                            tr_optional(
-                                llm_provider_spec.endpoint_selector_label_key,
-                                fallback_language="en",
-                            )
-                            or tr("API Platform"),
-                            options=endpoint_options,
-                            default_value=default_endpoint_id,
-                            key=f"{llm_provider}_service_endpoint_select",
-                            on_change=_save_settings_endpoint,
-                            args=(
-                                llm_provider_spec,
-                                localized_widget_key(
-                                    f"{llm_provider}_service_endpoint_select"
-                                ),
-                            ),
-                            format_func=lambda endpoint_id: endpoint_labels[
-                                endpoint_id
-                            ],
-                            help=(
-                                tr_optional(
-                                    llm_provider_spec.endpoint_selector_help_key,
-                                    fallback_language="en",
-                                )
-                                or None
-                            ),
-                        )
-                    selected_service_endpoint = next(
-                        (
-                            endpoint
-                            for endpoint in llm_provider_spec.service_endpoints
-                            if endpoint.endpoint_id == selected_endpoint_id
-                        ),
-                        None,
-                    )
-                    if selected_service_endpoint:
-                        llm_base_url = selected_service_endpoint.base_url
-                        provider_tip_context.update(
-                            {
-                                "api_key_url": selected_service_endpoint.api_key_url,
-                                "default_base_url": selected_service_endpoint.base_url,
-                                "model_docs_url": selected_service_endpoint.model_docs_url,
-                            }
-                        )
-                    else:
-                        # 自定义模式只保留用户明确保存的地址，不将某个标准区域伪装
-                        # 成自定义值。输入为空时配置不会持久化，下一次仍回到兼容默认。
-                        llm_base_url = str(configured_llm_base_url or "").strip()
-
-                if llm_provider == "ollama":
-                    llm_default_base_url = config.get_default_ollama_base_url()
-                    if not llm_base_url:
-                        llm_base_url = llm_default_base_url
-                    docker_hint = ""
-                    if config.is_running_in_container():
-                        docker_hint = tr_optional(
-                            "llm_provider_tips.ollama.docker_hint",
-                            fallback_language="en",
-                        )
-                    provider_tip_context["docker_hint"] = docker_hint
-
-                tips = get_llm_provider_tips(llm_provider, **provider_tip_context)
-                if tips:
-                    with llm_helper:
-                        st.info(tips)
-
-                st_llm_api_key = llm_api_key
-                if llm_provider_spec.show_api_key:
-                    st_llm_api_key = llm_form_panel.text_input(
-                        tr("API Key"),
-                        value=llm_api_key,
-                        type="password",
-                        key=f"{llm_provider}_api_key_input",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            llm_provider_spec.config_key("api_key"),
-                            f"{llm_provider}_api_key_input",
-                            lambda value: value,
-                        ),
-                    )
-
-                st_llm_base_url = llm_base_url
-                if llm_provider_spec.show_base_url:
-                    st_llm_base_url = llm_form_panel.text_input(
-                        tr("Base Url"),
-                        value=llm_base_url,
-                        key=(
-                            f"{llm_provider}_base_url_"
-                            f"{selected_service_endpoint.endpoint_id}_input"
-                            if selected_service_endpoint
-                            else f"{llm_provider}_base_url_custom_input"
-                        ),
-                        disabled=selected_service_endpoint is not None,
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            llm_provider_spec.config_key("base_url"),
-                            f"{llm_provider}_base_url_"
-                            f"{selected_service_endpoint.endpoint_id}_input"
-                            if selected_service_endpoint
-                            else f"{llm_provider}_base_url_custom_input",
-                            lambda value, llm_default_base_url=llm_default_base_url: (
-                                normalize_provider_override(value, llm_default_base_url)
-                            ),
-                        ),
-                    )
-                st_llm_model_name = ""
-                if llm_provider == "openai_codex":
-                    from webui.codex_models import render_codex_model_selector
-
-                    with llm_form_panel:
-                        st_llm_model_name = render_codex_model_selector(
-                            llm_model_name,
-                            tr,
-                            on_change=lambda model, provider=llm_provider_spec: (
-                                _set_runtime_config(
-                                    "app",
-                                    provider.config_key("model_name"),
-                                    normalize_provider_override(
-                                        model, provider.default_model
-                                    ),
-                                )
-                            ),
-                        )
-                elif llm_provider == "openai_chatgpt":
-                    from webui.chatgpt_login import render_chatgpt_login
-                    from webui.chatgpt_models import render_chatgpt_model_selector
-
-                    with llm_form_panel:
-                        if middle_config_panel.open:
-                            # Keep the nested polling fragment's delta paths separate
-                            # from the model selector and connection-test controls.
-                            with st.container(key="chatgpt_login_panel"):
-                                render_chatgpt_login(tr)
-                        st_llm_model_name = render_chatgpt_model_selector(
-                            llm_model_name,
-                            tr,
-                            on_change=lambda model, provider=llm_provider_spec: (
-                                _set_runtime_config(
-                                    "app",
-                                    provider.config_key("model_name"),
-                                    normalize_provider_override(
-                                        model, provider.default_model
-                                    ),
-                                )
-                            ),
-                        )
-                elif llm_provider == "groq":
-                    effective_api_key = st_llm_api_key or llm_api_key
-                    effective_base_url = st_llm_base_url or llm_base_url
-                    groq_models = get_groq_model_ids(
-                        api_key=effective_api_key,
-                        base_url=effective_base_url,
-                    )
-
-                    if groq_models:
-                        selected_index = 0
-                        if llm_model_name in groq_models:
-                            selected_index = groq_models.index(llm_model_name)
-
-                        st_llm_model_name = llm_form_panel.selectbox(
-                            tr("Model Name"),
-                            options=groq_models,
-                            index=selected_index,
-                            key="groq_model_name_select",
-                            on_change=_save_settings_change,
-                            args=(
-                                "app",
-                                llm_provider_spec.config_key("model_name"),
-                                "groq_model_name_select",
-                                lambda value, llm_provider_spec=llm_provider_spec: (
-                                    normalize_provider_override(
-                                        value, llm_provider_spec.default_model
-                                    )
-                                ),
-                            ),
-                        )
-                    else:
-                        st_llm_model_name = llm_form_panel.text_input(
-                            tr("Model Name"),
-                            value=llm_model_name,
-                            key="groq_model_name_input",
-                            on_change=_save_settings_change,
-                            args=(
-                                "app",
-                                llm_provider_spec.config_key("model_name"),
-                                "groq_model_name_input",
-                                lambda value, llm_provider_spec=llm_provider_spec: (
-                                    normalize_provider_override(
-                                        value, llm_provider_spec.default_model
-                                    )
-                                ),
-                            ),
-                        )
-                        if effective_api_key:
-                            llm_form_panel.caption(tr("Groq Model List Load Failed"))
-                        else:
-                            llm_form_panel.caption(
-                                tr("Groq API Key Required for Model List")
-                            )
-                else:
-                    st_llm_model_name = llm_form_panel.text_input(
-                        tr("Model Name"),
-                        value=llm_model_name,
-                        key=f"{llm_provider}_model_name_input",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            llm_provider_spec.config_key("model_name"),
-                            f"{llm_provider}_model_name_input",
-                            lambda value, llm_provider_spec=llm_provider_spec: (
-                                normalize_provider_override(
-                                    value, llm_provider_spec.default_model
-                                )
-                            ),
-                        ),
-                    )
-                # 输入框展示 Registry 默认值，但配置只保存真实的用户覆盖值。
-                # 这样默认模型、Base URL 更新后，未自定义的用户能够自动跟随。
-                _set_runtime_config(
-                    "app",
-                    llm_provider_spec.config_key("api_key"),
-                    st_llm_api_key,
-                )
-                _set_runtime_config(
-                    "app",
-                    llm_provider_spec.config_key("base_url"),
-                    normalize_provider_override(
-                        st_llm_base_url,
-                        llm_default_base_url,
-                    ),
-                )
-                _set_runtime_config(
-                    "app",
-                    llm_provider_spec.config_key("model_name"),
-                    normalize_provider_override(
-                        st_llm_model_name,
-                        llm_provider_spec.default_model,
-                    ),
-                )
-
-                # Provider 专用字段也由 Registry 声明。例如 Cloudflare AI Gateway
-                # 需要 Account ID；以后新增类似字段时无需再在 Main.py 增加判断。
-                for field in llm_provider_spec.extra_fields:
-                    field_config_key = llm_provider_spec.config_key(field.config_suffix)
-                    field_value = llm_form_panel.text_input(
-                        tr(field.label_key),
-                        value=(
-                            app_settings.get(field_config_key, "")
-                            or field.default_value
-                        ),
-                        type="password" if field.secret else "default",
-                        key=f"{llm_provider}_{field.config_suffix}_input",
-                        on_change=_save_settings_change,
-                        args=(
-                            "app",
-                            field_config_key,
-                            f"{llm_provider}_{field.config_suffix}_input",
-                            lambda value, field=field: normalize_provider_override(
-                                value, field.default_value
-                            ),
-                        ),
-                    )
-                    _set_runtime_config(
-                        "app",
-                        field_config_key,
-                        normalize_provider_override(
-                            field_value,
-                            field.default_value,
-                        ),
-                    )
-
-                if llm_provider == "openai_codex" and middle_config_panel.open:
-                    from webui.codex_login import render_codex_login
-
-                    with llm_form_panel.container():
-                        render_codex_login(tr)
-
-                if llm_provider == "kimi_code" and middle_config_panel.open:
-                    from app.services import kimi_code_oauth
-                    from webui.kimi_login import render_kimi_login
-
-                    # 给嵌套 fragment 独立的容器，轮询重绘不占用后续控件的位置。
-                    with llm_form_panel.container():
-                        render_kimi_login(
-                            kimi_code_oauth.resolve_region(st_llm_base_url), tr
-                        )
-
-                if llm_form_panel.button(
-                    tr("Test LLM Connection"),
-                    key="test_llm_connection_button",
-                    use_container_width=True,
-                    type="secondary",
-                    icon=":material/network_check:",
-                ):
-                    with config.try_runtime_config_lock() as lock_acquired:
-                        if not lock_acquired:
-                            llm_form_panel.warning(tr("Runtime Configuration Busy"))
-                        else:
-                            with llm_form_panel.spinner(tr("Testing LLM Connection")):
-                                connection_ok, connection_error, connection_elapsed = (
-                                    llm.test_connection()
-                                )
-
-                    if not lock_acquired:
-                        connection_ok = None
-                    elif connection_ok:
-                        llm_form_panel.success(
-                            tr("LLM Connection Test Succeeded").format(
-                                provider=llm_provider_labels[llm_provider],
-                                model=st_llm_model_name or "-",
-                                elapsed=f"{connection_elapsed:.2f}",
-                            )
-                        )
-                    else:
-                        connection_error = format_llm_connection_error(
-                            llm_provider,
-                            st_llm_base_url,
-                            connection_error,
-                        )
-                        llm_form_panel.error(
-                            tr("LLM Connection Test Failed").format(
-                                error=connection_error
-                            )
-                        )
+                _render_llm_settings_body(app_settings, middle_config_panel.open)
 
         # 右侧面板 - API 密钥设置
         with right_config_panel:
             if right_config_panel.open:
-                if "settings_material_group" not in st.session_state:
-                    _initialize_material_navigation("material", app_settings)
-                sections = (
-                    (
-                        "ai_video",
-                        "AI Video Generation APIs",
-                        "AI Video Generation APIs Help",
-                    ),
-                    (
-                        "ai_image",
-                        "AI Image Generation APIs",
-                        "AI Image Generation APIs Help",
-                    ),
-                    ("stock_video", "Stock Video APIs", "Stock Video APIs Help"),
-                )
-                remembered = dict(
-                    st.session_state.get("settings_material_providers", {})
-                )
-                for group, title_key, help_key in sections:
-                    providers = VIDEO_SOURCE_GROUPS[group]
-                    default_provider = remembered.get(group, providers[0])
-                    if default_provider not in providers:
-                        default_provider = providers[0]
-                    provider_key = localized_widget_key(
-                        f"settings_material_provider_{group}_select"
-                    )
-                    st.session_state[provider_key] = default_provider
-                    with st.container(border=True):
-                        st.subheader(tr(title_key))
-                        st.caption(tr(help_key))
-                        provider = st.selectbox(
-                            tr(title_key),
-                            options=providers,
-                            key=provider_key,
-                            format_func=_material_provider_labels().get,
-                            label_visibility="collapsed",
-                            on_change=_remember_material_provider,
-                            args=(group, provider_key),
-                        )
-                        remembered[group] = provider
-                        _render_material_provider_settings(provider)
-                st.session_state["settings_material_providers"] = remembered
+                _render_material_settings_body(app_settings)
 
     _save_runtime_config()
 
@@ -9533,7 +10406,8 @@ def _stage_task_audio(audio_path, audio_bytes):
 
 
 def _render_generation_controls(
-    params, uploaded_files, uploaded_audio_file, uploaded_bgm_file, voice_mode
+    params, uploaded_files, uploaded_audio_file, uploaded_bgm_file, voice_mode,
+    panel=None,
 ):
     """
     校验生成依赖、提交任务，并渲染日志与成片结果。
@@ -9542,491 +10416,851 @@ def _render_generation_controls(
     据此跳过页面末尾的重复请求。主脚本必须及时结束，定时 Fragment 才能持续
     刷新进度和任务日志。
     """
-    restore_upload_requirements = st.session_state.get(
-        "task_restore_upload_requirements", {}
-    )
-    has_local_materials = bool(
-        uploaded_files or st.session_state.get("local_video_materials", [])
-    )
-    has_custom_audio = bool(uploaded_audio_file)
-    unmet_restore_requirements = _get_unmet_restore_upload_requirements(
-        restore_upload_requirements,
-        video_source=params.video_source,
-        voice_name=params.voice_name or "",
-        has_local_materials=has_local_materials,
-        has_custom_audio=has_custom_audio,
-        voice_mode=voice_mode,
-    )
-    if "local_materials" in unmet_restore_requirements:
-        st.warning(tr("Task Restore Local Materials Warning"))
-    if "custom_audio" in unmet_restore_requirements:
-        st.warning(tr("Task Restore Custom Audio Warning"))
-    if restore_upload_requirements and not unmet_restore_requirements:
-        # 用户已重新上传文件，或主动切换了素材来源/音色。此时历史任务的上传依赖
-        # 已经得到明确处理，清除标记，避免后续普通生成继续显示旧提示。
-        st.session_state.pop("task_restore_upload_requirements", None)
-
-    _render_settings_transfer(params)
-
-    generation_busy = _generation_is_busy(_current_generation_task_id())
-    start_button = st.button(
-        tr("Generating Video") if generation_busy else tr("Generate Video"),
-        use_container_width=True,
-        type="primary",
-        key="generate_video_button",
-        on_click=_prepare_generation_task,
-        disabled=generation_busy,
-    )
-    render_onboarding_tour()
-    if start_button:
-        _save_runtime_config()
-        task_id = st.session_state.get("pending_generation_task_id") or str(uuid4())
-        _add_active_generation_task(
-            task_id,
-            subject=params.video_subject or params.video_script or task_id,
+    # panel 非空时渲染进中列底部常驻操作栏；为空保持旧的当前上下文行为。
+    with contextlib.nullcontext() if panel is None else panel:
+        restore_upload_requirements = st.session_state.get(
+            "task_restore_upload_requirements", {}
         )
-        if not params.video_subject and not params.video_script:
-            _remove_active_generation_task(task_id)
-            st.error(tr("Video Script and Subject Cannot Both Be Empty"))
-            st.stop()
+        has_local_materials = bool(
+            uploaded_files or st.session_state.get("local_video_materials", [])
+        )
+        has_custom_audio = bool(uploaded_audio_file)
+        unmet_restore_requirements = _get_unmet_restore_upload_requirements(
+            restore_upload_requirements,
+            video_source=params.video_source,
+            voice_name=params.voice_name or "",
+            has_local_materials=has_local_materials,
+            has_custom_audio=has_custom_audio,
+            voice_mode=voice_mode,
+        )
+        if "local_materials" in unmet_restore_requirements:
+            st.warning(tr("Task Restore Local Materials Warning"))
+        if "custom_audio" in unmet_restore_requirements:
+            st.warning(tr("Task Restore Custom Audio Warning"))
+        if restore_upload_requirements and not unmet_restore_requirements:
+            # 用户已重新上传文件，或主动切换了素材来源/音色。此时历史任务的上传依赖
+            # 已经得到明确处理，清除标记，避免后续普通生成继续显示旧提示。
+            st.session_state.pop("task_restore_upload_requirements", None)
 
-        voxcpm_reference_audio = None
-        voxcpm_prompt_audio = None
-        voxcpm_prompt_text = ""
-        if voice.is_voxcpm_voice(params.voice_name or ""):
-            reference_audio_error = st.session_state.get(
-                VOXCPM_REFERENCE_AUDIO_ERROR_SESSION_KEY
+        _render_settings_transfer(params)
+
+        generation_busy = _generation_is_busy(_current_generation_task_id())
+        project_locked = _project_is_locked()
+        start_button = st.button(
+            tr("Generating Video") if generation_busy else tr("Generate Video"),
+            use_container_width=True,
+            type="primary",
+            key="generate_video_button",
+            on_click=_prepare_generation_task,
+            disabled=generation_busy or project_locked,
+            help=tr("Project Locked Generate Help") if project_locked else None,
+        )
+        render_onboarding_tour()
+        if start_button:
+            _save_runtime_config()
+            task_id = st.session_state.get("pending_generation_task_id") or str(uuid4())
+            _add_active_generation_task(
+                task_id,
+                subject=params.video_subject or params.video_script or task_id,
             )
-            if reference_audio_error:
+            if not params.video_subject and not params.video_script:
                 _remove_active_generation_task(task_id)
-                st.error(
-                    tr("VoxCPM Reference Audio Invalid").format(
-                        error=reference_audio_error
-                    )
+                st.error(tr("Video Script and Subject Cannot Both Be Empty"))
+                st.stop()
+
+            voxcpm_reference_audio = None
+            voxcpm_prompt_audio = None
+            voxcpm_prompt_text = ""
+            if voice.is_voxcpm_voice(params.voice_name or ""):
+                reference_audio_error = st.session_state.get(
+                    VOXCPM_REFERENCE_AUDIO_ERROR_SESSION_KEY
                 )
-                st.stop()
-            voxcpm_reference_audio = _get_voxcpm_reference_audio()
-            prompt_validation_error = _get_voxcpm_prompt_validation_error()
-            if prompt_validation_error:
-                _remove_active_generation_task(task_id)
-                st.error(
-                    tr("VoxCPM Prompt Invalid").format(
-                        error=prompt_validation_error
+                if reference_audio_error:
+                    _remove_active_generation_task(task_id)
+                    st.error(
+                        tr("VoxCPM Reference Audio Invalid").format(
+                            error=reference_audio_error
+                        )
                     )
-                )
-                st.stop()
-            voxcpm_prompt_audio = _get_voxcpm_effective_prompt_audio()
-            voxcpm_prompt_text = _get_voxcpm_prompt_text()
+                    st.stop()
+                voxcpm_reference_audio = _get_voxcpm_reference_audio()
+                prompt_validation_error = _get_voxcpm_prompt_validation_error()
+                if prompt_validation_error:
+                    _remove_active_generation_task(task_id)
+                    st.error(
+                        tr("VoxCPM Prompt Invalid").format(
+                            error=prompt_validation_error
+                        )
+                    )
+                    st.stop()
+                voxcpm_prompt_audio = _get_voxcpm_effective_prompt_audio()
+                voxcpm_prompt_text = _get_voxcpm_prompt_text()
 
-        if params.video_source not in [
-            "infistar",
-            "jalapeno",
-            "pexels",
-            "pixabay",
-            "coverr",
-            "wavespeed",
-            "volcengine_seedance",
-            "ofox",
-            "metaso_minimax",
-            "muapi",
-            "loomloom",
-            "openai_image",
-            "codex_image",
-            "local",
-        ]:
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Select a Valid Video Source"))
-            st.stop()
-
-        if params.video_source == "pexels" and not config.app.get(
-            "pexels_api_keys", ""
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the Pexels API Key"))
-            st.stop()
-
-        if params.video_source == "pixabay" and not config.app.get(
-            "pixabay_api_keys", ""
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the Pixabay API Key"))
-            st.stop()
-
-        if params.video_source == "coverr" and not config.app.get(
-            "coverr_api_keys", ""
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the Coverr API Key"))
-            st.stop()
-
-        if params.video_source == "wavespeed" and not config.app.get(
-            "wavespeed_api_keys", ""
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the WaveSpeed API Key"))
-            st.stop()
-
-        if params.video_source == "wavespeed" and not st.session_state.get(
-            "wavespeed_confirm_charge", False
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Confirm WaveSpeed Charge Required"))
-            st.stop()
-
-        if params.video_source == "volcengine_seedance" and not (
-            volcengine_seedance.is_enabled(
-                config.snapshot_config_with_pending(config.app)
-            )
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the Volcano Engine Ark API Key"))
-            st.stop()
-
-        if params.video_source == "volcengine_seedance" and not st.session_state.get(
-            "volcengine_seedance_confirm_charge", False
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Confirm Volcano Engine Seedance Charge Required"))
-            st.stop()
-
-        if params.video_source == "jalapeno":
-            try:
-                snapshot = config.snapshot_config_with_pending(config.app)
-                jalapeno_video_endpoint = jalapeno_video.endpoint(snapshot)
-                if (not st.session_state.get("jalapeno_confirm_charge", False)
-                        or _jalapeno_charge_signature(params, snapshot)
-                        != st.session_state.get("jalapeno_charge_signature")):
-                    raise jalapeno_video.JalapenoVideoError(tr("Confirm Jalapeno Cloud Charge Required"))
-            except jalapeno_video.JalapenoVideoError as exc:
+            if params.video_source not in [
+                "infistar",
+                "jalapeno",
+                "pexels",
+                "pixabay",
+                "coverr",
+                "wavespeed",
+                "volcengine_seedance",
+                "ofox",
+                "metaso_minimax",
+                "muapi",
+                "loomloom",
+                "openai_image",
+                "codex_image",
+                "local",
+            ]:
                 _remove_active_generation_task(task_id)
-                st.error(str(exc))
+                st.error(tr("Please Select a Valid Video Source"))
                 st.stop()
 
-        if params.video_source == "infistar":
-            try:
-                snapshot = config.snapshot_config_with_pending(config.app)
-                if not infistar_video.is_enabled(snapshot):
-                    raise infistar_video.InfistarVideoError(tr("Please Enter the Infistar API Key"))
-                infistar_video.model_id(snapshot)
-                if not st.session_state.get("infistar_confirm_charge", False):
-                    raise infistar_video.InfistarVideoError(tr("Confirm Infistar Charge Required"))
-            except infistar_video.InfistarVideoError as exc:
+            if params.video_source == "pexels" and not config.app.get(
+                "pexels_api_keys", ""
+            ):
                 _remove_active_generation_task(task_id)
-                st.error(str(exc))
+                st.error(tr("Please Enter the Pexels API Key"))
                 st.stop()
 
-        if params.video_source == "ofox" and not (
-            ofox.is_enabled(config.snapshot_config_with_pending(config.app))
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the OFox API Key"))
-            st.stop()
+            if params.video_source == "pixabay" and not config.app.get(
+                "pixabay_api_keys", ""
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the Pixabay API Key"))
+                st.stop()
 
-        if params.video_source == "ofox" and not st.session_state.get(
-            "ofox_confirm_charge", False
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Confirm OFox Charge Required"))
-            st.stop()
+            if params.video_source == "coverr" and not config.app.get(
+                "coverr_api_keys", ""
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the Coverr API Key"))
+                st.stop()
 
-        if params.video_source == "metaso_minimax" and not (
-            metaso_minimax.is_enabled(
-                config.snapshot_config_with_pending(config.app)
-            )
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the Metaso MiniMax API Key"))
-            st.stop()
+            if params.video_source == "wavespeed" and not config.app.get(
+                "wavespeed_api_keys", ""
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the WaveSpeed API Key"))
+                st.stop()
 
-        if params.video_source == "metaso_minimax" and not st.session_state.get(
-            "metaso_minimax_confirm_charge", False
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Confirm Metaso MiniMax Charge Required"))
-            st.stop()
+            if params.video_source == "wavespeed" and not st.session_state.get(
+                "wavespeed_confirm_charge", False
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Confirm WaveSpeed Charge Required"))
+                st.stop()
 
-        if params.video_source == "muapi" and not (
-            muapi.is_enabled(config.snapshot_config_with_pending(config.app))
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Enter the MuAPI API Key"))
-            st.stop()
-
-        if params.video_source == "muapi" and not st.session_state.get(
-            "muapi_confirm_charge", False
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Confirm MuAPI Charge Required"))
-            st.stop()
-
-        if params.video_source == "codex_image":
-            from app.services import codex_image, codex_oauth
-
-            try:
-                codex_image.capture_context(
+            if params.video_source == "volcengine_seedance" and not (
+                volcengine_seedance.is_enabled(
                     config.snapshot_config_with_pending(config.app)
                 )
-            except codex_oauth.CodexError as error:
+            ):
                 _remove_active_generation_task(task_id)
-                st.error(tr(error.key).format(**error.params))
+                st.error(tr("Please Enter the Volcano Engine Ark API Key"))
                 st.stop()
 
-        if params.video_source == "openai_image" and not material.is_openai_image_enabled(
-            config.snapshot_config_with_pending(config.app)
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Configure the OpenAI Image Source"))
-            st.stop()
+            if params.video_source == "volcengine_seedance" and not st.session_state.get(
+                "volcengine_seedance_confirm_charge", False
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Confirm Volcano Engine Seedance Charge Required"))
+                st.stop()
 
-        loomloom_video_request = None
-        if params.video_source == "loomloom":
-            current_batch, current_signature = _current_loomloom_video_quote_context(
-                params
+            if params.video_source == "jalapeno":
+                try:
+                    snapshot = config.snapshot_config_with_pending(config.app)
+                    jalapeno_video_endpoint = jalapeno_video.endpoint(snapshot)
+                    if (not st.session_state.get("jalapeno_confirm_charge", False)
+                            or _jalapeno_charge_signature(params, snapshot)
+                            != st.session_state.get("jalapeno_charge_signature")):
+                        raise jalapeno_video.JalapenoVideoError(tr("Confirm Jalapeno Cloud Charge Required"))
+                except jalapeno_video.JalapenoVideoError as exc:
+                    _remove_active_generation_task(task_id)
+                    st.error(str(exc))
+                    st.stop()
+
+            if params.video_source == "infistar":
+                try:
+                    snapshot = config.snapshot_config_with_pending(config.app)
+                    if not infistar_video.is_enabled(snapshot):
+                        raise infistar_video.InfistarVideoError(tr("Please Enter the Infistar API Key"))
+                    infistar_video.model_id(snapshot)
+                    if not st.session_state.get("infistar_confirm_charge", False):
+                        raise infistar_video.InfistarVideoError(tr("Confirm Infistar Charge Required"))
+                except infistar_video.InfistarVideoError as exc:
+                    _remove_active_generation_task(task_id)
+                    st.error(str(exc))
+                    st.stop()
+
+            if params.video_source == "ofox" and not (
+                ofox.is_enabled(config.snapshot_config_with_pending(config.app))
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the OFox API Key"))
+                st.stop()
+
+            if params.video_source == "ofox" and not st.session_state.get(
+                "ofox_confirm_charge", False
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Confirm OFox Charge Required"))
+                st.stop()
+
+            if params.video_source == "metaso_minimax" and not (
+                metaso_minimax.is_enabled(
+                    config.snapshot_config_with_pending(config.app)
+                )
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the Metaso MiniMax API Key"))
+                st.stop()
+
+            if params.video_source == "metaso_minimax" and not st.session_state.get(
+                "metaso_minimax_confirm_charge", False
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Confirm Metaso MiniMax Charge Required"))
+                st.stop()
+
+            if params.video_source == "muapi" and not (
+                muapi.is_enabled(config.snapshot_config_with_pending(config.app))
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the MuAPI API Key"))
+                st.stop()
+
+            if params.video_source == "muapi" and not st.session_state.get(
+                "muapi_confirm_charge", False
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Confirm MuAPI Charge Required"))
+                st.stop()
+
+            if params.video_source == "codex_image":
+                from app.services import codex_image, codex_oauth
+
+                try:
+                    codex_image.capture_context(
+                        config.snapshot_config_with_pending(config.app)
+                    )
+                except codex_oauth.CodexError as error:
+                    _remove_active_generation_task(task_id)
+                    st.error(tr(error.key).format(**error.params))
+                    st.stop()
+
+            if params.video_source == "openai_image" and not material.is_openai_image_enabled(
+                config.snapshot_config_with_pending(config.app)
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Configure the OpenAI Image Source"))
+                st.stop()
+
+            loomloom_video_request = None
+            if params.video_source == "loomloom":
+                current_batch, current_signature = _current_loomloom_video_quote_context(
+                    params
+                )
+                quoted_batch = st.session_state.get("loomloom_video_batch")
+                quote_result = st.session_state.get("loomloom_video_quote")
+                quote_is_current = bool(
+                    current_batch is not None
+                    and isinstance(quoted_batch, loomloom.LoomLoomVideoBatch)
+                    and quote_result is not None
+                    and st.session_state.get("loomloom_video_input_signature")
+                    == current_signature
+                )
+                if not quote_is_current:
+                    _remove_active_generation_task(task_id)
+                    st.error(tr("AI Video Quote Required"))
+                    st.stop()
+                if not st.session_state.get("loomloom_video_confirm_charge", False):
+                    _remove_active_generation_task(task_id)
+                    st.error(tr("Confirm AI Video Charge Required"))
+                    st.stop()
+                try:
+                    video_backend = _create_loomloom_video_backend()
+                    loomloom_video_request = loomloom.LoomLoomConfirmedVideoRequest(
+                        settings=video_backend.settings,
+                        batch=current_batch,
+                        listing_version_id=quote_result.listing_version_id,
+                        client_request_id=st.session_state[
+                            "loomloom_video_client_request_id"
+                        ],
+                    )
+                    loomloom_video_request.validate()
+                except (loomloom.LoomLoomError, ValueError) as exc:
+                    _remove_active_generation_task(task_id)
+                    st.error(str(exc))
+                    st.stop()
+
+            if (
+                params.bgm_type == "sonilo"
+                and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume)
+                and not sonilo_service.is_enabled()
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Sonilo API Key Required"))
+                st.stop()
+
+            if (
+                params.bgm_type == "elevenlabs"
+                and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume)
+                and not elevenlabs_music_service.is_enabled()
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("ElevenLabs API Key Required"))
+                st.stop()
+
+            if params.video_source == "local" and not has_local_materials:
+                # 本地素材为空时继续执行会先产生 TTS/字幕，最后才在素材预处理阶段失败。
+                # 在任务启动前拦截，可以避免无意义的 API 调用和中间文件。
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Upload Local Materials First"))
+                st.stop()
+
+            if voice_mode == VOICE_MODE_UPLOAD and not uploaded_audio_file:
+                # 上传音频是用户显式选择的配音方式，缺少文件时不能静默退回 TTS。
+                # 在任务启动前拦截，避免产生与用户选择不一致的成片。
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Upload Voiceover File First"))
+                st.stop()
+
+            if "custom_audio" in unmet_restore_requirements:
+                # 历史自定义音频不能自动回填。用户尚未重新上传且也没有主动更换音色时，
+                # 必须阻止静默退回 TTS，否则重新生成的结果会与原任务语音不一致。
+                _remove_active_generation_task(task_id)
+                st.error(tr("Task Restore Custom Audio Warning"))
+                st.stop()
+
+            if uploaded_bgm_file and bgm_service.should_use_bgm(
+                params.bgm_type, params.bgm_volume
+            ):
+                try:
+                    saved_bgm_name = bgm_service.save_bgm_upload(
+                        uploaded_bgm_file.name, uploaded_bgm_file
+                    )
+                except bgm_service.BgmUploadError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.warning(f"WebUI background music upload rejected: {str(exc)}")
+                    st.error(tr("Invalid Background Music"))
+                    st.stop()
+                except bgm_service.BgmServiceError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.error(f"WebUI background music upload failed: {str(exc)}")
+                    st.error(tr("Background Music Validation Failed"))
+                    st.stop()
+                # 保存成功后只把文件名写入任务参数。视频服务会在两个 BGM 白名单
+                # 目录中重新解析，避免把服务器绝对路径持久化或展示给用户。
+                params.bgm_file = saved_bgm_name
+            elif uploaded_bgm_file:
+                # 0 音量时视频服务不会使用任何 BGM，因此不再把已经预览的上传文件
+                # 持久化到 storage。用户之后调高音量时可直接再次点击生成完成保存。
+                params.bgm_file = ""
+
+            if uploaded_audio_file:
+                try:
+                    task_dir = utils.task_dir(task_id)
+                    custom_audio_path = _build_uploaded_file_path(
+                        uploaded_audio_file,
+                        task_dir,
+                        CUSTOM_AUDIO_EXTENSIONS,
+                        "custom-audio",
+                    )
+                    # Voiceover uploads previously bypassed the same full-decode
+                    # and size checks used for background-music uploads. Validate
+                    # before storing or scheduling the generation task.
+                    bgm_service.validate_bgm_upload(
+                        uploaded_audio_file.name, uploaded_audio_file
+                    )
+                    _stage_task_audio(custom_audio_path, uploaded_audio_file.getbuffer())
+                except OSError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.error(f"failed to persist uploaded task audio: {exc}")
+                    st.error(tr("Video Generation Failed"))
+                    st.stop()
+                except bgm_service.BgmUploadError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.warning(f"WebUI custom audio upload rejected: {exc}")
+                    st.error(str(exc))
+                    st.stop()
+                except bgm_service.BgmServiceError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.error(f"WebUI custom audio validation failed: {exc}")
+                    st.error(str(exc))
+                    st.stop()
+                except ValueError:
+                    _remove_active_generation_task(task_id)
+                    st.error(tr("Unsupported Upload File Type"))
+                    st.stop()
+                params.custom_audio_file = custom_audio_path
+
+            if uploaded_files:
+                # 每次重新上传时都以本次选择的素材为准，避免旧素材不断重复追加。
+                try:
+                    params.video_materials, persisted_local_materials = (
+                        _save_uploaded_local_materials(uploaded_files)
+                    )
+                except material_upload_service.MaterialUploadError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.warning(f"WebUI local material upload rejected: {exc}")
+                    st.error(str(exc))
+                    st.stop()
+                except material_upload_service.MaterialServiceError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.error(f"WebUI local material upload failed: {exc}")
+                    st.error(str(exc))
+                    st.stop()
+                # 将已上传并保存到本地的视频素材写入会话，供后续只改文案时直接复用。
+                st.session_state["local_video_materials"] = persisted_local_materials
+            elif (
+                params.video_source == "local" and st.session_state["local_video_materials"]
+            ):
+                # 当用户没有重新上传文件时，复用最近一次已经保存到磁盘的本地素材列表。
+                params.video_materials = []
+                for material_entry in st.session_state["local_video_materials"]:
+                    m = MaterialInfo()
+                    m.provider = material_entry.get("provider", "local")
+                    m.url = material_entry.get("url", "")
+                    m.duration = material_entry.get("duration", 0)
+                    if m.url:
+                        params.video_materials.append(m)
+
+            reusable_voice_preview = _get_reusable_full_voice_preview(
+                params,
+                voice_mode,
             )
-            quoted_batch = st.session_state.get("loomloom_video_batch")
-            quote_result = st.session_state.get("loomloom_video_quote")
-            quote_is_current = bool(
-                current_batch is not None
-                and isinstance(quoted_batch, loomloom.LoomLoomVideoBatch)
-                and quote_result is not None
-                and st.session_state.get("loomloom_video_input_signature")
-                == current_signature
-            )
-            if not quote_is_current:
-                _remove_active_generation_task(task_id)
-                st.error(tr("AI Video Quote Required"))
-                st.stop()
-            if not st.session_state.get("loomloom_video_confirm_charge", False):
-                _remove_active_generation_task(task_id)
-                st.error(tr("Confirm AI Video Charge Required"))
-                st.stop()
+            if reusable_voice_preview:
+                # 试听缓存只存在当前 Streamlit 会话。提交前把音频写入目标任务目录，
+                # 后台线程随后只读取任务自己的文件；即使页面 rerun、浏览器关闭或
+                # 用户试听其它音色，也不会影响已经入队的生成任务。
+                try:
+                    preview_audio_file = os.path.join(
+                        utils.task_dir(task_id),
+                        "audio.mp3",
+                    )
+                    _stage_task_audio(preview_audio_file, reusable_voice_preview["audio_bytes"])
+                except OSError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.error(f"failed to persist preview task audio: {exc}")
+                    st.error(tr("Video Generation Failed"))
+                    st.stop()
+                reusable_voice_preview.pop("audio_bytes")
+                reusable_voice_preview["audio_file"] = preview_audio_file
+                logger.info(
+                    f"reuse full voice preview for task: "
+                    f"task_id={task_id}, duration={reusable_voice_preview['duration']:.2f}s"
+                )
+
             try:
-                video_backend = _create_loomloom_video_backend()
-                loomloom_video_request = loomloom.LoomLoomConfirmedVideoRequest(
-                    settings=video_backend.settings,
-                    batch=current_batch,
-                    listing_version_id=quote_result.listing_version_id,
-                    client_request_id=st.session_state[
-                        "loomloom_video_client_request_id"
-                    ],
+                st.toast(tr("Generating Video"))
+                logger.info(tr("Start Generating Video"))
+                logger.info(utils.to_json(params))
+                submitted_task_id = webui_task.submit_generation(
+                    task_id=task_id,
+                    params=params,
+                    capture_logs=not config.ui.get("hide_log", False),
+                    voice_preview=reusable_voice_preview,
+                    loomloom_video_request=loomloom_video_request,
+                    voxcpm_reference_audio=voxcpm_reference_audio,
+                    voxcpm_prompt_audio=voxcpm_prompt_audio,
+                    voxcpm_prompt_text=voxcpm_prompt_text,
+                    **({"jalapeno_video_endpoint": jalapeno_video_endpoint}
+                       if params.video_source == "jalapeno" else {}),
                 )
-                loomloom_video_request.validate()
-            except (loomloom.LoomLoomError, ValueError) as exc:
+                if loomloom_video_request is not None:
+                    # 一个报价只允许提交一次。后台请求自带稳定幂等 ID；提交成功后
+                    # 清除页面报价，下一次生成必须重新询价和确认。
+                    st.session_state["loomloom_video_batch"] = None
+                    st.session_state["loomloom_video_quote"] = None
+                    st.session_state["loomloom_video_input_signature"] = ""
+                    st.session_state["loomloom_video_client_request_id"] = ""
+            except Exception:
                 _remove_active_generation_task(task_id)
-                st.error(str(exc))
-                st.stop()
-
-        if (
-            params.bgm_type == "sonilo"
-            and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume)
-            and not sonilo_service.is_enabled()
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("Sonilo API Key Required"))
-            st.stop()
-
-        if (
-            params.bgm_type == "elevenlabs"
-            and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume)
-            and not elevenlabs_music_service.is_enabled()
-        ):
-            _remove_active_generation_task(task_id)
-            st.error(tr("ElevenLabs API Key Required"))
-            st.stop()
-
-        if params.video_source == "local" and not has_local_materials:
-            # 本地素材为空时继续执行会先产生 TTS/字幕，最后才在素材预处理阶段失败。
-            # 在任务启动前拦截，可以避免无意义的 API 调用和中间文件。
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Upload Local Materials First"))
-            st.stop()
-
-        if voice_mode == VOICE_MODE_UPLOAD and not uploaded_audio_file:
-            # 上传音频是用户显式选择的配音方式，缺少文件时不能静默退回 TTS。
-            # 在任务启动前拦截，避免产生与用户选择不一致的成片。
-            _remove_active_generation_task(task_id)
-            st.error(tr("Please Upload Voiceover File First"))
-            st.stop()
-
-        if "custom_audio" in unmet_restore_requirements:
-            # 历史自定义音频不能自动回填。用户尚未重新上传且也没有主动更换音色时，
-            # 必须阻止静默退回 TTS，否则重新生成的结果会与原任务语音不一致。
-            _remove_active_generation_task(task_id)
-            st.error(tr("Task Restore Custom Audio Warning"))
-            st.stop()
-
-        if uploaded_bgm_file and bgm_service.should_use_bgm(
-            params.bgm_type, params.bgm_volume
-        ):
-            try:
-                saved_bgm_name = bgm_service.save_bgm_upload(
-                    uploaded_bgm_file.name, uploaded_bgm_file
-                )
-            except bgm_service.BgmUploadError as exc:
-                _remove_active_generation_task(task_id)
-                logger.warning(f"WebUI background music upload rejected: {str(exc)}")
-                st.error(tr("Invalid Background Music"))
-                st.stop()
-            except bgm_service.BgmServiceError as exc:
-                _remove_active_generation_task(task_id)
-                logger.error(f"WebUI background music upload failed: {str(exc)}")
-                st.error(tr("Background Music Validation Failed"))
-                st.stop()
-            # 保存成功后只把文件名写入任务参数。视频服务会在两个 BGM 白名单
-            # 目录中重新解析，避免把服务器绝对路径持久化或展示给用户。
-            params.bgm_file = saved_bgm_name
-        elif uploaded_bgm_file:
-            # 0 音量时视频服务不会使用任何 BGM，因此不再把已经预览的上传文件
-            # 持久化到 storage。用户之后调高音量时可直接再次点击生成完成保存。
-            params.bgm_file = ""
-
-        if uploaded_audio_file:
-            try:
-                task_dir = utils.task_dir(task_id)
-                custom_audio_path = _build_uploaded_file_path(
-                    uploaded_audio_file,
-                    task_dir,
-                    CUSTOM_AUDIO_EXTENSIONS,
-                    "custom-audio",
-                )
-                # Voiceover uploads previously bypassed the same full-decode
-                # and size checks used for background-music uploads. Validate
-                # before storing or scheduling the generation task.
-                bgm_service.validate_bgm_upload(
-                    uploaded_audio_file.name, uploaded_audio_file
-                )
-                _stage_task_audio(custom_audio_path, uploaded_audio_file.getbuffer())
-            except OSError as exc:
-                _remove_active_generation_task(task_id)
-                logger.error(f"failed to persist uploaded task audio: {exc}")
                 st.error(tr("Video Generation Failed"))
                 st.stop()
-            except bgm_service.BgmUploadError as exc:
-                _remove_active_generation_task(task_id)
-                logger.warning(f"WebUI custom audio upload rejected: {exc}")
-                st.error(str(exc))
-                st.stop()
-            except bgm_service.BgmServiceError as exc:
-                _remove_active_generation_task(task_id)
-                logger.error(f"WebUI custom audio validation failed: {exc}")
-                st.error(str(exc))
-                st.stop()
-            except ValueError:
-                _remove_active_generation_task(task_id)
-                st.error(tr("Unsupported Upload File Type"))
-                st.stop()
-            params.custom_audio_file = custom_audio_path
 
-        if uploaded_files:
-            # 每次重新上传时都以本次选择的素材为准，避免旧素材不断重复追加。
-            try:
-                params.video_materials, persisted_local_materials = (
-                    _save_uploaded_local_materials(uploaded_files)
-                )
-            except material_upload_service.MaterialUploadError as exc:
+            if isinstance(submitted_task_id, str) and submitted_task_id != task_id:
                 _remove_active_generation_task(task_id)
-                logger.warning(f"WebUI local material upload rejected: {exc}")
-                st.error(str(exc))
-                st.stop()
-            except material_upload_service.MaterialServiceError as exc:
-                _remove_active_generation_task(task_id)
-                logger.error(f"WebUI local material upload failed: {exc}")
-                st.error(str(exc))
-                st.stop()
-            # 将已上传并保存到本地的视频素材写入会话，供后续只改文案时直接复用。
-            st.session_state["local_video_materials"] = persisted_local_materials
-        elif (
-            params.video_source == "local" and st.session_state["local_video_materials"]
-        ):
-            # 当用户没有重新上传文件时，复用最近一次已经保存到磁盘的本地素材列表。
-            params.video_materials = []
-            for material_entry in st.session_state["local_video_materials"]:
-                m = MaterialInfo()
-                m.provider = material_entry.get("provider", "local")
-                m.url = material_entry.get("url", "")
-                m.duration = material_entry.get("duration", 0)
-                if m.url:
-                    params.video_materials.append(m)
+                task_id = submitted_task_id
+                _add_active_generation_task(task_id, subject=params.video_subject)
+            st.session_state["current_generation_task_id"] = task_id
+            st.query_params["generation_task"] = task_id
+            # 提交即落盘项目快照并绑定会话：任务目录从此可被项目切换器加载。
+            submitted_params_dump = params.model_dump(mode="json")
+            _write_project_params(task_id, submitted_params_dump)
+            _bind_current_project(task_id, submitted_params_dump)
+            logger.info(f"WebUI generation task submitted: task_id={task_id}")
+            if webui_task.is_generation_active(task_id):
+                st.rerun()
 
-        reusable_voice_preview = _get_reusable_full_voice_preview(
-            params,
-            voice_mode,
-        )
-        if reusable_voice_preview:
-            # 试听缓存只存在当前 Streamlit 会话。提交前把音频写入目标任务目录，
-            # 后台线程随后只读取任务自己的文件；即使页面 rerun、浏览器关闭或
-            # 用户试听其它音色，也不会影响已经入队的生成任务。
-            try:
-                preview_audio_file = os.path.join(
-                    utils.task_dir(task_id),
-                    "audio.mp3",
-                )
-                _stage_task_audio(preview_audio_file, reusable_voice_preview["audio_bytes"])
-            except OSError as exc:
-                _remove_active_generation_task(task_id)
-                logger.error(f"failed to persist preview task audio: {exc}")
-                st.error(tr("Video Generation Failed"))
-                st.stop()
-            reusable_voice_preview.pop("audio_bytes")
-            reusable_voice_preview["audio_file"] = preview_audio_file
-            logger.info(
-                f"reuse full voice preview for task: "
-                f"task_id={task_id}, duration={reusable_voice_preview['duration']:.2f}s"
-            )
-
-        try:
-            st.toast(tr("Generating Video"))
-            logger.info(tr("Start Generating Video"))
-            logger.info(utils.to_json(params))
-            submitted_task_id = webui_task.submit_generation(
-                task_id=task_id,
-                params=params,
-                capture_logs=not config.ui.get("hide_log", False),
-                voice_preview=reusable_voice_preview,
-                loomloom_video_request=loomloom_video_request,
-                voxcpm_reference_audio=voxcpm_reference_audio,
-                voxcpm_prompt_audio=voxcpm_prompt_audio,
-                voxcpm_prompt_text=voxcpm_prompt_text,
-                **({"jalapeno_video_endpoint": jalapeno_video_endpoint}
-                   if params.video_source == "jalapeno" else {}),
-            )
-            if loomloom_video_request is not None:
-                # 一个报价只允许提交一次。后台请求自带稳定幂等 ID；提交成功后
-                # 清除页面报价，下一次生成必须重新询价和确认。
-                st.session_state["loomloom_video_batch"] = None
-                st.session_state["loomloom_video_quote"] = None
-                st.session_state["loomloom_video_input_signature"] = ""
-                st.session_state["loomloom_video_client_request_id"] = ""
-        except Exception:
-            _remove_active_generation_task(task_id)
-            st.error(tr("Video Generation Failed"))
-            st.stop()
-
-        if isinstance(submitted_task_id, str) and submitted_task_id != task_id:
-            _remove_active_generation_task(task_id)
-            task_id = submitted_task_id
-            _add_active_generation_task(task_id, subject=params.video_subject)
-        st.session_state["current_generation_task_id"] = task_id
-        st.query_params["generation_task"] = task_id
-        logger.info(f"WebUI generation task submitted: task_id={task_id}")
-        if webui_task.is_generation_active(task_id):
-            st.rerun()
-
-    _render_current_generation_task()
     return start_button
 
 
+# -----------------------------------------------------------------------------
+# 三列应用壳：左导航 / 中功能页 / 右生成日志
+# -----------------------------------------------------------------------------
+
+NAV_PAGES = (
+    ("script", "Video Script Settings", ":material/edit_note:", "creation"),
+    ("video", "Video Settings", ":material/movie:", "creation"),
+    ("audio", "Audio Settings", ":material/graphic_eq:", "creation"),
+    ("subtitle", "Subtitle Settings", ":material/subtitles:", "creation"),
+    ("tasks", "Task Manager", ":material/checklist:", "publish"),
+    ("publish_history", "Publish History Tab", ":material/history:", "publish"),
+    ("llm", "LLM Settings Tab", ":material/psychology:", "config"),
+    ("material", "Material API Tab", ":material/video_library:", "config"),
+    ("publish", "Auto-Publish Settings", ":material/send:", "config"),
+    ("presets", "Preset Library", ":material/tune:", "config"),
+    ("settings", "Settings", ":material/settings:", "config"),
+)
+NAV_PAGE_IDS = tuple(page for page, _, _, _ in NAV_PAGES)
+NAV_GROUP_LABELS = {
+    "creation": "Nav Group Creation",
+    "publish": "Nav Group Publish",
+    "config": "Nav Group Config",
+}
+
+
+def _navigate_to_page(page):
+    if page in NAV_PAGE_IDS:
+        st.session_state["active_page"] = page
+    # 导航可能来自 fragment 内的按钮（任务计数、移动端更多菜单），
+    # 显式整页 rerun 才能切换中列页面。
+    st.rerun(scope="app")
+
+
+def _toggle_nav_collapsed():
+    _set_runtime_config(
+        "ui", "nav_collapsed", not _saved_ui_bool("nav_collapsed", False)
+    )
+    _save_runtime_config()
+
+
+def _toggle_log_collapsed():
+    collapsing = not _saved_ui_bool("log_collapsed", False)
+    _set_runtime_config("ui", "log_collapsed", collapsing)
+    if collapsing:
+        st.session_state.pop("log_overlay_user_open", None)
+    else:
+        # 窄屏（761–1500）展开偏好默认呈现竖轨；只有用户主动展开
+        # 才升为右侧浮层，避免首屏浮层盖住顶栏与中列。
+        st.session_state["log_overlay_user_open"] = True
+    _save_runtime_config()
+
+
+def _open_log_overlay():
+    """窄屏自动竖轨的展开入口：服务端仍是展开态，只补用户展开标记。"""
+    st.session_state["log_overlay_user_open"] = True
+    st.rerun(scope="app")
+
+
+def _toggle_mobile_log():
+    """窄屏日志浮层开关：会话级状态，不污染桌面端收起偏好。
+
+    打开时若桌面偏好为收起，则顺带展开——用户明确要看日志，
+    浮层内容需要展开态的完整日志 UI。
+    """
+    opening = not st.session_state.get("mobile_log_open", False)
+    st.session_state["mobile_log_open"] = opening
+    if opening and _saved_ui_bool("log_collapsed", False):
+        _set_runtime_config("ui", "log_collapsed", False)
+        _save_runtime_config()
+    st.rerun(scope="app")
+
+
+def _close_mobile_log():
+    st.session_state["mobile_log_open"] = False
+    st.rerun(scope="app")
+
+
+def _render_shell_shortcuts():
+    # Ctrl+B / Ctrl+J 分别收起/展开左导航与右日志。实测约束：
+    # 1) 监听函数的创建与 addEventListener 调用都必须在顶层窗口 realm
+    #    完成（整体包在 host.eval 里）——从 iframe realm 发起的注册
+    #    收不到可信键盘事件（合成事件可以，极易误判）；
+    # 2) 每次渲染都重新 remove+add（幂等自愈）：一次性注册的监听器
+    #    在后续 rerun 后会失效，会话级守卫也不可靠（未重新渲染的组件
+    #    会被 Streamlit 移除，height=0 的 iframe 可能未及执行脚本）。
+    # 监听器用捕获阶段：交互后 Streamlit 会在冒泡路径上拦截 keydown。
+    # 跨帧访问受限时静默降级为按钮操作。
+    components.html(
+        """
+        <script>
+        try {
+            window.parent.eval(`(() => {
+                if (!window.__mptShellShortcutHandler) {
+                    window.__mptShellShortcutHandler = (event) => {
+                        if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
+                            return;
+                        }
+                        const key = String(event.key || "").toLowerCase();
+                        const selector = key === "b" ? ".st-key-nav_column_toggle"
+                            : key === "j" ? ".st-key-log_column_toggle" : null;
+                        if (!selector) {
+                            return;
+                        }
+                        // Streamlit 会为按钮渲染隐藏的宽度测量克隆，
+                        // 必须选中可见按钮而不是第一个匹配。
+                        const candidates = document.querySelectorAll(selector + " button");
+                        let button = null;
+                        for (const candidate of candidates) {
+                            if (candidate.offsetWidth > 0 || candidate.offsetHeight > 0) {
+                                button = candidate;
+                                break;
+                            }
+                        }
+                        if (button) {
+                            event.preventDefault();
+                            button.click();
+                        }
+                    };
+                }
+                const handler = window.__mptShellShortcutHandler;
+                document.removeEventListener("keydown", handler, true);
+                document.addEventListener("keydown", handler, true);
+            })()`);
+        } catch (err) { /* 跨帧受限时降级为按钮操作 */ }
+        </script>
+        """,
+        height=0,
+    )
+
+
+@st.fragment(run_every="2s")
+def _render_nav_tasks_button(active_page):
+    # 任务计数沿用旧顶部入口的定时刷新策略：只重绘这一个按钮，
+    # 不打断中列表单输入。
+    processing_count = _count_processing_tasks(_collect_task_summaries())
+    st.button(
+        _task_manager_label(processing_count),
+        key="nav_page_tasks",
+        icon=":material/checklist:",
+        type="primary" if active_page == "tasks" else "tertiary",
+        on_click=_navigate_to_page,
+        args=("tasks",),
+        width="stretch",
+        help=tr("Task Manager"),
+    )
+
+
+def _render_nav_sidebar(active_page, collapsed):
+    with st.container(
+        key="nav_sidebar_collapsed" if collapsed else "nav_sidebar_expanded"
+    ):
+        toggle_label = (
+            tr("Expand Navigation") if collapsed else tr("Collapse Navigation")
+        )
+        st.button(
+            toggle_label,
+            key="nav_column_toggle",
+            icon=(
+                ":material/chevron_right:" if collapsed else ":material/chevron_left:"
+            ),
+            on_click=_toggle_nav_collapsed,
+            width="stretch",
+            help=toggle_label,
+        )
+        current_group = None
+        for page, label_key, icon, group in NAV_PAGES:
+            if group != current_group:
+                current_group = group
+                st.caption(tr(NAV_GROUP_LABELS[group]))
+            if page == "tasks":
+                _render_nav_tasks_button(active_page)
+                continue
+            st.button(
+                tr(label_key),
+                key=f"nav_page_{page}",
+                icon=icon,
+                type="primary" if page == active_page else "tertiary",
+                on_click=_navigate_to_page,
+                args=(page,),
+                width="stretch",
+                help=tr(label_key),
+            )
+    _render_shell_shortcuts()
+
+
+def _render_generation_log_column(collapsed):
+    with st.container(
+        key="log_column_collapsed" if collapsed else "log_column_expanded"
+    ):
+        # 窄屏浮层专用的关闭按钮：桌面端由 CSS 隐藏，
+        # 只改会话级 mobile_log_open，不动桌面端的收起偏好。
+        st.button(
+            tr("Close Generation Logs"),
+            key="mobile_log_close",
+            icon=":material/close:",
+            on_click=_close_mobile_log,
+            width="stretch",
+            help=tr("Close Generation Logs"),
+        )
+        if not collapsed:
+            # 761–1500 自动竖轨专用展开按钮：此时服务端仍是展开态，
+            # 普通切换按钮语义是“收起”，点了会像死按钮；CSS 只在该
+            # 窄屏 band 显示本按钮并隐藏普通切换。
+            st.button(
+                tr("Expand Generation Logs"),
+                key="log_overlay_open_button",
+                icon=":material/chevron_right:",
+                on_click=_open_log_overlay,
+                width="stretch",
+                help=tr("Expand Generation Logs"),
+            )
+        toggle_label = (
+            tr("Expand Generation Logs")
+            if collapsed
+            else tr("Collapse Generation Logs")
+        )
+        st.button(
+            toggle_label,
+            key="log_column_toggle",
+            icon=(
+                ":material/chevron_right:" if collapsed else ":material/chevron_left:"
+            ),
+            on_click=_toggle_log_collapsed,
+            width="stretch",
+            help=toggle_label,
+        )
+        if collapsed:
+            return
+        st.caption(tr("Generation Logs Title"))
+        if not _current_generation_task_id():
+            st.caption(tr("Generation Logs Empty"))
+            return
+        _render_current_generation_task()
+
+
+@st.fragment(run_every="2s")
+def _render_tasks_page():
+    # 任务页沿用旧 popover 的定时刷新；发布历史已拆到独立一级页。
+    _render_task_manager_panel(include_publish_history=False)
+
+
+@st.fragment(run_every="2s")
+def _render_publish_history_page():
+    _render_publish_history(publish_history.list_publish_history(limit=100))
+
+
+def _render_settings_page():
+    app_settings = config.snapshot_config_with_pending(config.app)
+    ui_settings = config.snapshot_config_with_pending(config.ui)
+    tabs = st.tabs(
+        [
+            tr("General Settings Tab"),
+            tr("Interface Settings Tab"),
+            tr("Key Backup Tab"),
+            tr("Cache Management Tab"),
+        ],
+        key="settings_page_tabs",
+        on_change="rerun",
+    )
+    general_tab, interface_tab, keys_tab, cache_tab = tabs
+    with general_tab:
+        if general_tab.open:
+            _render_general_settings(app_settings)
+    with interface_tab:
+        if interface_tab.open:
+            _render_interface_settings_body(ui_settings)
+    # 密钥恢复会写回配置并清除密码控件状态，必须在这些控件渲染之前执行。
+    if keys_tab.open:
+        _render_key_backup_settings(keys_tab)
+    if cache_tab.open:
+        _render_cache_management_settings(cache_tab)
+
+
+def _render_active_feature_page(active_page):
+    if active_page in {"script", "video", "audio", "subtitle"}:
+        # 四个创作页的控件已经在 main_settings_grid 中全量渲染，
+        # 这里只负责非创作页的惰性加载。
+        return
+    with st.container(key=f"feature_page_{active_page}"):
+        # tasks/publish_history 已在中心列全量渲染（popover 契约），
+        # 这里只负责其余非创作页的惰性加载。
+        if active_page == "presets":
+            # 预设库控件键独立，不与设置弹窗冲突，无需让位。
+            _render_presets_page()
+            return
+        if st.session_state.get("settings_dialog_open", False):
+            # 设置弹窗与一级页共用同一批控件；弹窗打开时让位，避免重复键。
+            st.info(tr("Settings Dialog Open Hint"))
+            return
+        app_settings = config.snapshot_config_with_pending(config.app)
+        if active_page == "llm":
+            _render_llm_settings_body(app_settings)
+        elif active_page == "material":
+            _render_material_settings_body(app_settings)
+        elif active_page == "publish":
+            _render_publish_settings_body(app_settings)
+        elif active_page == "settings":
+            _render_settings_page()
+
+
+def _render_mobile_tab_bar(active_page, mobile_log_open):
+    # 窄屏底部 tab 栏：四个创作页 + 日志浮层开关 + “更多”入口；
+    # 桌面端由 CSS 隐藏。
+    with st.container(key="mobile_tab_bar", horizontal=True, gap="small"):
+        for page, label_key, icon, _ in NAV_PAGES[:4]:
+            st.button(
+                tr(label_key),
+                key=f"nav_mobile_{page}",
+                icon=icon,
+                type="primary" if page == active_page else "tertiary",
+                on_click=_navigate_to_page,
+                args=(page,),
+                width="stretch",
+                help=tr(label_key),
+            )
+        st.button(
+            tr("Generation Logs Title"),
+            key="nav_mobile_log",
+            icon=":material/article:",
+            type="primary" if mobile_log_open else "tertiary",
+            on_click=_toggle_mobile_log,
+            width="stretch",
+            help=tr("Generation Logs Title"),
+        )
+        with st.popover(
+            tr("More Pages"),
+            icon=":material/more_horiz:",
+            key="nav_mobile_more",
+            width="stretch",
+        ):
+            for page, label_key, icon, _ in NAV_PAGES[4:]:
+                st.button(
+                    tr(label_key),
+                    key=f"nav_mobile_page_{page}",
+                    icon=icon,
+                    type="primary" if page == active_page else "tertiary",
+                    on_click=_navigate_to_page,
+                    args=(page,),
+                    width="stretch",
+                )
+
+
 def _render_application():
-    """按固定顺序渲染顶部栏、弹窗、生成表单和任务结果。"""
+    """渲染三列壳：顶部栏、左导航、中功能页、右生成日志与底部常驻操作栏。"""
+    _apply_pending_project_switch()
+    # 预设应用的三选决议可能把参数写入 settings_preset_payload，
+    # 必须先于下面的预设回填执行。
+    _apply_pending_preset_apply()
+    # 回填必须在顶栏之前：切换器标签读当前绑定，若回填晚于顶栏渲染，
+    # 加载完成的那一 run 顶栏仍显示旧项目名。
+    preset_applied = _apply_pending_settings_preset()
+    restore_applied = _apply_pending_task_restore()
     _render_top_bar()
 
     if st.session_state.get("settings_dialog_open", False):
         _render_settings_dialog()
 
-    if _apply_pending_settings_preset():
-        st.success(tr("Settings Preset Imported"))
+    preset_applied_name = st.session_state.pop("preset_applied_name", None)
+    if preset_applied:
+        if preset_applied_name:
+            st.success(tr("Preset Applied").format(name=preset_applied_name))
+        else:
+            st.success(tr("Settings Preset Imported"))
 
-    restore_applied = _apply_pending_task_restore()
     restore_candidate_id = st.session_state.get("task_restore_candidate_id")
     if restore_candidate_id:
         _render_task_restore_dialog(restore_candidate_id)
@@ -10034,25 +11268,106 @@ def _render_application():
     if restore_applied or restore_succeeded:
         st.success(tr("Task Configuration Loaded"))
 
-    with st.container(key="main_settings_grid"):
-        panel = st.columns(4)
-    left_panel = panel[0]
-    middle_panel = panel[1]
-    audio_panel = panel[2]
-    right_panel = panel[3]
+    switch_candidate = st.session_state.get("project_switch_candidate")
+    if switch_candidate and not st.session_state.get("project_switch_action"):
+        _render_project_switch_dialog(switch_candidate)
+    if st.session_state.pop("project_new_blank_done", False):
+        st.toast(tr("Project New Blank Done"), icon="📄")
+    if st.session_state.pop("project_save_as_new_done", False):
+        st.toast(tr("Saved As New Project"), icon="📄")
+    if st.session_state.pop("project_save_as_new_failed", False):
+        st.error(tr("Project Switch Failed"))
+    if st.session_state.pop("project_switch_failed", False):
+        st.error(tr("Project Switch Failed"))
 
-    params = VideoParams(video_subject="")
-    params.match_materials_to_script = bool(
-        st.session_state.get("match_materials_to_script", False)
-    )
-    _render_script_settings(left_panel, params)
+    preset_candidate = st.session_state.get("preset_apply_candidate")
+    if preset_candidate and not st.session_state.get("preset_apply_action"):
+        _render_preset_apply_dialog(preset_candidate)
+    preset_delete_candidate = st.session_state.get("preset_delete_candidate")
+    if preset_delete_candidate:
+        _render_preset_delete_dialog(preset_delete_candidate)
+    if st.session_state.pop("preset_apply_refused", False):
+        st.toast(tr("Project Locked Preset Refused"), icon="🔒")
+    deleted_name = st.session_state.pop("preset_deleted_name", None)
+    if deleted_name:
+        st.toast(tr("Preset Deleted").format(name=deleted_name), icon="🗑️")
+    if st.session_state.pop("preset_apply_failed", False):
+        st.error(tr("Preset Apply Failed"))
+    if st.session_state.pop("preset_delete_failed", False):
+        st.error(tr("Preset Delete Failed"))
 
-    uploaded_files = _render_video_settings(middle_panel, params)
-    uploaded_audio_file, uploaded_bgm_file, voice_mode = _render_audio_settings(
-        audio_panel, params
-    )
+    active_page = st.session_state.get("active_page", "script")
+    if active_page not in NAV_PAGE_IDS:
+        active_page = "script"
+    nav_collapsed = _saved_ui_bool("nav_collapsed", False)
+    log_collapsed = _saved_ui_bool("log_collapsed", False)
+    mobile_log_open = bool(st.session_state.get("mobile_log_open", False))
+    nav_width = 64 if nav_collapsed else 232
+    log_width = 48 if log_collapsed else 380
 
-    _render_subtitle_settings(right_panel, params)
+    # 三列先用数值权重占位；实际像素宽度由 styles.css 依据
+    # app_shell_n*_l*_m* 状态键锁定，收起/展开不依赖运行时测量。
+    # _m 后缀仅供窄屏媒体查询判断日志浮层是否打开；_o 标记用户
+    # 主动展开过日志，窄屏据此在自动竖轨与右侧浮层之间切换。
+    with st.container(
+        key=(
+            f"app_shell_n{nav_width}_l{log_width}_m{int(mobile_log_open)}"
+            f"_o{int(bool(st.session_state.get('log_overlay_user_open', False)))}"
+        )
+    ):
+        nav_col, page_col, log_col = st.columns(
+            [nav_width, 1000, log_width],
+            gap="medium",
+            vertical_alignment="top",
+        )
+
+    with nav_col:
+        _render_nav_sidebar(active_page, nav_collapsed)
+
+    with page_col:
+        with st.container(key=f"active_page_{active_page}"):
+            # 锁定横幅只在创作页显示：CSS 以横幅为锚禁用创作区指针事件；
+            # 配置页不受项目锁定影响。
+            if _project_is_locked() and active_page in (
+                "script", "video", "audio", "subtitle"
+            ):
+                _render_project_lock_banner()
+            # 四个创作面板必须每次 rerun 都渲染：计费确认、上传、报价等
+            # 会话级状态在它们内部；非活动页只通过 CSS st-key 约定隐藏。
+            with st.container(key="main_settings_grid"):
+                script_panel = st.container(key="page_script")
+                video_panel = st.container(key="page_video")
+                audio_panel = st.container(key="page_audio")
+                subtitle_panel = st.container(key="page_subtitle")
+
+            params = VideoParams(video_subject="")
+            params.match_materials_to_script = bool(
+                st.session_state.get("match_materials_to_script", False)
+            )
+            _render_script_settings(script_panel, params)
+
+            uploaded_files = _render_video_settings(video_panel, params)
+            uploaded_audio_file, uploaded_bgm_file, voice_mode = _render_audio_settings(
+                audio_panel, params
+            )
+
+            _render_subtitle_settings(subtitle_panel, params)
+
+            # 任务管理/发布历史沿用旧顶栏 popover 的契约：行级操作按钮
+            # 在每次 rerun 都必须存在（headless 回归测试依赖）；非活动
+            # 时与创作页一样仅由 CSS st-key 约定隐藏。
+            with st.container(key="page_tasks"):
+                _render_tasks_page()
+            with st.container(key="page_publish_history"):
+                _render_publish_history_page()
+
+            _render_active_feature_page(active_page)
+            action_bar = st.container(key="action_bar")
+
+    with log_col:
+        _render_generation_log_column(log_collapsed)
+
+    _render_mobile_tab_bar(active_page, mobile_log_open)
 
     generation_submitted = _render_generation_controls(
         params,
@@ -10060,12 +11375,15 @@ def _render_application():
         uploaded_audio_file,
         uploaded_bgm_file,
         voice_mode,
+        panel=action_bar,
     )
 
     # 生成分支在启动后台线程前已经请求过保存。普通控件交互继续请求非阻塞保存；
     # 如果后台任务正在使用配置，配置层会在任务结束时自动应用并落盘最新值。
     if not generation_submitted:
         _save_runtime_config()
+
+    _finalize_project_binding(params)
 
 
 _render_application()

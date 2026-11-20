@@ -173,12 +173,95 @@ div[class*="st-key-voice_mode_control"] [role="radiogroup"] > button p {
     display: none !important;
 }
 
-/* 顶部任务入口由 st.fragment 定时刷新，Streamlit 会为 Fragment 自动生成一个
-   占满整行的 LayoutWrapper。这里只收缩该包装层，保证右侧操作区按内容紧凑排列。 */
-.st-key-top_bar_actions
-    > div[data-testid="stLayoutWrapper"]:first-child {
+/* 顶部操作区按内容紧凑排列，不占用品牌区的剩余宽度。 */
+.st-key-top_bar_actions {
     flex: 0 0 auto !important;
     width: fit-content !important;
+}
+
+/* 项目切换器按钮：长项目名截断为单行省略号，脏标记●保留在尾部。 */
+.st-key-project_switcher button {
+    max-width: 13rem;
+}
+
+.st-key-project_switcher button p {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+@media (max-width: 760px) {
+    /* 窄屏顶栏操作区一行放下切换器+设置+语言：三者都限宽。 */
+    .st-key-project_switcher button {
+        max-width: 6.75rem;
+    }
+
+    .st-key-top_bar_actions div[data-testid="stSelectbox"] {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    /* 水平容器子项的 min-width:auto 会撑住包装层：限宽必须落在
+       stElementContainer 包装上，否则内层再窄也会换行。 */
+    .st-key-top_bar_actions > [class~="st-key-top_language_code_selector"] {
+        flex: 0 0 auto !important;
+        width: 112px !important;
+        min-width: 0 !important;
+    }
+}
+
+/* 已完成项目锁定：横幅存在时创作区禁用指针事件并降饱和（空容器不渲染
+   DOM，兄弟选择器不可靠，改用 :has 锚定横幅）；底部操作栏不受影响
+   （生成按钮另在服务端 disabled）。 */
+[class*="st-key-active_page_"]:has([class~="st-key-project_lock_banner"]) [class~="st-key-main_settings_grid"] {
+    pointer-events: none;
+    opacity: 0.55;
+    filter: saturate(0.7);
+    transition: opacity 0.25s ease;
+}
+
+[class~="st-key-project_lock_banner"] {
+    margin-bottom: 0.75rem;
+}
+
+[class~="st-key-project_lock_banner"] [data-testid="stAlert"] {
+    border-left: 4px solid #f59e0b;
+}
+
+/* 预设库：保存栏输入框占满剩余宽度，按钮保持自然宽；水平容器子项
+   的 min-width:auto 会撑住包装层，限宽必须落在 stElementContainer 上。 */
+[class~="st-key-preset_save_bar"] {
+    align-items: center;
+    /* 输入框固有宽度 + 按钮超过窄屏行宽时，wrap 会先换行再收缩；
+       改用 nowrap + basis 0 让输入框始终占满剩余宽度。 */
+    flex-wrap: nowrap;
+    margin-bottom: 0.5rem;
+}
+
+[class~="st-key-preset_save_bar"] > [class~="st-key-preset_name_input"] {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+[class~="st-key-preset_save_bar"] > [class~="st-key-preset_save_current_button"] {
+    flex: 0 0 auto;
+}
+
+/* 预设卡片：圆角 + 悬停时借主题红描边与投影，给出可交互反馈。 */
+[class*="st-key-preset_row_"] {
+    border-radius: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+[class*="st-key-preset_row_"]:hover {
+    border-color: rgba(255, 75, 75, 0.45);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+    [class*="st-key-preset_row_"]:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
 }
 
 @media (max-width: 700px) {
@@ -388,9 +471,8 @@ div[class*="st-key-task_row_"] button[kind="secondary"] p {
 }
 
 
-/* 中等宽度下将四个设置面板调整为 2×2。主内容区还会扣除页面边距，因此
-   1200～1440px 的常见视口不足以稳定容纳四列英文标签；断点覆盖到 1500px，
-   避免下拉内容和标题被裁切，真正的宽屏才恢复四列。 */
+/* 中等宽度下缩小品牌字号；四列面板已改为三列壳中的单页渲染，
+   不再需要 2×2 换行规则。 */
 @media (min-width: 701px) and (max-width: 1500px) {
     .mpt-brand__name {
         font-size: 2.25rem;
@@ -398,22 +480,6 @@ div[class*="st-key-task_row_"] button[kind="secondary"] p {
 
     .mpt-brand__version {
         font-size: 0.875rem;
-    }
-
-    div[class*="st-key-main_settings_grid"]
-        > div[data-testid="stLayoutWrapper"]
-        > div[data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-        gap: 1rem !important;
-    }
-
-    div[class*="st-key-main_settings_grid"]
-        > div[data-testid="stLayoutWrapper"]
-        > div[data-testid="stHorizontalBlock"]
-        > div[data-testid="stColumn"] {
-        flex: 1 1 calc(50% - 0.5rem) !important;
-        width: calc(50% - 0.5rem) !important;
-        min-width: calc(50% - 0.5rem) !important;
     }
 }
 
@@ -499,5 +565,542 @@ div[class*="st-key-task_row_"] button[kind="secondary"] p {
         flex: 1 1 0 !important;
         width: auto !important;
         min-width: 1.75rem !important;
+    }
+}
+
+/* ==========================================================================
+   三列应用壳：左导航 / 中功能页 / 右生成日志
+   ========================================================================== */
+
+/* 宽布局下让三列壳占满可用宽度，不再受默认块容器最大宽度限制。 */
+div[data-testid="stMainBlockContainer"] {
+    max-width: 100% !important;
+}
+
+/* 三列整体不换行；数值权重只是占位，实际像素宽度由状态键锁定。 */
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap !important;
+    align-items: flex-start !important;
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(2) {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    /* 中列至少占满视口：内容不足时操作栏仍被 sticky 压在视口底部，
+       内容超长时随滚动吸底，两种情况都常驻可触达。 */
+    min-height: calc(100dvh - 7.5rem);
+}
+
+/* 让中列内部的垂直块链继承列高，操作栏才能被推到列底。 */
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(2)
+    > div[data-testid="stVerticalBlock"],
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(2)
+    > div[data-testid="stLayoutWrapper"] {
+    min-height: inherit;
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(2)
+    div[class*="st-key-active_page_"] {
+    flex: 1 1 auto;
+    min-height: inherit;
+}
+
+div[class*="st-key-app_shell_n232"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1) {
+    flex: 0 0 232px !important;
+    width: 232px !important;
+    min-width: 232px !important;
+}
+
+div[class*="st-key-app_shell_n64"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1) {
+    flex: 0 0 64px !important;
+    width: 64px !important;
+    min-width: 64px !important;
+}
+
+div[class*="st-key-app_shell_"][class*="_l380"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3) {
+    flex: 0 0 380px !important;
+    width: 380px !important;
+    min-width: 380px !important;
+}
+
+div[class*="st-key-app_shell_"][class*="_l48"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3) {
+    flex: 0 0 48px !important;
+    width: 48px !important;
+    min-width: 48px !important;
+}
+
+/* 左右两列随页面滚动吸顶，内容超高时列内滚动；滚动条用页面自身的
+   半透明中性色，而不是浏览器默认样式。 */
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1),
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3) {
+    position: sticky !important;
+    top: 0.5rem;
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, currentColor 30%, transparent) transparent;
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar {
+    width: 8px;
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar-thumb,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar-thumb {
+    border-radius: 4px;
+    background: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar-thumb:hover,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, currentColor 40%, transparent);
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar-track,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* 导航按钮：整行宽、左对齐、圆角，悬停有轻量背景反馈；当前页用
+   Streamlit primary 色标识。 */
+div[class*="st-key-nav_sidebar_"] button {
+    border-radius: 8px !important;
+}
+
+div[class*="st-key-nav_sidebar_"] button[kind="tertiary"] {
+    justify-content: flex-start !important;
+}
+
+div[class*="st-key-nav_sidebar_"] button[kind="tertiary"]:hover {
+    background: color-mix(in srgb, currentColor 8%, transparent) !important;
+}
+
+div[class*="st-key-nav_sidebar_"] [data-testid="stCaptionContainer"] {
+    margin-top: 0.5rem;
+    opacity: 0.7;
+}
+
+/* 收起态只保留图标：文字视觉隐藏但保留可访问名称，与任务行操作
+   按钮的隐藏方式一致。 */
+div[class*="st-key-nav_sidebar_collapsed"] [data-testid="stCaptionContainer"] {
+    display: none !important;
+}
+
+div[class*="st-key-nav_sidebar_collapsed"] button p,
+div[class*="st-key-log_column_collapsed"] button p {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+}
+
+div[class*="st-key-nav_sidebar_collapsed"] button span[data-has-shortcut],
+div[class*="st-key-log_column_collapsed"] button span[data-has-shortcut] {
+    width: 100% !important;
+    gap: 0 !important;
+    justify-content: center !important;
+}
+
+div[class*="st-key-nav_sidebar_collapsed"] button,
+div[class*="st-key-log_column_collapsed"] button {
+    min-height: 2.25rem !important;
+    padding: 0.25rem !important;
+}
+
+/* 页面可见性约定：四个创作页与任务/发布历史页容器每次都渲染
+   （后两者沿用旧 popover 的行按钮契约），非活动页由 CSS 隐藏；
+   显示时恢复 flex 布局，保留 Streamlit 容器的子元素间距。 */
+div[class*="st-key-page_script"],
+div[class*="st-key-page_video"],
+div[class*="st-key-page_audio"],
+div[class*="st-key-page_subtitle"],
+div[class*="st-key-page_tasks"],
+div[class*="st-key-page_publish_history"] {
+    display: none !important;
+}
+
+div[class*="st-key-active_page_script"] div[class*="st-key-page_script"],
+div[class*="st-key-active_page_video"] div[class*="st-key-page_video"],
+div[class*="st-key-active_page_audio"] div[class*="st-key-page_audio"],
+div[class*="st-key-active_page_subtitle"] div[class*="st-key-page_subtitle"],
+div[class*="st-key-active_page_tasks"] div[class*="st-key-page_tasks"],
+div[class*="st-key-active_page_publish_history"] div[class*="st-key-page_publish_history"] {
+    display: flex !important;
+}
+
+/* 中列底部常驻操作栏： sticky 吸底 + 半透明背景，滚动时始终可触达
+   生成按钮与预设导入导出。
+   注意：sticky 必须加在包裹 action_bar 的 stLayoutWrapper 上——
+   keyed 容器自身的直接父级与它等高，sticky 无位移空间；
+   wrapper 的父级（active_page 纵向块）高于视口，才能产生吸底钳制。 */
+div[data-testid="stLayoutWrapper"]:has(> div[class*="st-key-action_bar"]) {
+    position: sticky !important;
+    bottom: 0.5rem;
+    z-index: 50;
+    margin-top: 1rem;
+}
+
+div[class*="st-key-action_bar"] {
+    padding: 0.75rem 0.9rem !important;
+    border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, #ffffff 94%, transparent);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+    div[class*="st-key-action_bar"] {
+        background: color-mix(in srgb, #0e1117 94%, transparent);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
+}
+
+/* 移动端底部 tab 栏在桌面端隐藏，窄屏媒体查询中重新启用。 */
+div[class*="st-key-mobile_tab_bar"] {
+    display: none !important;
+}
+
+/* 日志浮层的关闭按钮仅在窄屏显示。 */
+div[class~="st-key-mobile_log_close"] {
+    display: none !important;
+}
+
+/* ≤1500px：展开的日志列改为右侧浮层，收起态仍保留 48px 在流窄轨。 */
+@media (max-width: 1500px) {
+    div[class*="st-key-app_shell_"][class*="_l380"]
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3) {
+        position: fixed !important;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(380px, 92vw) !important;
+        min-width: 0 !important;
+        max-height: none;
+        z-index: 120;
+        padding: 0.75rem;
+        background: #ffffff;
+        border-left: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        box-shadow: -12px 0 32px rgba(15, 23, 42, 0.18);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        div[class*="st-key-app_shell_"][class*="_l380"]
+            > div[data-testid="stLayoutWrapper"]
+            > div[data-testid="stHorizontalBlock"]
+            > div[data-testid="stColumn"]:nth-child(3) {
+            background: #0e1117;
+            box-shadow: -12px 0 32px rgba(0, 0, 0, 0.5);
+        }
+    }
+}
+
+/* 自动竖轨专用展开按钮：默认全端隐藏，只在下方 761–1500 band 内显示。 */
+[class~="st-key-log_overlay_open_button"] {
+    display: none !important;
+}
+
+/* 761–1500px：展开偏好首屏自动收为竖轨（只留展开图标按钮），
+   避免浮层遮住顶栏操作区与中列；用户主动展开（_o1）后才恢复
+   上面的右侧浮层。对应需求“1100–1500 右栏自动收为竖条”。 */
+@media (min-width: 761px) and (max-width: 1500px) {
+    div[class*="st-key-app_shell_"][class*="_l380"]:not([class*="_o1"])
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3) {
+        position: sticky !important;
+        top: 0.5rem;
+        right: auto;
+        bottom: auto;
+        flex: 0 0 48px !important;
+        width: 48px !important;
+        min-width: 48px !important;
+        max-height: calc(100dvh - 1rem);
+        overflow: hidden;
+        z-index: auto;
+        padding: 0;
+        background: transparent;
+        border-left: none;
+        box-shadow: none;
+    }
+
+    /* 竖轨只保留专用展开按钮：其余元素容器整体隐藏（含日志 fragment
+       与普通切换按钮——后者此时语义是“收起”，点了会像死按钮）。
+       注意 st-key 类就在 stElementContainer 自身上，不能用 :has 锚定。 */
+    div[class*="st-key-app_shell_"][class*="_l380"]:not([class*="_o1"])
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3)
+        [data-testid="stElementContainer"]:not([class~="st-key-log_overlay_open_button"]) {
+        display: none !important;
+    }
+
+    div[class*="st-key-app_shell_"][class*="_l380"]:not([class*="_o1"])
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3)
+        [class~="st-key-log_overlay_open_button"] {
+        display: block !important;
+    }
+
+    /* 与真收起态一致：图标保留、文字视觉隐藏但保留可访问名称。 */
+    div[class*="st-key-app_shell_"][class*="_l380"]:not([class*="_o1"])
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3) button p {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        clip-path: inset(50%) !important;
+        white-space: nowrap !important;
+    }
+}
+
+/* ≤1100px：展开的导航列改为左侧抽屉，收起态保留 64px 图标窄轨。 */
+@media (max-width: 1100px) {
+    div[class*="st-key-app_shell_n232"]
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(1) {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: min(264px, 86vw) !important;
+        min-width: 0 !important;
+        max-height: none;
+        z-index: 120;
+        padding: 0.75rem;
+        background: #ffffff;
+        border-right: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        box-shadow: 12px 0 32px rgba(15, 23, 42, 0.18);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        div[class*="st-key-app_shell_n232"]
+            > div[data-testid="stLayoutWrapper"]
+            > div[data-testid="stHorizontalBlock"]
+            > div[data-testid="stColumn"]:nth-child(1) {
+            background: #0e1117;
+            box-shadow: 12px 0 32px rgba(0, 0, 0, 0.5);
+        }
+    }
+}
+
+/* ≤760px：隐藏左侧导航，启用底部 tab 栏；日志窄轨保留，展开后
+   为近全宽浮层。 */
+@media (max-width: 760px) {
+    div[class*="st-key-app_shell_"]
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(1) {
+        display: none !important;
+    }
+
+    /* 日志列窄屏默认隐藏：展开态若沿用 ≤1500 的右侧浮层会在
+       手机首屏遮住整页；改为 _m1 时才弹出的底部薄层。 */
+    div[class*="st-key-app_shell_"]
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3) {
+        display: none !important;
+    }
+
+    div[class*="st-key-app_shell_"][class*="_l380"][class*="_m1"]
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3) {
+        display: block !important;
+        position: fixed !important;
+        top: auto;
+        left: 0;
+        right: 0;
+        /* 与 tab 栏顶边齐平（栏高 = 2.75rem 按钮 + 0.8rem 内边距 + 1px 边框），
+           留缝会让底层页面内容从缝隙里露出来。 */
+        bottom: calc(3.55rem + env(safe-area-inset-bottom, 0px));
+        width: auto !important;
+        min-width: 0 !important;
+        max-height: 62vh;
+        overflow-y: auto;
+        z-index: 125;
+        padding: 0.75rem;
+        background: #ffffff;
+        border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 -12px 32px rgba(15, 23, 42, 0.18);
+    }
+
+    /* 薄层 scrim：列自身 z-index 形成堆叠上下文，::before 取 -1 即
+       压在页面之上、薄层内容之下；tab 栏 z-index 更高不受影响。 */
+    div[class*="st-key-app_shell_"][class*="_l380"][class*="_m1"]
+        > div[data-testid="stLayoutWrapper"]
+        > div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"]:nth-child(3)::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        background: rgba(15, 23, 42, 0.32);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        div[class*="st-key-app_shell_"][class*="_l380"][class*="_m1"]
+            > div[data-testid="stLayoutWrapper"]
+            > div[data-testid="stHorizontalBlock"]
+            > div[data-testid="stColumn"]:nth-child(3)::before {
+            background: rgba(0, 0, 0, 0.5);
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        div[class*="st-key-app_shell_"][class*="_l380"][class*="_m1"]
+            > div[data-testid="stLayoutWrapper"]
+            > div[data-testid="stHorizontalBlock"]
+            > div[data-testid="stColumn"]:nth-child(3) {
+            background: #0e1117;
+            box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.5);
+        }
+    }
+
+    div[class~="st-key-mobile_log_close"] {
+        display: block !important;
+    }
+
+    /* 浮层内用专用关闭按钮，全局收起偏好留给桌面端。 */
+    div[class~="st-key-log_column_toggle"] {
+        display: none !important;
+    }
+
+    /* horizontal=True 容器的 st-key 类直接挂在 stHorizontalBlock 上，
+       子级是 stElementContainer 而非 stColumn，选择器必须按此结构写。 */
+    div[class*="st-key-mobile_tab_bar"] {
+        display: flex !important;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 130;
+        gap: 0.25rem !important;
+        align-items: stretch;
+        padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom, 0px));
+        background: #ffffff;
+        border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        div[class*="st-key-mobile_tab_bar"] {
+            background: #0e1117;
+            box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+        }
+    }
+
+    div[class*="st-key-mobile_tab_bar"]
+        > div[data-testid="stElementContainer"] {
+        flex: 1 1 0 !important;
+        width: auto !important;
+        min-width: 0 !important;
+    }
+
+    div[class*="st-key-mobile_tab_bar"] button {
+        min-height: 2.75rem !important;
+        padding: 0.25rem !important;
+        border-radius: 10px !important;
+    }
+
+    div[class*="st-key-mobile_tab_bar"] button p {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        clip-path: inset(50%) !important;
+        white-space: nowrap !important;
+    }
+
+    div[class*="st-key-mobile_tab_bar"] button span[data-has-shortcut] {
+        width: 100% !important;
+        gap: 0 !important;
+        justify-content: center !important;
+    }
+
+    /* 正文预留底部 tab 栏高度；操作栏吸底位置上移，避免被遮挡。 */
+    div[data-testid="stMainBlockContainer"] {
+        padding-bottom: 4.25rem !important;
+    }
+
+    div[data-testid="stLayoutWrapper"]:has(> div[class*="st-key-action_bar"]) {
+        bottom: 4rem;
     }
 }
