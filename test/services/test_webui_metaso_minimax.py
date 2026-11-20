@@ -4,6 +4,7 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
 from app.config import config
+from app.utils import utils
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -20,7 +21,7 @@ def _widget_by_key(elements, key):
     )
 
 
-def test_metaso_source_requires_confirmation_and_never_enters_task_params():
+def test_metaso_source_requires_confirmation_and_never_enters_task_params(tmp_path):
     test_config = dict(
         config.app,
         llm_provider="openai",
@@ -34,6 +35,8 @@ def test_metaso_source_requires_confirmation_and_never_enters_task_params():
         patch.object(config, "ui", dict(config.ui, voice_mode="none")),
         patch.object(config, "try_save_config", return_value=True),
         patch("app.services.webui_task.submit_generation") as submit_generation,
+        # 提交钩子会写 params.json 快照：隔离 task_dir，避免污染真实 storage/tasks
+        patch.object(utils, "task_dir", lambda *a, **k: str(tmp_path / "tasks")),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=60)
         app.session_state["ui_language"] = "en"

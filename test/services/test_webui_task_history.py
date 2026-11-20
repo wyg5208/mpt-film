@@ -252,6 +252,10 @@ def test_history_scan_skips_non_object_script_payload(tmp_path, payload):
         "utils": SimpleNamespace(task_dir=lambda: str(tasks_root)),
         "const": const,
         "_find_final_task_video": lambda _task_path: "",
+        # 草稿检测依赖项目快照常量与读取器；本用例只关心损坏 script.json
+        # 的兜底行为，快照读取统一 stub 为缺失。
+        "PROJECT_PARAMS_FILE_NAME": "params.json",
+        "_read_project_params": lambda _task_id: None,
     }
     module = ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[]))
     exec(compile(module, str(WEBUI_MAIN), "exec"), namespace)
