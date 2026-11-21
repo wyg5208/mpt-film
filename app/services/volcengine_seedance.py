@@ -1,4 +1,6 @@
+import base64
 import math
+import mimetypes
 import os
 import time
 from dataclasses import dataclass, field
@@ -229,14 +231,38 @@ def _rendition_size(aspect: VideoAspect, resolution: str) -> tuple[int, int]:
     return long_edge, short_edge
 
 
+def _frame_content(source: str, role: str) -> dict:
+    """首/尾帧条件化（B5 云端关键帧链）：http(s)/data URL 直传，
+    本地文件读字节转 base64 data URL。付费接口不接受空条件。"""
+    value = str(source or "").strip()
+    if not value:
+        raise VolcEngineSeedanceError(f"Seedance {role} source must not be empty")
+    if not value.startswith(("http://", "https://", "data:")):
+        if not os.path.isfile(value):
+            raise VolcEngineSeedanceError(
+                f"Seedance {role} file does not exist: {value}"
+            )
+        mime = mimetypes.guess_type(value)[0] or "image/png"
+        with open(value, "rb") as handle:
+            encoded = base64.b64encode(handle.read()).decode("ascii")
+        value = f"data:{mime};base64,{encoded}"
+    return {"type": "image_url", "image_url": {"url": value}, "role": role}
+
+
 def generate_videos(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect = VideoAspect.portrait,
     *,
     endpoint: SeedanceEndpoint | None = None,
+    first_frame: str = "",
+    last_frame: str = "",
 ) -> list[MaterialInfo]:
-    """提交一个 Seedance 文生视频任务；默认仍采用原有方舟配置。"""
+    """提交一个 Seedance 文生视频任务；默认仍采用原有方舟配置。
+
+    first_frame/last_frame（B5）：非空时 payload content 追加 image_url
+    条件项，升级为首尾帧图生视频；缺省纯文生视频，既有调用零回归。
+    """
     api_key = endpoint.api_key if endpoint else get_api_key()
     provider_id = endpoint.provider_id if endpoint else "volcengine_seedance"
     display_name = endpoint.display_name if endpoint else "Volcano Engine Seedance"
@@ -274,9 +300,14 @@ def generate_videos(
             f"(configured {minimum}-{maximum}s)"
         )
     resolution = endpoint.resolution if endpoint else _resolution()
+    content = [{"type": "text", "text": term}]
+    if first_frame:
+        content.append(_frame_content(first_frame, "first_frame"))
+    if last_frame:
+        content.append(_frame_content(last_frame, "last_frame"))
     payload = {
         "model": endpoint.model if endpoint else _model_id(),
-        "content": [{"type": "text", "text": term}],
+        "content": content,
         "ratio": aspect.value,
         "duration": duration,
         "resolution": resolution,

@@ -99,6 +99,77 @@ class TestVolcEngineSeedanceService(unittest.TestCase):
         )
         self.assertEqual(result[0].source_info["search_term"], "smart home")
 
+    def test_first_last_frame_appended_as_image_url_content(self):
+        # B5 云端关键帧链：首/尾帧以 image_url 条件项追加在 text 之后。
+        submit = self._response({"id": "cgt-frames"})
+        completed = self._response(
+            {
+                "id": "cgt-frames",
+                "status": "succeeded",
+                "content": {"video_url": "https://cdn.example.com/frames.mp4"},
+            }
+        )
+        with (
+            patch.object(seedance.requests, "post", return_value=submit) as post,
+            patch.object(seedance.requests, "get", return_value=completed),
+        ):
+            seedance.generate_videos(
+                "sunrise", 5,
+                first_frame="https://cdn.example.com/first.png",
+                last_frame="data:image/png;base64,QUJD",
+            )
+        self.assertEqual(
+            post.call_args.kwargs["json"]["content"],
+            [
+                {"type": "text", "text": "sunrise"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://cdn.example.com/first.png"},
+                    "role": "first_frame",
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,QUJD"},
+                    "role": "last_frame",
+                },
+            ],
+        )
+
+    def test_local_frame_file_becomes_base64_data_url(self):
+        import base64
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            frame = os.path.join(tmp, "keyframe.png")
+            payload = b"\x89PNG\r\n\x1a\n" + b"frame-bytes"
+            with open(frame, "wb") as handle:
+                handle.write(payload)
+            submit = self._response({"id": "cgt-local-frame"})
+            completed = self._response(
+                {
+                    "id": "cgt-local-frame",
+                    "status": "succeeded",
+                    "content": {"video_url": "https://cdn.example.com/local.mp4"},
+                }
+            )
+            with (
+                patch.object(seedance.requests, "post", return_value=submit) as post,
+                patch.object(seedance.requests, "get", return_value=completed),
+            ):
+                seedance.generate_videos("sunrise", 5, first_frame=frame)
+        url = post.call_args.kwargs["json"]["content"][1]["image_url"]["url"]
+        self.assertTrue(url.startswith("data:image/png;base64,"))
+        self.assertEqual(base64.b64decode(url.split(",", 1)[1]), payload)
+
+    def test_missing_frame_file_fails_before_paid_submission(self):
+        with patch.object(seedance.requests, "post") as post:
+            with self.assertRaises(seedance.VolcEngineSeedanceError) as raised:
+                seedance.generate_videos(
+                    "sunrise", 5, first_frame="Z:/no/such/keyframe.png"
+                )
+        self.assertIn("does not exist", str(raised.exception))
+        post.assert_not_called()
+
     def test_submit_poll_and_parse_successful_video(self):
         submit = self._response({"id": "cgt-123"})
         polls = [

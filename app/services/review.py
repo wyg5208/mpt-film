@@ -5,7 +5,7 @@
 的缺陷变成结构化报文。与 OpenFilm 有三点刻意差异：
 
 1. 只审查已渲染的产物。输入就是一个 mp4 路径，不重跑任何页面，也不引入浏览器。
-2. **advisory，永不阻断任务**。MPT 的成片是用户等待已久的后台产物，审查发现只能
+2. **advisory，永不阻断任务**。ChangoFilm 的成片是用户等待已久的后台产物，审查发现只能
    提示，不能把成功变成失败。因此本模块所有入口都吞掉内部异常，调用方也不需要
    try/except。
 3. 零新依赖。只用 stdlib + numpy/PIL + 仓库已有的 ffmpeg 二进制。注意
@@ -59,6 +59,17 @@ CLIP_DBTP = -0.1
 # 时长不一致：成片必须覆盖配音长度，超出该秒数差值即为异常。
 DURATION_TOLERANCE = 0.15
 
+# 边界跳变（B5 scene_boundary_jump）：切点前后帧的 rgb24 平均绝对差与
+# 整帧亮度跳变。真实夹具实测（calibrate-boundary-b5）：连续运动切点
+# diff 3.96–6.12 / luma ≤0.09，恒等静帧 0/0；库存硬切 diff 103.9–160.5，
+# 其中运动→运动硬切 luma 仅 2.97（亮度单独不可靠，帧差主判）。阈值取
+# 40/30：连续基线上方约 6 倍余量，硬切最小值下方约 2.6 倍，两侧都宽。
+# 转场（fade/slide/zoom）遮蔽的切点不报。
+BOUNDARY_JUMP_DIFF = 40.0
+BOUNDARY_LUMA_JUMP = 30.0
+# 切点前取帧的回退量：约一帧（30fps 下 0.033s），保证落在上一段内。
+BOUNDARY_FRAME_OFFSET = 0.04
+
 # 连续帧数门槛与邻域窗口均以秒为单位在下面换算。
 BLACK_MIN_SECONDS = 0.2
 FROZEN_MIN_SECONDS = 0.4
@@ -77,6 +88,7 @@ class Finding:
     end: float
     detail: str
     evidence: str = ""
+    scene_order: int | None = None
 
     def to_warning(self, video_index: int | None = None) -> dict:
         """转换为任务层现有的 warnings 形状，避免为审查新增状态字段。"""
@@ -89,6 +101,8 @@ class Finding:
         }
         if video_index is not None:
             warning["video_index"] = video_index
+        if self.scene_order is not None:
+            warning["scene_order"] = self.scene_order
         return warning
 
 
@@ -312,7 +326,7 @@ def _find_visual_findings(frames: np.ndarray, fps: int) -> list[Finding]:
         # diff 序列比 frames 少一帧，区间长度即"静止的相邻帧对数"。
         if end - start < frozen_min:
             continue
-        # 整片静止在 MPT 里通常是素材读取失败后循环兜底，属于必须提示的问题。
+        # 整片静止在 ChangoFilm 里通常是素材读取失败后循环兜底，属于必须提示的问题。
         findings.append(
             Finding(
                 code="frozen_sequence",
@@ -362,6 +376,91 @@ def _find_visual_findings(frames: np.ndarray, fps: int) -> list[Finding]:
         # 拼接时序问题的副本，与黑场/白闪通道一起反复报告没有额外价值。
         break
 
+    return findings
+
+
+def _extract_frame_rgb(video_path: str, at_seconds: float) -> np.ndarray | None:
+    """抽取指定时刻的单帧（rgb24，64x36），供切点前后帧差与色度跳变。
+
+    -ss 放在 -i 前：ffmpeg 先 seek 到关键帧再解码到目标时刻，帧级精确；
+    失败返回 None，边界审查降级为不报（advisory 绝不阻断）。
+    """
+    command = [
+        _ffmpeg_binary(),
+        "-nostdin",
+        "-v",
+        "error",
+        "-ss",
+        f"{max(0.0, at_seconds):.3f}",
+        "-i",
+        video_path,
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={PROBE_WIDTH}:{PROBE_HEIGHT}:flags=area",
+        "-pix_fmt",
+        "rgb24",
+        "-f",
+        "rawvideo",
+        "-",
+    ]
+    result = _run(command, timeout=60)
+    frame_bytes = PROBE_WIDTH * PROBE_HEIGHT * 3
+    if result.returncode != 0 or len(result.stdout) < frame_bytes:
+        return None
+    return np.frombuffer(result.stdout[:frame_bytes], dtype=np.uint8).reshape(
+        PROBE_HEIGHT, PROBE_WIDTH, 3
+    )
+
+
+def _boundary_findings(video_path: str, boundaries: list, duration: float | None) -> list[Finding]:
+    """方案切点边界审查（B5）：切点前后帧差 + 亮度/色度突变。
+
+    本地 FL2V 共享帧切点预期恒 ok（回归哨兵）；库存硬切是主要告警源。
+    fade/slide/zoom 转场遮蔽的切点不报（突变被设计吸收）；match_cut
+    与 none 同样接受检测。共享标记只影响文案，不影响判据——哨兵意义
+    正在于共享切点实测也必须安静。
+    """
+    findings: list[Finding] = []
+    for boundary in boundaries or []:
+        try:
+            cut = float(boundary.get("cut") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cut <= 0:
+            continue
+        if duration is not None and cut >= duration - BOUNDARY_FRAME_OFFSET:
+            continue
+        transition = str(boundary.get("transition") or "none")
+        if transition in ("fade", "slide", "zoom"):
+            continue
+        before = _extract_frame_rgb(video_path, cut - BOUNDARY_FRAME_OFFSET)
+        after = _extract_frame_rgb(video_path, cut)
+        if before is None or after is None:
+            continue
+        diff = float(
+            np.abs(before.astype(np.int16) - after.astype(np.int16)).mean()
+        )
+        luma_jump = abs(float(before.mean()) - float(after.mean()))
+        if diff <= BOUNDARY_JUMP_DIFF and luma_jump <= BOUNDARY_LUMA_JUMP:
+            continue
+        order = boundary.get("order")
+        shared = bool(boundary.get("shared"))
+        findings.append(
+            Finding(
+                code="scene_boundary_jump",
+                severity="warn",
+                start=cut,
+                end=cut,
+                detail=(
+                    f"scene boundary jump at {cut:.2f}s"
+                    + (f" (scene {order})" if order is not None else "")
+                    + f": frame diff {diff:.1f}, luma jump {luma_jump:.1f}"
+                    + ("; shared keyframe cut expected continuous" if shared else "")
+                ),
+                scene_order=int(order) if order is not None else None,
+            )
+        )
     return findings
 
 
@@ -472,12 +571,16 @@ def review_video(
     *,
     audio_path: str | None = None,
     mode: str | None = None,
+    boundaries: list | None = None,
 ) -> list[Finding]:
     """
     审查一条成片，返回结构化 findings。
 
     ``mode``：``"off"`` 直接返回空；``"sample"``（默认）按 5 fps 抽样，只能覆盖
     多帧事件；``"full"`` 按成片原生帧率逐帧解码，可发现单帧缺陷，成本线性增长。
+
+    ``boundaries``：方案驱动任务的切点清单（B5），每项携带 cut/order/
+    shared/transition；缺省 None 时不做边界审查，快速模式零回归。
 
     本函数**永不抛出**：任何内部异常都压缩成一条 ``review_unavailable`` 的 info
     finding。理由是调用点在任务编排末尾，此时视频、旁白、字幕都已生成，审查
@@ -525,6 +628,9 @@ def review_video(
         else:
             findings.extend(_find_visual_findings(frames, sample_fps))
 
+        if boundaries:
+            findings.extend(_boundary_findings(video_path, boundaries, duration))
+
         audio = _measure_audio(video_path)
         has_audio = audio is not None and audio.get("integrated") is not None
         findings.extend(_audio_findings(audio, has_audio))
@@ -532,7 +638,7 @@ def review_video(
         if duration is not None and audio_path and os.path.isfile(audio_path):
             narration_duration, _ = _read_duration_and_fps(audio_path)
             if narration_duration:
-                # 成片必须覆盖配音。MPT 的拼接逻辑本就带安全余量，这里 shortfall
+                # 成片必须覆盖配音。ChangoFilm 的拼接逻辑本就带安全余量，这里 shortfall
                 # 超过容差说明旁白被截断，用户会听到句子在半空中结束。
                 shortfall = narration_duration - duration
                 if shortfall > DURATION_TOLERANCE:
