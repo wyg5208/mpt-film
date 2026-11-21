@@ -1,4 +1,4 @@
-# MoneyPrinterTurbo configuration example.
+# ChangoFilm configuration example.
 # The app copies this file to config.toml on first run. Keep API keys and other
 # credentials in config.toml; do not commit your local config.toml.
 
@@ -64,7 +64,7 @@ hide_config = false
 # independently generated script candidates. The WebUI integration is optional.
 script_generation_backend = "local"
 
-# LoomLoom Public API settings. The WebUI supports the public MoneyPrinterTurbo
+# LoomLoom Public API settings. The WebUI supports the public ChangoFilm
 # SkillBot below out of the box. Configure the key in the WebUI or a private
 # config.toml, and never commit a real key. The fixed SkillBot accepts subject,
 # requirements, and candidateIndex for each row
@@ -256,6 +256,32 @@ sonilo_api_key = ""
 sonilo_base_url = "https://api.sonilo.com"
 # 单次生成流连续无数据时的最长等待秒数；它不是整个请求的总耗时上限。
 sonilo_timeout = 600
+
+# -----------------------------------------------------------------------------
+# Local AI Engines / 本地 AI 引擎（脚本方案专业模式，免费免 Key）
+# -----------------------------------------------------------------------------
+# 用户自己的 GPU，单卡串行。引擎离线时只置灰对应能力，不影响其它路径。
+
+# ComfyUI local image engine (keyframes / character references via IPAdapter).
+# Bare origin only — every API path is appended by the client. The comfy-mini
+# proxy on port 8190 also works here. Start ComfyUI first (绘世启动器).
+# ComfyUI 本地画面引擎：裸 origin，客户端自行拼接 API 路径；也兼容 8190
+# 的 comfy-mini 代理。模型目录需在 extra_model_paths.yaml 注册。
+comfyui_base_url = "http://127.0.0.1:8188"
+# History polling interval in seconds (WS progress degrades to this silently).
+# 轮询间隔秒数；WebSocket 细粒度进度断线时静默降级为轮询。
+comfyui_poll_interval = 2
+# Per-run deadline in seconds (a lazy model load is the long part).
+# 单次运行上限秒数；懒加载模型是长的那段。
+comfyui_run_timeout = 1200
+
+# ACE-Step local music engine (instrumental beds / sung songs with lyrics).
+# Start it first (start_api_server.bat). Never run uv sync inside the ACE-Step
+# environment: it would uninstall the file-sourced torch build.
+# ACE-Step 本地音乐引擎：先用 start_api_server.bat 启动。刚启动要花几分钟
+# 加载模型，客户端固定等 300 秒并给出可重试提示。绝不在其环境里跑 uv sync。
+acestep_base_url = "http://127.0.0.1:8001"
+acestep_poll_interval = 2
 
 # -----------------------------------------------------------------------------
 # LLM Providers / 大模型提供商
@@ -524,10 +550,17 @@ api_route_model_name = ""
 ollama_base_url = ""
 ollama_model_name = ""
 
+# llama.cpp (llama-server). OpenAI-compatible endpoint on port 8080 by default.
+# api_key is optional: only needed when llama-server runs with --api-key.
+# model_name is ignored by llama-server; any non-empty value works.
+llamacpp_api_key = ""
+llamacpp_base_url = ""
+llamacpp_model_name = ""
+
 # Claude Code (Claude Pro / Max / Team subscription).
 # Uses the locally installed, logged-in `claude` CLI in headless mode instead of
 # an API key, so no Anthropic API credit is needed. Requirements:
-#   - the `claude` CLI must be installed in whatever runs MoneyPrinterTurbo
+#   - the `claude` CLI must be installed in whatever runs ChangoFilm
 #   - it must be authenticated: interactively via `claude` on the host, or with
 #     a long-lived token from `claude setup-token` exported as
 #     CLAUDE_CODE_OAUTH_TOKEN (needed for Docker)
@@ -840,7 +873,7 @@ voices = []
 [voxcpm]
 # ModelBest VoxCPM cloud TTS. Create an API Key and select a model with the
 # `speech_synthesis` capability at https://platform.modelbest.cn/console/
-# The Audio Speech API returns a streaming WAV response; MoneyPrinterTurbo
+# The Audio Speech API returns a streaming WAV response; ChangoFilm
 # converts it to its internal MP3 voiceover format automatically.
 base_url = "https://api.modelbest.cn/v1"
 api_key = ""
