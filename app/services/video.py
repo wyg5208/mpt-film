@@ -1001,6 +1001,7 @@ def combine_videos(
     progress_callback: Callable[[float], None] | None = None,
     seed: int | None = None,
     video_index: int = 1,
+    timeline: List[dict] | None = None,
 ) -> str:
     # Direct callers and persisted tasks can still supply the raw string.
     # Normalize it once for all downstream enum access.
@@ -1042,12 +1043,60 @@ def combine_videos(
     processed_clips = []
     subclipped_items = []
     video_duration = 0
-    if video_concat_mode.value == VideoConcatMode.random.value:
+    # 方案驱动执行（B4）：显式时间线直接给出场景→素材 in/out 序列与
+    # 逐段目标播放时长/转场，不再切片、不打乱、不 RNG。缺省 None 时
+    # 下方原逻辑逐字节不变（快速模式零回归）。
+    timeline_overrides = {}
+    if timeline is not None:
+        for entry in timeline:
+            file_path = str((entry or {}).get("path") or "")
+            if not file_path:
+                continue
+            clip = None
+            try:
+                clip = _open_video_clip_quietly(file_path)
+                clip_duration = float(clip.duration)
+                clip_w, clip_h = clip.size
+                if not math.isfinite(clip_duration) or clip_duration <= 0:
+                    raise ValueError("invalid video duration")
+            except Exception as exc:
+                logger.warning(
+                    f"skipping unreadable timeline source: path={file_path}, error={exc}"
+                )
+                continue
+            finally:
+                close_clip(clip)
+            start_time = max(0.0, float(entry.get("in") or 0))
+            end_time = float(entry.get("out") or 0)
+            if end_time <= start_time:
+                end_time = start_time + float(entry.get("duration") or 0) * normalized_clip_speed
+            # 源素材不够长时钳制到实际时长，避免 subclipped 越界。
+            end_time = min(end_time, clip_duration)
+            if end_time <= start_time:
+                logger.warning(
+                    f"skipping timeline entry with empty window: path={file_path}"
+                )
+                continue
+            timeline_overrides[len(subclipped_items)] = {
+                "duration": float(entry.get("duration") or (end_time - start_time)),
+                "transition": entry.get("transition"),
+            }
+            subclipped_items.append(
+                SubClippedVideoClip(
+                    file_path=file_path,
+                    start_time=start_time,
+                    end_time=end_time,
+                    width=clip_w,
+                    height=clip_h,
+                    source_file_path=file_path,
+                )
+            )
+    if timeline is None and video_concat_mode.value == VideoConcatMode.random.value:
         # 打乱的输入序列必须稳定。素材列表本身可能按下载完成时序到达，
         # 不排序时同一个种子在不同机器上会切出完全不同的候选集。
         # sequential 模式不排：那里的列表顺序就是关键词轮询顺序，是语义本身。
         video_paths = sorted(video_paths)
-    for video_path in video_paths:
+    for video_path in (video_paths if timeline is None else []):
         clip = None
         try:
             clip = _open_video_clip_quietly(video_path)
@@ -1072,7 +1121,7 @@ def combine_videos(
         
         start_time = 0
 
-        while start_time < clip_duration:
+        while timeline is None and start_time < clip_duration:
             end_time = min(start_time + source_clip_duration, clip_duration)
 
             # 保留所有有效分段。
@@ -1094,14 +1143,15 @@ def combine_videos(
             if video_concat_mode.value == VideoConcatMode.sequential.value:
                 break
 
-    subclipped_items = _prioritize_unique_source_clips(
-        subclipped_items=subclipped_items,
-        concat_mode=video_concat_mode,
-        seed=seed,
-        video_index=video_index,
-        **({"source_usage": source_usage, "source_groups": source_groups}
-           if source_usage is not None else {}),
-    )
+    if timeline is None:
+        subclipped_items = _prioritize_unique_source_clips(
+            subclipped_items=subclipped_items,
+            concat_mode=video_concat_mode,
+            seed=seed,
+            video_index=video_index,
+            **({"source_usage": source_usage, "source_groups": source_groups}
+               if source_usage is not None else {}),
+        )
         
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
@@ -1109,6 +1159,10 @@ def combine_videos(
     def process_one_clip(indexed_item):
         """把一个源片段裁剪、变速、转场后写出，失败时返回 None。"""
         index, subclipped_item = indexed_item
+        # 时间线条目自带目标播放时长与转场；无时间线时沿用全局参数。
+        override = timeline_overrides.get(index) or {}
+        item_max_duration = override.get("duration", max_clip_duration)
+        item_transition_value = override.get("transition", transition_value)
         source_clip = None
         clip = None
         clip_file = None
@@ -1154,19 +1208,19 @@ def combine_videos(
             # Short footage and faster playback can leave less than one second.
             # Keep the chosen transition inside the rendered clip's timeline.
             transition_duration = min(1.0, clip.duration)
-            if transition_value == VideoTransitionMode.fade_in.value:
+            if item_transition_value == VideoTransitionMode.fade_in.value:
                 clip = video_effects.fadein_transition(clip, transition_duration)
-            elif transition_value == VideoTransitionMode.fade_out.value:
+            elif item_transition_value == VideoTransitionMode.fade_out.value:
                 clip = video_effects.fadeout_transition(clip, transition_duration)
-            elif transition_value == VideoTransitionMode.slide_in.value:
+            elif item_transition_value == VideoTransitionMode.slide_in.value:
                 clip = video_effects.slidein_transition(clip, transition_duration, shuffle_side)
-            elif transition_value == VideoTransitionMode.slide_out.value:
+            elif item_transition_value == VideoTransitionMode.slide_out.value:
                 clip = video_effects.slideout_transition(clip, transition_duration, shuffle_side)
-            elif transition_value == VideoTransitionMode.zoom_in.value:
+            elif item_transition_value == VideoTransitionMode.zoom_in.value:
                 clip = video_effects.zoomin_transition(clip, 1)
-            elif transition_value == VideoTransitionMode.zoom_out.value:
+            elif item_transition_value == VideoTransitionMode.zoom_out.value:
                 clip = video_effects.zoomout_transition(clip, 1)
-            elif transition_value == VideoTransitionMode.shuffle.value:
+            elif item_transition_value == VideoTransitionMode.shuffle.value:
                 transition_funcs = [
                     lambda c: video_effects.fadein_transition(c, transition_duration),
                     lambda c: video_effects.fadeout_transition(c, transition_duration),
@@ -1178,8 +1232,8 @@ def combine_videos(
                 shuffle_transition = clip_rng.choice(transition_funcs)
                 clip = shuffle_transition(clip)
 
-            if clip.duration > max_clip_duration:
-                clip = clip.subclipped(0, max_clip_duration)
+            if clip.duration > item_max_duration:
+                clip = clip.subclipped(0, item_max_duration)
 
             # Write each candidate clip to a unique temporary file. Threads must not
             # share the same output path.
@@ -1242,8 +1296,11 @@ def combine_videos(
             while candidate_index < len(subclipped_items) and batch_duration < remaining_duration:
                 subclipped_item = subclipped_items[candidate_index]
                 source_duration = subclipped_item.end_time - subclipped_item.start_time
+                candidate_max = (
+                    timeline_overrides.get(candidate_index, {}).get("duration", max_clip_duration)
+                )
                 output_duration = min(
-                    max_clip_duration,
+                    candidate_max,
                     source_duration / normalized_clip_speed,
                 )
                 batch.append((candidate_index, subclipped_item))

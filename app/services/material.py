@@ -1926,6 +1926,225 @@ def _render_openai_image_video(
         return ""
 
 
+# 库存图片下载源：与库存视频共用同一批 API Key，但检索图片库。
+# 键为 video_source 业务值，值为对应的库存视频 provider（Key 配置键前缀）。
+STOCK_IMAGE_SOURCES = {"pexels_image": "pexels", "pixabay_image": "pixabay"}
+STOCK_IMAGE_SEARCH_PER_PAGE = 20
+
+
+def _stock_image_candidate(
+    provider: str,
+    search_term: str,
+    asset_id: Any,
+    image_url: Any,
+    width: Any,
+    height: Any,
+    source_page: Any,
+    creator: Any,
+    minimum_duration: int,
+) -> MaterialInfo | None:
+    """把一条图片搜索结果规范成候选 MaterialInfo（url 暂为远端直链）。"""
+    if not isinstance(image_url, str) or not image_url:
+        return None
+    item = MaterialInfo()
+    item.provider = provider
+    item.url = image_url
+    # 图片没有原生时长，与文生图一致记录目标片段时长供按需流程核算。
+    item.duration = max(int(minimum_duration), 1)
+    item.source_info = {
+        "provider": provider,
+        "search_term": search_term,
+        "asset_id": str(asset_id) if asset_id is not None else None,
+        "source_page": _safe_public_url(source_page),
+        "creator": _creator_info(creator),
+        "rendition": {"id": None, "width": width, "height": height},
+    }
+    return item
+
+
+def search_images_pexels(
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect = VideoAspect.portrait,
+) -> List[MaterialInfo]:
+    """检索 Pexels 图片库，返回方向匹配的候选（远端 CDN 直链）。"""
+    aspect = VideoAspect(video_aspect)
+    api_key = get_api_key("pexels_api_keys")
+    headers = {
+        "Authorization": api_key,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    }
+    params = {"query": search_term, "per_page": STOCK_IMAGE_SEARCH_PER_PAGE}
+    if aspect != VideoAspect.square:
+        params["orientation"] = aspect.name
+    query_url = f"https://api.pexels.com/v1/search?{urlencode(params)}"
+    logger.info(f"searching images on pexels: term={search_term!r}")
+    try:
+        r = trace_http_call(
+            "GET", requests.get,
+            query_url,
+            headers=headers,
+            proxies=config.proxy,
+            verify=_get_tls_verify(),
+            timeout=(30, 60),
+        )
+        photos = _stock_search_results("pexels", r, "photos")
+        if photos is None:
+            return []
+        items = []
+        for photo in photos:
+            if not isinstance(photo, dict):
+                continue
+            width, height = photo.get("width"), photo.get("height")
+            if not _matches_video_aspect(width, height, aspect):
+                continue
+            src = photo.get("src")
+            src = src if isinstance(src, dict) else {}
+            item = _stock_image_candidate(
+                "pexels_image",
+                search_term,
+                photo.get("id"),
+                src.get("large2x") or src.get("large") or src.get("original"),
+                width,
+                height,
+                photo.get("url"),
+                photo.get("photographer"),
+                minimum_duration,
+            )
+            if item is not None:
+                items.append(item)
+        return items
+    except Exception as e:
+        logger.error(
+            "pexels image search failed: "
+            f"error={type(e).__name__}, detail={_redact_request_error(e, api_key)}"
+        )
+    return []
+
+
+def search_images_pixabay(
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect = VideoAspect.portrait,
+) -> List[MaterialInfo]:
+    """检索 Pixabay 图片库，返回方向匹配的候选（远端 CDN 直链）。"""
+    aspect = VideoAspect(video_aspect)
+    api_key = get_api_key("pixabay_api_keys")
+    params = {
+        "key": api_key,
+        "q": search_term,
+        "image_type": "photo",
+        "per_page": STOCK_IMAGE_SEARCH_PER_PAGE,
+        "safesearch": "true",
+    }
+    # Pixabay 的方向参数取值与 Pexels 不同，需单独映射。
+    orientation = {"portrait": "vertical", "landscape": "horizontal"}.get(aspect.name)
+    if orientation:
+        params["orientation"] = orientation
+    query_url = f"https://pixabay.com/api/?{urlencode(params)}"
+    logger.info(f"searching images on pixabay: term={search_term!r}")
+    try:
+        r = trace_http_call(
+            "GET", requests.get,
+            query_url,
+            proxies=config.proxy,
+            verify=_get_tls_verify(),
+            timeout=(30, 60),
+        )
+        hits = _stock_search_results("pixabay", r, "hits")
+        if hits is None:
+            return []
+        items = []
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            width, height = hit.get("imageWidth"), hit.get("imageHeight")
+            if not _matches_video_aspect(width, height, aspect):
+                continue
+            item = _stock_image_candidate(
+                "pixabay_image",
+                search_term,
+                hit.get("id"),
+                hit.get("fullHDURL") or hit.get("largeImageURL") or hit.get("imageURL"),
+                width,
+                height,
+                hit.get("pageURL"),
+                hit.get("user"),
+                minimum_duration,
+            )
+            if item is not None:
+                items.append(item)
+        return items
+    except Exception as e:
+        logger.error(
+            "pixabay image search failed: "
+            f"error={type(e).__name__}, detail={_redact_request_error(e, api_key)}"
+        )
+    return []
+
+
+def generate_images_stock(
+    base_provider: str,
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect = VideoAspect.portrait,
+    save_dir: str = "",
+) -> List[MaterialInfo]:
+    """为一个关键词下载一张库存图片并规范成本地 PNG。
+
+    与 generate_images_openai 保持同一签名和空列表失败约定，可直接插入
+    按需图片编排。库存图片免费：搜索/下载/解码失败跳过该候选或关键词，
+    不触发付费源的终止语义；搜索结果参与 24 小时缓存（CDN 直链稳定，
+    不同于付费源会过期的签名地址）。
+    """
+    source = f"{base_provider}_image"
+    search = (
+        search_images_pexels if base_provider == "pexels" else search_images_pixabay
+    )
+    candidates = _search_videos_with_cache(
+        provider=source,
+        search_videos=search,
+        search_term=search_term,
+        minimum_duration=minimum_duration,
+        video_aspect=video_aspect,
+    )
+    api_key = get_api_key(f"{base_provider}_api_keys")
+    for item in candidates:
+        remote_url = item.url
+        try:
+            image_bytes, failure_detail = _openai_image_download_bytes(
+                remote_url, api_key
+            )
+        except OpenAIImagePaidResultError:
+            # 下载 helper 重试耗尽抛付费语义错误；库存源降级为跳过候选。
+            image_bytes, failure_detail = None, "download retries exhausted"
+        if image_bytes is None:
+            logger.warning(
+                "stock image download failed, trying next candidate: "
+                f"provider={source}, detail={failure_detail}"
+            )
+            continue
+        try:
+            image_path, width, height = _save_openai_image_file(image_bytes, save_dir)
+        except _OpenAIImageDecodeError as e:
+            logger.warning(
+                "stock image is not decodable, trying next candidate: "
+                f"provider={source}, detail={e}"
+            )
+            continue
+        source_info = item.source_info if isinstance(item.source_info, dict) else {}
+        source_info["remote_url"] = remote_url
+        source_info["rendition"] = {"id": None, "width": width, "height": height}
+        item.source_info = source_info
+        item.url = image_path
+        logger.info(f"stock image saved: provider={source}, path={image_path}")
+        return [item]
+    logger.error(
+        f"no usable stock image for term: provider={source}, term={search_term!r}"
+    )
+    return []
+
+
 def _download_videos_openai_image_on_demand(
     *,
     task_id: str,
@@ -1938,15 +2157,21 @@ def _download_videos_openai_image_on_demand(
     image_generator: Callable[..., List[MaterialInfo]] | None = None,
     provider: str = "openai_image",
     codex_image_context=None,
+    paid_source: bool = True,
+    progress_callback: Callable[[float], None] | None = None,
 ) -> List[str]:
     """
-    按脚本片段顺序逐张生成 OpenAI 兼容文生图素材，凑够所需总时长立即停止。
+    按脚本片段顺序逐张生成图片素材，凑够所需总时长立即停止。
 
     与 WaveSpeed 按需生成同一付费安全语义：文生图按张计费，先全量生成再
     挑选会为用不到的画面付费。每张图片生成后立即渲染成 mp4 片段并累计
     有效时长（与库存流程一致，按片段时长封顶），累计达到所需配音时长后
     不再发起新的付费请求。明确拒绝的单张图片可跳过；请求结果不明、付费
     结果下载失败或本地渲染失败时必须终止任务，避免后续关键词再次计费。
+
+    ``paid_source=False`` 供免费库存图片源复用本编排：渲染失败跳过该张
+    继续下一候选/关键词，不抛付费终止错误；``progress_callback`` 可选，
+    每渲染完一张以 0~1 覆盖比例报告进度（与库存视频下载进度同口径）。
     """
     # 直接调用素材服务也要在付费请求前校验，不能生成后才发现效果参数无效。
     image_motion = ImageMotion(image_motion)
@@ -2009,9 +2234,15 @@ def _download_videos_openai_image_on_demand(
                     raise CodexImageMaterialError(
                         codex_image.CodexImageError("codex.image.render_failed")
                     )
-                raise OpenAIImagePaidResultError(
-                    "generated image could not be rendered locally"
+                if paid_source:
+                    raise OpenAIImagePaidResultError(
+                        "generated image could not be rendered locally"
+                    )
+                logger.error(
+                    "stock image could not be rendered locally, skipping: "
+                    f"provider={provider}, path={item.url}"
                 )
+                continue
             if provider == "codex_image":
                 try:
                     codex_image.assert_current(codex_image_context)
@@ -2031,6 +2262,8 @@ def _download_videos_openai_image_on_demand(
                     f"error={type(source_error).__name__}, detail={source_error}"
                 )
             total_duration += min(max_clip_duration, item.duration)
+            if progress_callback is not None:
+                progress_callback(min(total_duration / required_duration, 1.0))
             # 与 WaveSpeed 相同用 >= 判断：恰好凑够时再生成一张就多付一次费。
             # 内外两处判断必须保持同一语义。
             if total_duration >= required_duration:
@@ -2473,6 +2706,24 @@ def download_videos(
             audio_duration=audio_duration,
             max_clip_duration=max_clip_duration,
             material_directory=material_directory,
+        )
+    if source in STOCK_IMAGE_SOURCES:
+        # 库存图片免费：复用按需图片编排（逐张渲染成片段、凑够时长即停），
+        # 但失败跳过关键词而非付费终止语义；搜索参与 24 小时缓存。
+        return _download_videos_openai_image_on_demand(
+            task_id=task_id,
+            search_terms=search_terms,
+            video_aspect=video_aspect,
+            audio_duration=audio_duration,
+            max_clip_duration=max_clip_duration,
+            material_directory=material_directory,
+            image_motion=image_motion,
+            image_generator=lambda **kwargs: generate_images_stock(
+                STOCK_IMAGE_SOURCES[source], **kwargs
+            ),
+            provider=source,
+            paid_source=False,
+            progress_callback=progress_callback,
         )
     if source in {"openai_image", "codex_image"}:
         # 与 WaveSpeed 相同的按需付费语义：文生图按张计费，逐段生成、凑够
@@ -3361,3 +3612,52 @@ def _download_videos_infistar_on_demand(
     finally:
         _persist_material_sources(task_id, sources)
     return paths
+
+
+def download_scene_materials(
+    task_id: str,
+    scene_requests: dict[str, List[str]],
+    scene_durations: dict[str, float],
+    *,
+    source: str = "pexels",
+    video_aspect: VideoAspect = VideoAspect.portrait,
+    max_clip_duration: int = 5,
+    seed: int | None = None,
+    progress_callback: Callable[[float], None] | None = None,
+) -> dict[str, List[str]]:
+    """方案驱动执行（B4）：逐场景检索下载，keywords 绑定场景而非全局
+    terms 轮询。每个场景只买（下）自己时间窗需要的量，顺序模式保留
+    关键词语义顺序。返回 scene_id → 本地文件列表；某场景空手时保留空
+    列表，由任务层统一判定失败（不静默丢掉场景）。
+    """
+    bindings: dict[str, List[str]] = {}
+    scene_ids = list(scene_requests)
+    total = len(scene_ids) or 1
+    for index, scene_id in enumerate(scene_ids):
+        terms = scene_requests[scene_id]
+        duration = float(scene_durations.get(scene_id) or 0)
+        logger.info(
+            f"scene materials {index + 1}/{len(scene_ids)}: "
+            f"scene={scene_id}, terms={terms}, window={duration:.1f}s"
+        )
+
+        def scene_progress(fraction: float, _index=index) -> None:
+            if progress_callback is not None:
+                progress_callback((_index + min(max(fraction, 0.0), 1.0)) / total)
+
+        paths = download_videos(
+            task_id=task_id,
+            search_terms=terms,
+            source=source,
+            video_aspect=video_aspect,
+            video_concat_mode=VideoConcatMode.sequential,
+            audio_duration=duration,
+            max_clip_duration=max_clip_duration,
+            match_script_order=True,
+            seed=seed,
+            progress_callback=scene_progress if progress_callback is not None else None,
+        )
+        bindings[scene_id] = list(paths or [])
+        if not bindings[scene_id]:
+            logger.warning(f"scene {scene_id} got no materials for terms {terms}")
+    return bindings
