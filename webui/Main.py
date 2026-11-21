@@ -33,6 +33,7 @@ sys.path.insert(0, root_dir)
 
 from app.config import config
 from app.models import const
+from app.models import service_catalog
 from app.models.llm_provider import (
     DEFAULT_LLM_PROVIDER_ID,
     LLM_PROVIDER_REGISTRY,
@@ -70,6 +71,7 @@ from app.services import (
     plan_store,
     series_store,
     social_auto_upload,
+    source_failover,
     subtitle,
     upload_post,
     video,
@@ -90,10 +92,11 @@ from app.utils.logging_utils import (
 )
 from app.utils import utils
 from app.utils.request_logging import trace_http_call
+from webui import brand_theme
 
 st.set_page_config(
     page_title="ChangoFilm",
-    page_icon="🎬",
+    page_icon=str(brand_theme.ICON_FILE),
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
@@ -112,6 +115,8 @@ st.set_page_config(
 style_file = Path(__file__).with_name("styles.css")
 streamlit_style = f"<style>{style_file.read_text(encoding='utf-8')}</style>"
 st.markdown(streamlit_style, unsafe_allow_html=True)
+# 品牌主题层在站内样式之后注入：变量 + 结构覆盖，随会话主题控件即时生效。
+brand_theme.inject()
 # 定义资源目录
 font_dir = utils.font_dir()
 song_dir = utils.song_dir()
@@ -2541,15 +2546,21 @@ def _render_brand(available_update: str | None = None):
             f'aria-label="{update_label}" title="{update_label}">'
             f"{update_label}</a>"
         )
+    mark_html = ""
+    if brand_theme.theme()["logo"]:
+        mark_html = (
+            f'<span class="changofilm-brand__mark">{brand_theme.mark_svg()}</span>'
+        )
+    # 单行 HTML：多行缩进写法在占位符为空时会留下纯空白行，
+    # Markdown 会在那里截断 HTML 块，把剩余 span 渲染成代码块。
     st.markdown(
-        f"""
-        <h1 class="changofilm-brand">
-            <span class="changofilm-brand__name">ChangoFilm</span>
-            <span class="changofilm-brand__version"
-                  title="ChangoFilm version">v{html.escape(str(config.project_version))}</span>
-            {update_link}
-        </h1>
-        """,
+        '<h1 class="changofilm-brand">'
+        f"{mark_html}"
+        '<span class="changofilm-brand__name">ChangoFilm</span>'
+        f'<span class="changofilm-brand__version" title="ChangoFilm version">'
+        f"v{html.escape(str(config.project_version))}</span>"
+        f"{update_link}"
+        "</h1>",
         unsafe_allow_html=True,
     )
 
@@ -4567,53 +4578,87 @@ def _remember_settings_selection(memory_key, widget_key):
     st.session_state[memory_key] = st.session_state[widget_key]
 
 
-def _remember_material_provider(group, widget_key):
-    remembered = dict(st.session_state.get("settings_material_providers", {}))
-    remembered[group] = st.session_state[widget_key]
-    st.session_state["settings_material_group"] = group
-    st.session_state["settings_material_providers"] = remembered
+def _remember_tab_by_label(memory_key, widget_key, label_to_key):
+    """键控 st.tabs 的 on_change 回调：把当前选中标签映射回稳定 key 记忆。"""
+    mapped = label_to_key.get(st.session_state.get(widget_key))
+    if mapped:
+        st.session_state[memory_key] = mapped
 
 
-def _activate_stock_image_source(widget_key):
-    """库存图片下拉选择：同步切换视频来源并记住分组（与通用页激活同口径）。"""
+def _mount_keyed_tabs(label_keys, widget_base, memory_key, target_session_key=None, stable_keys=None):
+    """键控 st.tabs 的统一挂载预置：显式目标 > 记忆 > 首个 TAB。
+
+    st.tabs 带键挂载时若会话无选中值，react-aria 会补发一次选中
+    变更事件造成额外一轮 rerun；这里在实例化前预置选中标签，并配合
+    on_change 回调把所选标签映射回稳定 key 记忆。传入 on_change 同时
+    启用惰性渲染，未选中的 TAB 不执行（面板 .open 为 False）。
+    stable_keys 与 label_keys 等长，是记忆与跳转使用的稳定业务键
+    （素材能力 TAB 存能力分组 id）；缺省与 label_keys 相同。
+    """
+    stable_keys = list(stable_keys) if stable_keys is not None else list(label_keys)
+    labels = [tr(label_key) for label_key in label_keys]
+    label_to_key = dict(zip(labels, stable_keys))
+    key_to_label = dict(zip(stable_keys, labels))
+    tabs_key = localized_widget_key(widget_base)
+    target = None
+    if target_session_key:
+        target = st.session_state.pop(target_session_key, None)
+    remembered = st.session_state.get(memory_key)
+    active = (
+        target
+        if target in stable_keys
+        else remembered
+        if remembered in stable_keys
+        else stable_keys[0]
+    )
+    # 记忆键是选中状态的唯一事实来源，每次挂载都无条件预置选中标签：
+    # 显式目标 > 记忆 > 首个 TAB。组件的既有选中值不能用来短路预置——
+    # 同一键在页面与设置弹窗两种容器下元素 id 不同，重挂载时旧值无法
+    # 迁移，若跳过预置会回落到首个 TAB 并经挂载同步把记忆覆盖掉。
+    # 稳态下记忆与组件选中值一致，预置是无操作；只有记忆被外部改写
+    # （弹窗/页面互切、Use 按钮定向、语言切换）时预置才会真正生效。
+    st.session_state[tabs_key] = key_to_label[active]
+    panels = st.tabs(
+        labels,
+        key=tabs_key,
+        on_change=_remember_tab_by_label,
+        args=(memory_key, tabs_key, label_to_key),
+    )
+    _remember_tab_by_label(memory_key, tabs_key, label_to_key)
+    return panels
+
+
+def _activate_material_primary_source(group, widget_key):
+    """素材能力 TAB 的第一优先下拉：写唯一主源键并与创作页控件同步。"""
     selected = st.session_state[widget_key]
     _set_runtime_config("app", "video_source", selected)
     _sync_general_provider_widgets("video_source_select", selected)
-    remembered = dict(st.session_state.get("settings_material_providers", {}))
-    remembered["stock_image"] = selected
-    st.session_state["settings_material_providers"] = remembered
+    st.session_state["settings_material_group"] = group
+    _save_runtime_config()
+
+
+def _activate_stock_image_source(widget_key):
+    """库存图片下拉选择：同步切换视频来源（与能力 TAB 激活同口径）。"""
+    selected = st.session_state[widget_key]
+    _set_runtime_config("app", "video_source", selected)
+    _sync_general_provider_widgets("video_source_select", selected)
+    st.session_state["settings_material_group"] = "stock_image"
     _save_runtime_config()
 
 
 def _initialize_material_navigation(target, settings):
-    groups = {
-        group: providers
-        for group, providers in VIDEO_SOURCE_GROUPS.items()
-        if group != "local"
-    }
-    source = settings.get("video_source", "pexels")
-    source_group = next(
-        (group for group, providers in groups.items() if source in providers), None
-    )
-    explicit = {"stock": "stock_video", "video": "ai_video", "image": "ai_image"}.get(
-        target
-    )
-    group = explicit or (source_group if target == "material" else None)
-    group = group or st.session_state.get(
-        "settings_material_group", source_group or "stock_video"
-    )
-    if group not in groups:
-        group = "stock_video"
-    remembered = dict(st.session_state.get("settings_material_providers", {}))
-    if target == "material" and source_group:
-        remembered[group] = source
-    elif group not in remembered or remembered[group] not in groups[group]:
-        remembered[group] = source if source in groups[group] else groups[group][0]
-    st.session_state["settings_material_group"] = group
-    st.session_state["settings_material_providers"] = remembered
-    st.session_state[
-        localized_widget_key(f"settings_material_provider_{group}_select")
-    ] = remembered[group]
+    """把设置弹窗/跳转目标映射为素材能力 TAB 预选（能力即素材分组）。"""
+    capability = {
+        "stock": "stock_video",
+        "video": "ai_video",
+        "image": "ai_image",
+    }.get(target)
+    if not capability:
+        source = str(settings.get("video_source", "") or "")
+        capability = service_catalog.material_capability_of_source(source)
+    if capability not in service_catalog.MATERIAL_CAPABILITY_GROUPS:
+        capability = "stock_video"
+    st.session_state["settings_material_group"] = capability
 
 
 def _material_provider_labels():
@@ -4685,13 +4730,7 @@ def _activate_general_provider(section):
     else:
         _set_runtime_config("app", "video_source", selected)
         _sync_general_provider_widgets("video_source_select", selected)
-        remembered = dict(st.session_state.get("settings_material_providers", {}))
-        remembered[section] = selected
-        st.session_state["settings_material_providers"] = remembered
         st.session_state["settings_material_group"] = section
-        _sync_general_provider_widgets(
-            f"settings_material_provider_{section}_select", selected
-        )
     _save_runtime_config()
 
 
@@ -5374,44 +5413,8 @@ def _render_material_provider_settings(provider):
         # 只展示参考值，不将 OpenAI 官方端点写成默认配置。
         # 兼容服务的 Base URL 和模型 ID 没有统一值；留空不会让
         # 用户在未知情时误连官方付费接口，也不会覆盖旧配置。
+        # 高级参数（尺寸/提示词模板）属于创作面板的项目级参数，不在服务商配置。
         st.caption(tr("OpenAI Image Configuration Example"))
-
-        with st.expander(tr("OpenAI Image Advanced Settings"), expanded=False):
-            openai_image_size = st.text_input(
-                tr("OpenAI Image Size"),
-                value=str(app_settings.get("openai_image_size", "") or ""),
-                placeholder="1024x1536",
-                help=tr("OpenAI Image Size Help"),
-                key="openai_image_size_input",
-                on_change=_save_settings_change,
-                args=(
-                    "app",
-                    "openai_image_size",
-                    "openai_image_size_input",
-                    lambda value: value.strip(),
-                ),
-            )
-            _set_runtime_config("app", "openai_image_size", openai_image_size.strip())
-
-            openai_image_prompt_template = st.text_input(
-                tr("OpenAI Image Prompt Template"),
-                value=str(app_settings.get("openai_image_prompt_template", "") or ""),
-                placeholder="cinematic photo of {term}, photorealistic",
-                help=tr("OpenAI Image Prompt Template Help"),
-                key="openai_image_prompt_template_input",
-                on_change=_save_settings_change,
-                args=(
-                    "app",
-                    "openai_image_prompt_template",
-                    "openai_image_prompt_template_input",
-                    lambda value: value.strip(),
-                ),
-            )
-            _set_runtime_config(
-                "app",
-                "openai_image_prompt_template",
-                openai_image_prompt_template.strip(),
-            )
 
 
 def _render_social_publish_settings(app_settings):
@@ -5822,8 +5825,522 @@ def _render_interface_settings_body(ui_settings):
     _render_logging_settings()
 
 
+PROVIDER_TAB_LABEL_KEYS = (
+    "Provider Overview Tab",
+    "Provider Text Tab",
+    "Provider Video Tab",
+    "Provider Image Tab",
+    "Provider Voiceover Tab",
+    "Provider Music Tab",
+    "Provider Stock Search Tab",
+)
+
+# 素材能力分组 → 服务商配置页承载其 Key 表单的 TAB（素材页跳转用）。
+MATERIAL_GROUP_PROVIDER_TAB = {
+    "ai_video": "Provider Video Tab",
+    "ai_image": "Provider Image Tab",
+    "stock_video": "Provider Stock Search Tab",
+    "stock_image": "Provider Stock Search Tab",
+}
+
+# 配音服务固定展示顺序与默认文案（配音链与 Key 表单共用）。
+TTS_SERVER_OPTIONS = (
+    ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
+    ("azure-tts-v2", "Azure TTS V2"),
+    ("siliconflow", "SiliconFlow TTS"),
+    ("gemini-tts", "Google Gemini TTS"),
+    ("mimo-tts", "Xiaomi MiMo TTS"),
+    ("minimax-tts", "MiniMax TTS"),
+    ("elevenlabs", "ElevenLabs TTS"),
+    ("chatterbox", "Chatterbox TTS"),
+    ("kokoro", "Kokoro TTS"),
+    ("fish_audio", "Fish Audio TTS"),
+    ("voxcpm", "VoxCPM TTS"),
+)
+
+
+def _tts_server_label(server_id):
+    return dict(TTS_SERVER_OPTIONS).get(server_id, server_id)
+
+
+def _music_service_ready(service_id):
+    """配乐服务的本地就绪检查（口径与服务层一致，不探测连通性）。"""
+    if service_id == "sonilo":
+        return bool(
+            str(config.app.get("sonilo_api_key", "") or "").strip()
+            or os.getenv("SONILO_API_KEY", "").strip()
+        )
+    if service_id == "elevenlabs":
+        return bool(
+            str(config.elevenlabs.get("api_key", "") or "").strip()
+            or os.getenv("ELEVENLABS_API_KEY", "").strip()
+        )
+    return False
+
+
+def _service_platform_readiness(app_settings):
+    """汇总本地就绪的 LLM 与素材服务集合，供总览矩阵与状态徽标使用。"""
+    readiness = _general_provider_readiness(app_settings)
+    configured_llm = set(readiness.get("llm", ()))
+    configured_material = {
+        source
+        for group, sources in readiness.items()
+        if group != "llm"
+        for source in sources
+    }
+    return configured_llm, configured_material
+
+
+def _platform_service_ready(platform, configured_llm, configured_material):
+    """平台任一已接线服务就绪即视为已配置。"""
+    if any(service_id in configured_llm for service_id in platform.llm_ids):
+        return True
+    if any(service_id in configured_material for service_id in platform.material_ids):
+        return True
+    if any(
+        source_failover.tts_server_available(service_id)
+        for service_id in platform.tts_ids
+    ):
+        return True
+    return any(
+        _music_service_ready(service_id) for service_id in platform.music_ids
+    )
+
+
+def _platform_label(platform):
+    return (
+        tr_optional(platform.label_key, fallback_language="en")
+        or platform.default_label
+    )
+
+
+def _platform_status_badge(ready):
+    if ready:
+        return f":green[:material/check_circle: {tr('Provider Configured Badge')}]"
+    return (
+        f":gray[:material/radio_button_unchecked: "
+        f"{tr('Provider Not Configured Badge')}]"
+    )
+
+
+def _render_service_provider_overview(app_settings):
+    """总览矩阵：按国内→本地→国际→聚合排序展示平台、能力与就绪状态。"""
+    configured_llm, configured_material = _service_platform_readiness(app_settings)
+    st.caption(tr("Provider Overview Help"))
+    for group in service_catalog.PLATFORM_GROUP_ORDER:
+        platforms = [
+            platform
+            for platform in service_catalog.SERVICE_PLATFORMS
+            if platform.group == group
+        ]
+        if not platforms:
+            continue
+        st.subheader(tr(service_catalog.GROUP_LABEL_KEYS[group]))
+        for platform in platforms:
+            ready = _platform_service_ready(
+                platform, configured_llm, configured_material
+            )
+            label = _platform_label(platform)
+            capability_text = " · ".join(
+                tr(service_catalog.CAPABILITY_LABEL_KEYS[capability])
+                for capability in platform.capabilities
+            )
+            with st.container(border=True):
+                info_column, status_column = st.columns([0.72, 0.28])
+                with info_column:
+                    st.markdown(f"**{label}**")
+                    if capability_text:
+                        st.caption(capability_text)
+                with status_column:
+                    st.markdown(_platform_status_badge(ready))
+
+
+def _material_source_ready(app_settings, provider):
+    readiness = _general_provider_readiness(app_settings)
+    return any(
+        provider in sources
+        for group, sources in readiness.items()
+        if group != "llm"
+    )
+
+
+def _render_provider_settings_expander(app_settings, provider, expanded=False):
+    """服务商配置页的单个素材 Provider 行：状态徽标 + 既有 Key/参数表单。"""
+    label = _material_provider_labels().get(provider, provider)
+    with st.expander(
+        f"{label} {_platform_status_badge(_material_source_ready(app_settings, provider))}",
+        expanded=expanded,
+    ):
+        _render_material_provider_settings(provider)
+
+
+def _render_ai_video_provider_settings(app_settings):
+    """视频生成 TAB：AI 视频与订阅图生视频服务的凭证表单。"""
+    st.caption(tr("Provider Video Tab Help"))
+    for provider in VIDEO_SOURCE_GROUPS["ai_video"]:
+        _render_provider_settings_expander(app_settings, provider)
+
+
+def _render_ai_image_provider_settings(app_settings):
+    """图片生成 TAB：AI 图像服务的凭证表单。"""
+    st.caption(tr("Provider Image Tab Help"))
+    for provider in VIDEO_SOURCE_GROUPS["ai_image"]:
+        _render_provider_settings_expander(app_settings, provider)
+
+
+def _render_voiceover_provider_settings(app_settings):
+    """配音 TAB：TTS 三槽链（第一优先 + 备用 1/2）+ 各服务凭证表单。"""
+    tts_server_ids = [server_id for server_id, _ in TTS_SERVER_OPTIONS]
+    saved_server = str(config.ui.get("tts_server", "azure-tts-v1") or "azure-tts-v1")
+    if saved_server not in tts_server_ids:
+        saved_server = "azure-tts-v1"
+    primary_widget_key = localized_widget_key("tts_server_primary_select")
+    st.session_state[primary_widget_key] = saved_server
+    primary_server = st.selectbox(
+        tr("Voiceover Service"),
+        options=tts_server_ids,
+        key=primary_widget_key,
+        format_func=_tts_server_label,
+        on_change=_save_settings_change,
+        args=(
+            "ui",
+            "tts_server",
+            primary_widget_key,
+            lambda value: value,
+        ),
+    )
+    _set_runtime_config("ui", "tts_server", primary_server)
+    # 与素材链备用槽一致：format_func 纯闭包，标签渲染时预算。
+    disabled_label = tr("Backup Slot Disabled")
+    for slot in (1, 2):
+        backup_config_key = f"tts_server_backup{slot}"
+        backup_widget_key = localized_widget_key(f"tts_server_backup{slot}_select")
+        saved_backup = str(config.ui.get(backup_config_key, "") or "").strip()
+        if saved_backup not in tts_server_ids:
+            saved_backup = ""
+        st.session_state[backup_widget_key] = saved_backup
+        st.selectbox(
+            tr(f"Backup Voiceover Service {slot}"),
+            options=[""] + tts_server_ids,
+            key=backup_widget_key,
+            format_func=lambda server_id: (
+                disabled_label
+                if not server_id
+                else _tts_server_label(server_id)
+            ),
+            on_change=_save_settings_change,
+            args=(
+                "ui",
+                backup_config_key,
+                backup_widget_key,
+                lambda value: str(value or "").strip(),
+            ),
+        )
+    st.caption(tr("TTS Chain Help"))
+    for server_id, label in TTS_SERVER_OPTIONS:
+        with st.expander(
+            f"{label} {_platform_status_badge(source_failover.tts_server_available(server_id))}",
+            expanded=False,
+        ):
+            _render_tts_provider_settings(server_id)
+
+
+def _render_tts_provider_settings(server):
+    """配音服务的凭证与参数表单（从音频面板抽出的 Key 配置）。"""
+    if server == "azure-tts-v1":
+        st.caption(tr("Azure Edge TTS Free Hint"))
+    elif server == "azure-tts-v2":
+        azure_speech_region = st.text_input(
+            tr("Speech Region"),
+            value=config.azure.get("speech_region", ""),
+            key="azure_speech_region_input",
+        )
+        azure_speech_key = st.text_input(
+            tr("Speech Key"),
+            value=config.azure.get("speech_key", ""),
+            type="password",
+            key="azure_speech_key_input",
+        )
+        _set_runtime_config("azure", "speech_region", azure_speech_region)
+        _set_runtime_config("azure", "speech_key", azure_speech_key)
+    elif server == "gemini-tts":
+        # Gemini TTS 与 Gemini LLM 共用同一份密钥；在服务商配置集中维护。
+        gemini_tts_api_key = st.text_input(
+            tr("Gemini API Key"),
+            value=config.app.get("gemini_api_key", ""),
+            type="password",
+            key="gemini_tts_api_key_input",
+        )
+        _set_runtime_config("app", "gemini_api_key", gemini_tts_api_key)
+    elif server == "siliconflow":
+        siliconflow_api_key = st.text_input(
+            tr("SiliconFlow API Key"),
+            value=config.siliconflow.get("api_key", ""),
+            type="password",
+            key="siliconflow_api_key_input",
+        )
+        _set_runtime_config("siliconflow", "api_key", siliconflow_api_key)
+    elif server == "mimo-tts":
+        # MiMo TTS 复用 MiMo LLM Provider 的 API Key，只需维护一份密钥。
+        mimo_api_key = st.text_input(
+            tr("MiMo API Key"),
+            value=config.app.get("mimo_api_key", ""),
+            type="password",
+            key="mimo_tts_api_key_input",
+        )
+        _set_runtime_config("app", "mimo_api_key", mimo_api_key)
+    elif server == "minimax-tts":
+        _render_minimax_tts_settings()
+    elif server == "elevenlabs":
+        _render_elevenlabs_api_key_input("ElevenLabs API Key")
+        _elevenlabs_models = [
+            "eleven_multilingual_v2",
+            "eleven_flash_v2_5",
+            "eleven_v3",
+        ]
+        saved_elevenlabs_model = config.elevenlabs.get(
+            "model_id", "eleven_multilingual_v2"
+        )
+        if saved_elevenlabs_model not in _elevenlabs_models:
+            saved_elevenlabs_model = "eleven_multilingual_v2"
+        elevenlabs_model = stable_selectbox(
+            tr("ElevenLabs Model"),
+            options=_elevenlabs_models,
+            default_value=saved_elevenlabs_model,
+            key="elevenlabs_model_select",
+        )
+        _set_runtime_config("elevenlabs", "model_id", elevenlabs_model)
+    elif server == "fish_audio":
+        fish_audio_api_key = st.text_input(
+            tr("Fish Audio API Key"),
+            value=(
+                config.fish_audio.get("api_key", "")
+                if hasattr(config, "fish_audio") and isinstance(config.fish_audio, dict)
+                else ""
+            ),
+            type="password",
+            key="fish_audio_api_key_input",
+        )
+        _set_runtime_config("fish_audio", "api_key", fish_audio_api_key)
+        _fish_audio_models = [
+            "s2.1-pro-free",
+            "s2.1-pro",
+            "s2-pro",
+        ]
+        saved_fish_model = (
+            config.fish_audio.get("model", "s2.1-pro-free")
+            if hasattr(config, "fish_audio") and isinstance(config.fish_audio, dict)
+            else "s2.1-pro-free"
+        )
+        if saved_fish_model not in _fish_audio_models:
+            saved_fish_model = "s2.1-pro-free"
+        fish_model = stable_selectbox(
+            tr("Fish Audio Model"),
+            options=_fish_audio_models,
+            default_value=saved_fish_model,
+            key="fish_audio_model_select",
+        )
+        _set_runtime_config("fish_audio", "model", fish_model)
+    elif server == "voxcpm":
+        _sync_voxcpm_api_key_input()
+        voxcpm_api_key = st.text_input(
+            tr("VoxCPM API Key"),
+            type="password",
+            key="voxcpm_api_key_input",
+        )
+        _set_runtime_config("voxcpm", "api_key", voxcpm_api_key)
+        voxcpm_model = st.text_input(
+            tr("VoxCPM Model ID"),
+            value=config.voxcpm.get("model_id", ""),
+            key="voxcpm_model_id_input",
+            placeholder=tr("VoxCPM Model ID Placeholder"),
+        )
+        _set_runtime_config("voxcpm", "model_id", voxcpm_model.strip())
+        voxcpm_base_url = st.text_input(
+            tr("VoxCPM Base URL"),
+            value=config.voxcpm.get("base_url") or DEFAULT_VOXCPM_BASE_URL,
+            key="voxcpm_base_url_input",
+            placeholder=DEFAULT_VOXCPM_BASE_URL,
+        )
+        _set_runtime_config(
+            "voxcpm",
+            "base_url",
+            (voxcpm_base_url or DEFAULT_VOXCPM_BASE_URL).strip().rstrip("/"),
+        )
+        st.caption(tr("VoxCPM Reference Audio Notice"))
+    elif server == "chatterbox":
+        chatterbox_base_url = st.text_input(
+            tr("Chatterbox Base URL"),
+            value=config.chatterbox.get("base_url") or DEFAULT_CHATTERBOX_BASE_URL,
+            key="chatterbox_base_url_input",
+            placeholder=tr("Chatterbox Base URL Placeholder"),
+        )
+        _set_runtime_config(
+            "chatterbox", "base_url", (chatterbox_base_url or "").strip()
+        )
+        chatterbox_api_key = st.text_input(
+            tr("Chatterbox API Key"),
+            value=config.chatterbox.get("api_key", ""),
+            type="password",
+            key="chatterbox_api_key_input",
+        )
+        _set_runtime_config("chatterbox", "api_key", chatterbox_api_key)
+        chatterbox_model = st.text_input(
+            tr("Chatterbox Model"),
+            value=config.chatterbox.get("model_id") or DEFAULT_CHATTERBOX_MODEL,
+            key="chatterbox_model_input",
+        )
+        _set_runtime_config(
+            "chatterbox",
+            "model_id",
+            (chatterbox_model or DEFAULT_CHATTERBOX_MODEL).strip(),
+        )
+        _saved_chatterbox_voices = (
+            _parse_chatterbox_voices(config.chatterbox.get("voices"))
+            or DEFAULT_CHATTERBOX_VOICES
+        )
+        if isinstance(_saved_chatterbox_voices, list):
+            _saved_chatterbox_voices = ", ".join(_saved_chatterbox_voices)
+        chatterbox_voices = st.text_input(
+            tr("Chatterbox Voices"),
+            value=str(_saved_chatterbox_voices or ""),
+            key="chatterbox_voices_input",
+            placeholder=tr("Chatterbox Voices Placeholder"),
+        )
+        _set_runtime_config(
+            "chatterbox",
+            "voices",
+            _parse_chatterbox_voices(chatterbox_voices),
+        )
+    elif server == "kokoro":
+        kokoro_base_url = st.text_input(
+            tr("Kokoro Base URL"),
+            value=config.kokoro.get("base_url") or DEFAULT_KOKORO_BASE_URL,
+            key="kokoro_base_url_input",
+            placeholder=tr("Kokoro Base URL Placeholder"),
+        )
+        _set_runtime_config(
+            "kokoro", "base_url", (kokoro_base_url or "").strip()
+        )
+        kokoro_api_key = st.text_input(
+            tr("Kokoro API Key"),
+            value=config.kokoro.get("api_key", ""),
+            type="password",
+            key="kokoro_api_key_input",
+        )
+        _set_runtime_config("kokoro", "api_key", kokoro_api_key)
+        kokoro_model = st.text_input(
+            tr("Kokoro Model"),
+            value=config.kokoro.get("model_id") or DEFAULT_KOKORO_MODEL,
+            key="kokoro_model_input",
+        )
+        _set_runtime_config(
+            "kokoro",
+            "model_id",
+            (kokoro_model or DEFAULT_KOKORO_MODEL).strip(),
+        )
+        _saved_kokoro_voices = (
+            _parse_chatterbox_voices(config.kokoro.get("voices"))
+            or DEFAULT_KOKORO_VOICES
+        )
+        if isinstance(_saved_kokoro_voices, list):
+            _saved_kokoro_voices = ", ".join(_saved_kokoro_voices)
+        kokoro_voices = st.text_input(
+            tr("Kokoro Voices"),
+            value=str(_saved_kokoro_voices or ""),
+            key="kokoro_voices_input",
+            placeholder=tr("Kokoro Voices Placeholder"),
+        )
+        _set_runtime_config(
+            "kokoro",
+            "voices",
+            _parse_chatterbox_voices(kokoro_voices),
+        )
+
+
+def _render_music_provider_settings(app_settings):
+    """音乐 TAB：Sonilo 与 ElevenLabs 配乐凭证（从音频面板抽出）。"""
+    st.caption(tr("Provider Music Tab Help"))
+    with st.container(border=True):
+        st.markdown(f"**{tr('Sonilo Background Music')}**")
+        configured_key = str(config.app.get("sonilo_api_key", "") or "").strip()
+        effective_key = configured_key or os.getenv("SONILO_API_KEY", "").strip()
+        entered_key = st.text_input(
+            tr("Sonilo API Key"),
+            value=effective_key,
+            type="password",
+            key="sonilo_api_key_input",
+        ).strip()
+        # 配置值优先于环境变量；仅当用户确实修改输入或本来就使用配置时
+        # 写回，避免把环境变量中的 Key 在无操作的情况下复制进 config.toml。
+        if configured_key or entered_key != effective_key:
+            _set_runtime_config("app", "sonilo_api_key", entered_key)
+    with st.container(border=True):
+        st.markdown(f"**{tr('ElevenLabs Background Music')}**")
+        _render_elevenlabs_api_key_input("ElevenLabs Music API Key")
+
+
+def _render_stock_search_provider_settings(app_settings):
+    """素材搜索 TAB：库存视频服务的 Key（库存图片源共享同批 Key）。"""
+    st.caption(tr("Provider Stock Tab Help"))
+    for provider in VIDEO_SOURCE_GROUPS["stock_video"]:
+        _render_provider_settings_expander(app_settings, provider)
+    st.caption(tr("Stock Image Keys Shared Hint"))
+
+
+def _open_provider_settings_for_group(group):
+    """素材能力 TAB 的跳转回调：打开服务商配置并定位到对应 TAB。"""
+    st.session_state["service_provider_target_tab"] = (
+        MATERIAL_GROUP_PROVIDER_TAB.get(group, "Provider Overview Tab")
+    )
+    _open_settings_dialog("llm")
+
+
 def _render_llm_settings_body(app_settings, is_open=True):
-    """大模型设置体；设置弹窗与一级大模型页共用。"""
+    """服务商配置体；设置弹窗与服务商配置页共用。
+
+    七个能力 TAB：总览矩阵 + 文本生成/视频生成/图片生成/配音/音乐/素材搜索。
+    API 凭证集中在这里，创作面板只保留生成参数。
+    """
+    (
+        overview_panel,
+        text_panel,
+        video_panel,
+        image_panel,
+        tts_panel,
+        music_panel,
+        stock_panel,
+    ) = _mount_keyed_tabs(
+        PROVIDER_TAB_LABEL_KEYS,
+        "service_provider_tabs",
+        "service_provider_active_tab",
+        "service_provider_target_tab",
+    )
+    with overview_panel:
+        if overview_panel.open:
+            _render_service_provider_overview(app_settings)
+    with text_panel:
+        if text_panel.open:
+            _render_llm_chain_settings(app_settings, is_open)
+    with video_panel:
+        if video_panel.open:
+            _render_ai_video_provider_settings(app_settings)
+    with image_panel:
+        if image_panel.open:
+            _render_ai_image_provider_settings(app_settings)
+    with tts_panel:
+        if tts_panel.open:
+            _render_voiceover_provider_settings(app_settings)
+    with music_panel:
+        if music_panel.open:
+            _render_music_provider_settings(app_settings)
+    with stock_panel:
+        if stock_panel.open:
+            _render_stock_search_provider_settings(app_settings)
+
+
+def _render_llm_chain_settings(app_settings, is_open=True):
+    """文本生成 TAB：LLM 三槽链（第一优先 + 备用 1/2）+ 当前 Provider 表单。"""
     # 下拉顺序、默认 label 和稳定 provider id 全部来自 Registry；locale
     # 只覆盖展示文案，不再让 Main.py 维护第二份 Provider 列表。
     llm_provider_ids = [
@@ -5853,6 +6370,49 @@ def _render_llm_settings_body(app_settings, is_open=True):
             lambda value: value,
         ),
     )
+    _set_runtime_config("app", "llm_provider", llm_provider)
+
+    configured_llm = set(_general_provider_readiness(app_settings).get("llm", ()))
+    # format_func 必须是纯闭包：标签在渲染时预算，避免 AppTest 在 run 间
+    # 重新求值 format_func 时 tr() 回退语言与已渲染 options 不一致。
+    disabled_label = tr("Backup Slot Disabled")
+    not_configured_suffix = tr("Provider Not Configured Suffix")
+    for slot in (1, 2):
+        backup_config_key = f"llm_provider_backup{slot}"
+        backup_widget_key = localized_widget_key(f"llm_provider_backup{slot}_select")
+        saved_backup = str(app_settings.get(backup_config_key, "") or "").strip().lower()
+        if saved_backup not in llm_provider_ids:
+            saved_backup = ""
+        st.session_state[backup_widget_key] = saved_backup
+        st.selectbox(
+            tr(f"Backup LLM Provider {slot}"),
+            options=[""] + llm_provider_ids,
+            key=backup_widget_key,
+            format_func=lambda provider_id: (
+                disabled_label
+                if not provider_id
+                else llm_provider_labels[provider_id]
+                + (
+                    ""
+                    if provider_id in configured_llm
+                    else not_configured_suffix
+                )
+            ),
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                backup_config_key,
+                backup_widget_key,
+                lambda value: str(value or "").strip().lower(),
+            ),
+        )
+    st.caption(tr("LLM Chain Help"))
+
+    _render_llm_provider_form(app_settings, llm_provider, is_open)
+
+
+def _render_llm_provider_form(app_settings, llm_provider, is_open=True):
+    """当前选中 LLM Provider 的凭证与参数表单（原大模型设置主体）。"""
     # 配置表单和 Provider 说明并排展示，减少长说明在窄列中的换行，
     # 同时充分利用基础设置面板的横向空间。
     llm_form_panel, llm_help_panel = st.columns(
@@ -5861,7 +6421,6 @@ def _render_llm_settings_body(app_settings, is_open=True):
         vertical_alignment="top",
     )
     llm_helper = llm_help_panel.container()
-    _set_runtime_config("app", "llm_provider", llm_provider)
     llm_provider_spec = get_llm_provider(llm_provider)
     if llm_provider_spec is None:
         # 正常情况下下拉选项全部来自 Registry，不会进入该分支；保留
@@ -6230,9 +6789,11 @@ def _render_llm_settings_body(app_settings, is_open=True):
         if not lock_acquired:
             connection_ok = None
         elif connection_ok:
+            # llm_provider_labels 是 _render_llm_chain_settings 的局部变量；
+            # 这里从 Registry 解析 label，避免连接成功路径 NameError。
             llm_form_panel.success(
                 tr("LLM Connection Test Succeeded").format(
-                    provider=llm_provider_labels[llm_provider],
+                    provider=get_llm_provider_label(llm_provider_spec),
                     model=st_llm_model_name or "-",
                     elapsed=f"{connection_elapsed:.2f}",
                 )
@@ -6250,86 +6811,120 @@ def _render_llm_settings_body(app_settings, is_open=True):
             )
 
 
-def _render_image_provider_group(app_settings, remembered):
-    """AI 图像引擎配置组：素材来源页与图片设置 TAB 共用同一批控件键。
+# 素材能力 TAB 的标题（能力即素材分组，local 不参与备用链）。
+MATERIAL_CAPABILITY_TAB_LABEL_KEYS = (
+    "Capability Group AI Video",
+    "Capability Group AI Image",
+    "Capability Group Stock Video",
+    "Capability Group Stock Image",
+)
 
-    调用方保证同一次 rerun 只有一处渲染（图片 TAB 在素材页/设置弹窗
-    渲染本体时让位），避免重复键。
-    """
-    providers = VIDEO_SOURCE_GROUPS["ai_image"]
-    default_provider = remembered.get("ai_image", providers[0])
-    if default_provider not in providers:
-        default_provider = providers[0]
-    provider_key = localized_widget_key(
-        "settings_material_provider_ai_image_select"
+
+def _material_backup_source_options(group):
+    return [""] + list(VIDEO_SOURCE_GROUPS[group])
+
+
+def _render_material_capability_tab(group, app_settings):
+    """单个素材能力 TAB：三槽来源链 + 源状态 + Key 集中提示，无任何 Key 输入。"""
+    providers = VIDEO_SOURCE_GROUPS[group]
+    labels = _material_provider_labels()
+    capability_labels = {
+        source: labels.get(source, source) for source in providers
+    }
+    # format_func 必须是纯闭包：渲染时预算标签，避免 run 间重新求值时
+    # tr() 回退语言与已渲染 options 不一致。
+    disabled_label = tr("Backup Slot Disabled")
+    configured_sources = {
+        source
+        for sources in _general_provider_readiness(app_settings).values()
+        if group != "llm"
+        for source in sources
+    }
+
+    primary_widget_key = localized_widget_key(f"material_primary_{group}_select")
+    saved_source = str(app_settings.get("video_source", "") or "")
+    default_primary = saved_source if saved_source in providers else providers[0]
+    st.session_state[primary_widget_key] = default_primary
+    st.selectbox(
+        tr("Priority Source"),
+        options=providers,
+        key=primary_widget_key,
+        format_func=capability_labels.get,
+        on_change=_activate_material_primary_source,
+        args=(group, primary_widget_key),
     )
-    st.session_state[provider_key] = default_provider
-    with st.container(border=True):
-        st.subheader(tr("AI Image Generation APIs"))
-        st.caption(tr("AI Image Generation APIs Help"))
-        provider = st.selectbox(
-            tr("AI Image Generation APIs"),
-            options=providers,
-            key=provider_key,
-            format_func=_material_provider_labels().get,
-            label_visibility="collapsed",
-            on_change=_remember_material_provider,
-            args=("ai_image", provider_key),
+    st.caption(tr("Material Primary Source Help"))
+
+    for slot in (1, 2):
+        backup_config_key = f"video_source_backups_{group}_{slot}"
+        backup_widget_key = localized_widget_key(
+            f"material_backup{slot}_{group}_select"
         )
-        _render_material_provider_settings(provider)
-    return provider
+        saved_backup = str(app_settings.get(backup_config_key, "") or "").strip()
+        if saved_backup not in providers:
+            saved_backup = ""
+        st.session_state[backup_widget_key] = saved_backup
+        st.selectbox(
+            tr(f"Backup Source {slot}"),
+            options=_material_backup_source_options(group),
+            key=backup_widget_key,
+            format_func=lambda source_id: (
+                disabled_label
+                if not source_id
+                else capability_labels.get(source_id, source_id)
+            ),
+            on_change=_save_settings_change,
+            args=(
+                "app",
+                backup_config_key,
+                backup_widget_key,
+                lambda value: str(value or "").strip(),
+            ),
+        )
+    st.caption(tr("Material Chain Help"))
+
+    with st.container(border=True):
+        st.markdown(f"**{tr('Source Status Section')}**")
+        for source in providers:
+            ready = source in configured_sources
+            badge = ":material/check_circle:" if ready else ":material/radio_button_unchecked:"
+            status_text = (
+                tr("Provider Configured Badge")
+                if ready
+                else tr("Provider Not Configured Badge")
+            )
+            st.markdown(
+                f"{badge} {capability_labels[source]} · {status_text}"
+            )
+
+    st.caption(tr("Material Keys In Provider Page Hint"))
+    st.button(
+        tr("Open Provider Settings"),
+        key=f"material_open_providers_{group}",
+        icon=":material/hub:",
+        on_click=_open_provider_settings_for_group,
+        args=(group,),
+    )
 
 
 def _render_material_settings_body(app_settings):
-    """素材来源 API 设置体；设置弹窗与一级素材来源页共用。"""
-    if "settings_material_group" not in st.session_state:
-        _initialize_material_navigation("material", app_settings)
-    sections = (
-        (
-            "ai_video",
-            "AI Video Generation APIs",
-            "AI Video Generation APIs Help",
-        ),
-        (
-            "ai_image",
-            "AI Image Generation APIs",
-            "AI Image Generation APIs Help",
-        ),
-        ("stock_video", "Stock Video APIs", "Stock Video APIs Help"),
+    """素材来源设置体；设置弹窗与一级素材来源页共用。
+
+    按能力分组为四个 TAB（AI 视频/AI 图片/库存视频/库存图片），每个能力
+    支持三槽来源链（第一优先写唯一主源键并与创作页同步；备用 1/2 按能力
+    分组存储）。Key 配置全部集中在服务商配置页，这里不再提供任何 Key 输入。
+    """
+    groups = list(service_catalog.MATERIAL_CAPABILITY_GROUPS)
+    panels = _mount_keyed_tabs(
+        MATERIAL_CAPABILITY_TAB_LABEL_KEYS,
+        "material_capability_tabs",
+        "settings_material_group",
+        stable_keys=groups,
     )
-    remembered = dict(
-        st.session_state.get("settings_material_providers", {})
-    )
-    for group, title_key, help_key in sections:
-        if group == "ai_image":
-            # 图像引擎配置组抽为共用 helper：图片设置 TAB 也渲染它。
-            remembered[group] = _render_image_provider_group(
-                app_settings, remembered
-            )
-            continue
-        providers = VIDEO_SOURCE_GROUPS[group]
-        default_provider = remembered.get(group, providers[0])
-        if default_provider not in providers:
-            default_provider = providers[0]
-        provider_key = localized_widget_key(
-            f"settings_material_provider_{group}_select"
-        )
-        st.session_state[provider_key] = default_provider
-        with st.container(border=True):
-            st.subheader(tr(title_key))
-            st.caption(tr(help_key))
-            provider = st.selectbox(
-                tr(title_key),
-                options=providers,
-                key=provider_key,
-                format_func=_material_provider_labels().get,
-                label_visibility="collapsed",
-                on_change=_remember_material_provider,
-                args=(group, provider_key),
-            )
-            remembered[group] = provider
-            _render_material_provider_settings(provider)
-    st.session_state["settings_material_providers"] = remembered
+    for panel, group in zip(panels, groups):
+        with panel:
+            if panel.open:
+                _render_material_capability_tab(group, app_settings)
 
 
 @st.dialog(
@@ -6346,12 +6941,13 @@ def _render_settings_dialog():
         _set_runtime_config("app", "hide_config", False)
         tab_keys = {
             "general": "General Settings Tab",
-            "llm": "LLM Settings Tab",
+            "llm": "Service Providers Tab",
             "material": "Material API Tab",
             "publish": "Auto-Publish Settings",
             "interface": "Interface Settings Tab",
             "keys": "Key Backup Tab",
             "cache": "Cache Management Tab",
+            "brand": "Brand Theme Tab",
         }
         settings_tab_targets = {key: tr(label) for key, label in tab_keys.items()}
         settings_tabs_key = localized_widget_key("settings_dialog_tabs")
@@ -6383,6 +6979,7 @@ def _render_settings_dialog():
             left_config_panel,
             key_backup_panel,
             cache_config_panel,
+            brand_panel,
         ) = panels
         _remember_settings_tab(settings_tabs_key, settings_tab_targets)
         with general_config_panel:
@@ -6414,6 +7011,12 @@ def _render_settings_dialog():
         with right_config_panel:
             if right_config_panel.open:
                 _render_material_settings_body(app_settings)
+
+        # 品牌主题面板：与左导航控制区共享会话主题，改动即时生效。
+        with brand_panel:
+            if brand_panel.open:
+                st.caption(tr("Theme Dialog Hint"))
+                brand_theme.render_controls("cfset", tr)
 
     _save_runtime_config()
 
@@ -7541,13 +8144,12 @@ def _render_script_settings(panel, params):
 
 
 def _render_image_settings(panel, params):
-    """图片设置 TAB：图像动效（项目级参数）+ 图像引擎配置 + 本地关键帧引擎。
+    """图片设置 TAB：图像动效（项目级参数）+ 库存图片源 + 本地关键帧引擎。
 
     与视频/音频/字幕面板同为 render-all：每次 rerun 都组装 params，
     保证项目快照/恢复覆盖图像动效。动效仅对本地素材、AI 图像与库存图片源
-    生效，其余素材来源下不挂载控件（与旧视频面板口径一致）。引擎配置为账号级
-    config，设置弹窗打开（任意 TAB）或素材来源页渲染本体时这里让位，
-    避免重复键与在通用 TAB 背后挂载 provider 表单。
+    生效，其余素材来源下不挂载控件（与旧视频面板口径一致）。API 凭证已
+    集中到服务商配置页，这里只保留生成参数与 OpenAI 图像高级参数。
     """
     with panel:
         # 图片 TAB 先于视频 TAB 渲染，params.video_source 尚未组装；
@@ -7612,30 +8214,69 @@ def _render_image_settings(panel, params):
                 args=(stock_key,),
             )
             st.caption(tr("Stock Image Keys Shared Hint"))
-            if (
-                st.session_state.get("settings_dialog_open", False)
-                or st.session_state.get("active_page") == "material"
-            ):
-                st.caption(tr("Stock Image Keys Elsewhere Hint"))
-            else:
-                _render_material_provider_settings(
-                    material.STOCK_IMAGE_SOURCES[selected_stock]
+            st.caption(tr("Stock Image Keys Elsewhere Hint"))
+
+        # AI 图像与库存图片服务的 Key 已集中在服务商配置页，创作面板只
+        # 保留生成参数；OpenAI 图像高级参数仍属于本项目级参数，留在本页。
+        st.caption(tr("Image Provider Elsewhere Hint"))
+        st.button(
+            tr("Open Provider Settings"),
+            key="image_settings_open_providers",
+            icon=":material/hub:",
+            on_click=_open_provider_settings_for_group,
+            args=("ai_image",),
+        )
+
+        if effective_source == "openai_image":
+            with st.container(border=True):
+                st.markdown(f"**{tr('OpenAI Image Advanced Settings')}**")
+                openai_image_size = st.text_input(
+                    tr("OpenAI Image Size"),
+                    value=str(
+                        config.snapshot_config_with_pending(config.app).get(
+                            "openai_image_size", ""
+                        )
+                        or ""
+                    ),
+                    placeholder="1024x1536",
+                    help=tr("OpenAI Image Size Help"),
+                    key="openai_image_size_input",
+                    on_change=_save_settings_change,
+                    args=(
+                        "app",
+                        "openai_image_size",
+                        "openai_image_size_input",
+                        lambda value: value.strip(),
+                    ),
+                )
+                _set_runtime_config(
+                    "app", "openai_image_size", openai_image_size.strip()
                 )
 
-        app_settings = config.snapshot_config_with_pending(config.app)
-        if (
-            st.session_state.get("settings_dialog_open", False)
-            or st.session_state.get("active_page") == "material"
-        ):
-            st.caption(tr("Image Provider Elsewhere Hint"))
-        else:
-            remembered = dict(
-                st.session_state.get("settings_material_providers", {})
-            )
-            remembered["ai_image"] = _render_image_provider_group(
-                app_settings, remembered
-            )
-            st.session_state["settings_material_providers"] = remembered
+                openai_image_prompt_template = st.text_input(
+                    tr("OpenAI Image Prompt Template"),
+                    value=str(
+                        config.snapshot_config_with_pending(config.app).get(
+                            "openai_image_prompt_template", ""
+                        )
+                        or ""
+                    ),
+                    placeholder="cinematic photo of {term}, photorealistic",
+                    help=tr("OpenAI Image Prompt Template Help"),
+                    key="openai_image_prompt_template_input",
+                    on_change=_save_settings_change,
+                    args=(
+                        "app",
+                        "openai_image_prompt_template",
+                        "openai_image_prompt_template_input",
+                        lambda value: value.strip(),
+                    ),
+                )
+                _set_runtime_config(
+                    "app",
+                    "openai_image_prompt_template",
+                    openai_image_prompt_template.strip(),
+                )
 
         with st.container(border=True):
             st.markdown(f"**{tr('Local Keyframe Engine Section')}**")
@@ -9085,6 +9726,34 @@ def _cache_minimax_voices(
     cache[cache_key] = voices
 
 
+def _get_minimax_voice_options() -> tuple[list[str], dict[str, str]]:
+    """从会话缓存读取 MiniMax 音色目录，供音频面板的统一音色选择器使用。
+
+    目录在服务商配置页配音 TAB 主动刷新；未刷新时仅保留配置的 Voice ID，
+    原有生成流程不依赖远端音色查询结果。
+    """
+    effective_api_key = voice.get_minimax_tts_api_key()
+    effective_endpoint = voice.get_minimax_tts_endpoint()
+    available_voices = _get_cached_minimax_voices(
+        effective_api_key, effective_endpoint
+    )
+    voice_labels = {
+        f"minimax:{item['voice_id']}": (
+            f"{item['voice_name']} ({item['voice_id']})"
+            if item["voice_name"] != item["voice_id"]
+            else item["voice_id"]
+        )
+        for item in available_voices
+    }
+    configured_voice_id = str(
+        config.minimax_tts.get("voice_id", voice.MINIMAX_TTS_DEFAULT_VOICE)
+        or voice.MINIMAX_TTS_DEFAULT_VOICE
+    ).strip()
+    configured_voice = f"minimax:{configured_voice_id}"
+    voice_labels.setdefault(configured_voice, configured_voice_id)
+    return list(voice_labels), voice_labels
+
+
 def _render_minimax_tts_settings() -> tuple[list[str], dict[str, str]]:
     """渲染 MiniMax TTS 配置，并返回统一音色选择器使用的选项和文案。"""
     effective_api_key = _sync_minimax_tts_api_key_input()
@@ -9247,7 +9916,7 @@ def _render_elevenlabs_api_key_input(label_key):
     ).strip()
 
 
-def _render_background_music_settings(params, elevenlabs_api_key_rendered=False):
+def _render_background_music_settings(params):
     """渲染背景音乐来源与音量设置，并返回本次待保存的上传文件。"""
     uploaded_bgm_file = None
     previous_bgm_type = st.session_state.get("last_rendered_bgm_type")
@@ -9274,26 +9943,13 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
     params.bgm_type = selected_bgm_type
     _set_runtime_config("ui", "bgm_type", params.bgm_type)
     if params.bgm_type == "sonilo":
-        configured_key = str(config.app.get("sonilo_api_key", "") or "").strip()
-        effective_key = configured_key or os.getenv("SONILO_API_KEY", "").strip()
-        entered_key = st.text_input(
-            tr("Sonilo API Key"),
-            value=effective_key,
-            type="password",
-            key="sonilo_api_key_input",
-        ).strip()
-        # 用户要求已配置的 Key 直接回填到密码输入框。配置值优先于环境变量；
-        # 仅当用户确实修改输入或本来就使用配置时写回，避免把环境变量中的 Key
-        # 在无操作的情况下复制进 config.toml。
-        if configured_key or entered_key != effective_key:
-            _set_runtime_config("app", "sonilo_api_key", entered_key)
+        # Sonilo Key 在服务商配置页音乐 TAB 统一维护；这里只在缺失时提示。
+        if not _music_service_ready("sonilo"):
+            st.caption(tr("Music Key Elsewhere Hint"))
     elif params.bgm_type == "elevenlabs":
-        if elevenlabs_api_key_rendered:
-            # TTS 区域已经渲染共享输入框时不再创建第二个 widget，避免两个独立
-            # session_state 值互相覆盖。说明文字帮助用户定位上方的共用配置。
-            st.caption(tr("ElevenLabs API Key Help"))
-        else:
-            _render_elevenlabs_api_key_input("ElevenLabs Music API Key")
+        # ElevenLabs Key 在服务商配置页统一维护；这里只在缺失时提示。
+        if not _music_service_ready("elevenlabs"):
+            st.caption(tr("Music Key Elsewhere Hint"))
 
     bgm_volume_options = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     params.bgm_volume = stable_selectbox(
@@ -9606,39 +10262,12 @@ def _render_audio_settings(panel, params):
             _set_runtime_config("ui", "voice_mode", voice_mode)
             tts_mode_enabled = voice_mode == VOICE_MODE_TTS
 
-            # Provider 下拉只负责选择自动配音服务；无配音已经由上方模式控制，
-            # 不再作为 TTS Provider 混入列表，避免两个入口表达同一状态。
-            tts_servers = [
-                ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
-                ("azure-tts-v2", "Azure TTS V2"),
-                ("siliconflow", "SiliconFlow TTS"),
-                ("gemini-tts", "Google Gemini TTS"),
-                ("mimo-tts", "Xiaomi MiMo TTS"),
-                ("minimax-tts", "MiniMax TTS"),
-                ("elevenlabs", "ElevenLabs TTS"),
-                ("chatterbox", "Chatterbox TTS"),
-                ("kokoro", "Kokoro TTS"),
-                ("fish_audio", "Fish Audio TTS"),
-                ("voxcpm", "VoxCPM TTS"),
-            ]
-
-            tts_server_values = [server_value for server_value, _ in tts_servers]
+            # 配音服务与备用链在服务商配置页统一维护；这里按已保存的服务
+            # 渲染音色列表等生成参数，不再提供服务下拉与 Key 输入。
+            tts_server_values = [server_id for server_id, _ in TTS_SERVER_OPTIONS]
             if saved_tts_server not in tts_server_values:
                 saved_tts_server = "azure-tts-v1"
-
-            if tts_mode_enabled:
-                selected_tts_server = stable_selectbox(
-                    tr("Voiceover Service"),
-                    options=tts_server_values,
-                    default_value=saved_tts_server,
-                    key="tts_server_select",
-                    format_func=lambda value: dict(
-                        (v, label) for v, label in tts_servers
-                    )[value],
-                )
-            else:
-                # 非自动配音模式不渲染 TTS 控件，但保留上次选择，切回后可以继续使用。
-                selected_tts_server = saved_tts_server
+            selected_tts_server = saved_tts_server
 
             _set_runtime_config("ui", "tts_server", selected_tts_server)
 
@@ -9649,17 +10278,16 @@ def _render_audio_settings(panel, params):
                 if provider_tips:
                     st.info(provider_tips)
 
-            # MiniMax 只复用下方通用“配音声音”选择器。Provider 配置函数负责
-            # 刷新远端音色并返回友好文案，不再额外渲染 Voice ID 和音色下拉框。
+            # MiniMax 的音色目录在服务商配置页主动刷新；这里从会话缓存
+            # 读取，未刷新时仍保留配置的 Voice ID 供选择。
             minimax_voices = []
             minimax_voice_labels = {}
             if tts_mode_enabled and selected_tts_server == "minimax-tts":
-                minimax_voices, minimax_voice_labels = _render_minimax_tts_settings()
+                minimax_voices, minimax_voice_labels = _get_minimax_voice_options()
 
             # 根据选择的TTS服务器获取声音列表
             filtered_voices = []
             saved_voice_name = config.ui.get("voice_name", "")
-            elevenlabs_api_key_rendered = False
 
             if not tts_mode_enabled:
                 # 上传音频和无配音模式不加载远程音色，减少无意义的网络请求和界面噪音。
@@ -9676,9 +10304,12 @@ def _render_audio_settings(panel, params):
             elif selected_tts_server == "minimax-tts":
                 filtered_voices = minimax_voices
             elif selected_tts_server == "elevenlabs":
-                # 音色列表位于 Key 输入框之前渲染，必须先统一恢复重连状态并读取
-                # 配置/环境变量，否则页面会用空 Key 加载并缓存空音色列表。
-                saved_elevenlabs_api_key = _sync_elevenlabs_api_key_input()
+                # Key 在服务商配置页维护；这里读取配置/环境变量加载音色列表。
+                saved_elevenlabs_api_key = str(
+                    config.elevenlabs.get("api_key", "")
+                    or os.getenv("ELEVENLABS_API_KEY", "")
+                    or ""
+                ).strip()
                 cache_key = f"elevenlabs_voices_{saved_elevenlabs_api_key}"
                 if cache_key not in st.session_state:
                     st.session_state[cache_key] = voice.get_elevenlabs_voices(
@@ -9686,12 +10317,10 @@ def _render_audio_settings(panel, params):
                     )
                 filtered_voices = st.session_state[cache_key]
             elif selected_tts_server == "chatterbox":
-                # 自托管 Chatterbox 服务的预置音色（来自 [chatterbox] voices 配置）
-                _sync_chatterbox_config_from_session_state()
+                # 自托管 Chatterbox 服务的预置音色（[chatterbox] voices 在服务商配置页维护）
                 filtered_voices = voice.get_chatterbox_voices()
             elif selected_tts_server == "kokoro":
                 # 自托管 Kokoro 服务的音色：[kokoro] voices 为空时从服务端 /audio/voices 读取
-                _sync_kokoro_config_from_session_state()
                 filtered_voices = _get_kokoro_voice_options(saved_voice_name)
             elif selected_tts_server == "fish_audio":
                 filtered_voices = voice.get_fish_audio_voices()
@@ -9822,173 +10451,12 @@ def _render_audio_settings(panel, params):
                 voice_name = saved_voice_name or voice.NO_VOICE_NAME
                 params.voice_name = voice_name
 
-            # 当选择V2版本或者声音是V2声音时，显示服务区域和API key输入框
-            if tts_mode_enabled and (
-                selected_tts_server == "azure-tts-v2"
-                or (voice_name and voice.is_azure_v2_voice(voice_name))
-            ):
-                saved_azure_speech_region = config.azure.get("speech_region", "")
-                saved_azure_speech_key = config.azure.get("speech_key", "")
-                azure_speech_region = st.text_input(
-                    tr("Speech Region"),
-                    value=saved_azure_speech_region,
-                    key="azure_speech_region_input",
-                )
-                azure_speech_key = st.text_input(
-                    tr("Speech Key"),
-                    value=saved_azure_speech_key,
-                    type="password",
-                    key="azure_speech_key_input",
-                )
-                _set_runtime_config("azure", "speech_region", azure_speech_region)
-                _set_runtime_config("azure", "speech_key", azure_speech_key)
-
-            if tts_mode_enabled and selected_tts_server == "gemini-tts":
-                # Gemini TTS 与 Gemini LLM 共用同一份密钥；在音频面板提供直接入口，
-                # 用户无需先切换 LLM Provider 才能完成语音配置。
-                gemini_tts_api_key = st.text_input(
-                    tr("Gemini API Key"),
-                    value=config.app.get("gemini_api_key", ""),
-                    type="password",
-                    key="gemini_tts_api_key_input",
-                )
-                _set_runtime_config("app", "gemini_api_key", gemini_tts_api_key)
-
-            # 当选择硅基流动时，显示API key输入框和说明信息
-            if tts_mode_enabled and (
-                selected_tts_server == "siliconflow"
-                or (voice_name and voice.is_siliconflow_voice(voice_name))
-            ):
-                saved_siliconflow_api_key = config.siliconflow.get("api_key", "")
-
-                siliconflow_api_key = st.text_input(
-                    tr("SiliconFlow API Key"),
-                    value=saved_siliconflow_api_key,
-                    type="password",
-                    key="siliconflow_api_key_input",
-                )
-
-                _set_runtime_config("siliconflow", "api_key", siliconflow_api_key)
-
-            # 当选择 Xiaomi MiMo TTS 时，复用 MiMo LLM provider 的 API Key。
-            # 这样用户如果同时使用 MiMo 生成文案和语音，只需要维护一份密钥。
-            if tts_mode_enabled and (
-                selected_tts_server == "mimo-tts"
-                or (voice_name and voice.is_mimo_voice(voice_name))
-            ):
-                saved_mimo_api_key = config.app.get("mimo_api_key", "")
-
-                mimo_api_key = st.text_input(
-                    tr("MiMo API Key"),
-                    value=saved_mimo_api_key,
-                    type="password",
-                    key="mimo_tts_api_key_input",
-                )
-
-                _set_runtime_config("app", "mimo_api_key", mimo_api_key)
-
-            # ElevenLabs API key section
-            if tts_mode_enabled and (
-                selected_tts_server == "elevenlabs"
-                or (voice_name and voice.is_elevenlabs_voice(voice_name))
-            ):
-                _render_elevenlabs_api_key_input(
-                    "ElevenLabs API Key",
-                )
-                elevenlabs_api_key_rendered = True
-
-                _elevenlabs_models = [
-                    "eleven_multilingual_v2",
-                    "eleven_flash_v2_5",
-                    "eleven_v3",
-                ]
-                saved_elevenlabs_model = config.elevenlabs.get(
-                    "model_id", "eleven_multilingual_v2"
-                )
-                if saved_elevenlabs_model not in _elevenlabs_models:
-                    saved_elevenlabs_model = "eleven_multilingual_v2"
-                elevenlabs_model = stable_selectbox(
-                    tr("ElevenLabs Model"),
-                    options=_elevenlabs_models,
-                    default_value=saved_elevenlabs_model,
-                    key="elevenlabs_model_select",
-                )
-                _set_runtime_config("elevenlabs", "model_id", elevenlabs_model)
-
-            # Fish Audio API settings section
-            if tts_mode_enabled and (
-                selected_tts_server == "fish_audio"
-                or (voice_name and voice.is_fish_audio_voice(voice_name))
-            ):
-                saved_fish_api_key = (
-                    config.fish_audio.get("api_key", "")
-                    if hasattr(config, "fish_audio") and isinstance(config.fish_audio, dict)
-                    else ""
-                )
-                fish_audio_api_key = st.text_input(
-                    tr("Fish Audio API Key"),
-                    value=saved_fish_api_key,
-                    type="password",
-                    key="fish_audio_api_key_input",
-                )
-                _set_runtime_config("fish_audio", "api_key", fish_audio_api_key)
-
-                _fish_audio_models = [
-                    "s2.1-pro-free",
-                    "s2.1-pro",
-                    "s2-pro",
-                ]
-                saved_fish_model = (
-                    config.fish_audio.get("model", "s2.1-pro-free")
-                    if hasattr(config, "fish_audio") and isinstance(config.fish_audio, dict)
-                    else "s2.1-pro-free"
-                )
-                if saved_fish_model not in _fish_audio_models:
-                    saved_fish_model = "s2.1-pro-free"
-                fish_model = stable_selectbox(
-                    tr("Fish Audio Model"),
-                    options=_fish_audio_models,
-                    default_value=saved_fish_model,
-                    key="fish_audio_model_select",
-                )
-                _set_runtime_config("fish_audio", "model", fish_model)
-
-            # ModelBest hosts VoxCPM behind its streaming Audio Speech API.
-            # The fixed provider endpoint is still editable for compatible
-            # gateways, while the user only has to supply an API key and a
-            # speech_synthesis-capable model id for the standard platform.
+            # 各配音服务的凭证与端点已集中在服务商配置页维护；音频面板只
+            # 保留本次任务的生成参数（音色/语速/音量/试听/参考音频等）。
             if tts_mode_enabled and (
                 selected_tts_server == "voxcpm"
                 or (voice_name and voice.is_voxcpm_voice(voice_name))
             ):
-                _sync_voxcpm_api_key_input()
-                voxcpm_api_key = st.text_input(
-                    tr("VoxCPM API Key"),
-                    type="password",
-                    key="voxcpm_api_key_input",
-                )
-                _set_runtime_config("voxcpm", "api_key", voxcpm_api_key)
-
-                voxcpm_model = st.text_input(
-                    tr("VoxCPM Model ID"),
-                    value=config.voxcpm.get("model_id", ""),
-                    key="voxcpm_model_id_input",
-                    placeholder=tr("VoxCPM Model ID Placeholder"),
-                )
-                _set_runtime_config("voxcpm", "model_id", voxcpm_model.strip())
-
-                voxcpm_base_url = st.text_input(
-                    tr("VoxCPM Base URL"),
-                    value=config.voxcpm.get("base_url") or DEFAULT_VOXCPM_BASE_URL,
-                    key="voxcpm_base_url_input",
-                    placeholder=DEFAULT_VOXCPM_BASE_URL,
-                )
-                _set_runtime_config(
-                    "voxcpm",
-                    "base_url",
-                    (voxcpm_base_url or DEFAULT_VOXCPM_BASE_URL).strip().rstrip("/"),
-                )
-
                 uploaded_reference_audio = st.file_uploader(
                     tr("VoxCPM Reference Audio"),
                     type=list(voice.VOXCPM_REFERENCE_AUDIO_FILE_TYPES),
@@ -10075,111 +10543,8 @@ def _render_audio_settings(panel, params):
                     else:
                         _clear_voxcpm_prompt_state()
 
-            # Chatterbox API settings section (self-hosted, OpenAI-compatible)
-            if tts_mode_enabled and (
-                selected_tts_server == "chatterbox"
-                or (voice_name and voice.is_chatterbox_voice(voice_name))
-            ):
-                chatterbox_base_url = st.text_input(
-                    tr("Chatterbox Base URL"),
-                    value=config.chatterbox.get("base_url")
-                    or DEFAULT_CHATTERBOX_BASE_URL,
-                    key="chatterbox_base_url_input",
-                    placeholder=tr("Chatterbox Base URL Placeholder"),
-                )
-                _set_runtime_config(
-                    "chatterbox", "base_url", (chatterbox_base_url or "").strip()
-                )
-
-                chatterbox_api_key = st.text_input(
-                    tr("Chatterbox API Key"),
-                    value=config.chatterbox.get("api_key", ""),
-                    type="password",
-                    key="chatterbox_api_key_input",
-                )
-                _set_runtime_config("chatterbox", "api_key", chatterbox_api_key)
-
-                chatterbox_model = st.text_input(
-                    tr("Chatterbox Model"),
-                    value=config.chatterbox.get("model_id") or DEFAULT_CHATTERBOX_MODEL,
-                    key="chatterbox_model_input",
-                )
-                _set_runtime_config(
-                    "chatterbox",
-                    "model_id",
-                    (chatterbox_model or DEFAULT_CHATTERBOX_MODEL).strip(),
-                )
-
-                _saved_chatterbox_voices = (
-                    _parse_chatterbox_voices(config.chatterbox.get("voices"))
-                    or DEFAULT_CHATTERBOX_VOICES
-                )
-                if isinstance(_saved_chatterbox_voices, list):
-                    _saved_chatterbox_voices = ", ".join(_saved_chatterbox_voices)
-                chatterbox_voices = st.text_input(
-                    tr("Chatterbox Voices"),
-                    value=str(_saved_chatterbox_voices or ""),
-                    key="chatterbox_voices_input",
-                    placeholder=tr("Chatterbox Voices Placeholder"),
-                )
-                _set_runtime_config(
-                    "chatterbox",
-                    "voices",
-                    _parse_chatterbox_voices(chatterbox_voices),
-                )
-
-            # Kokoro API settings section (self-hosted, OpenAI-compatible; voices listed from the server when left empty)
-            if tts_mode_enabled and (
-                selected_tts_server == "kokoro"
-                or (voice_name and voice.is_kokoro_voice(voice_name))
-            ):
-                kokoro_base_url = st.text_input(
-                    tr("Kokoro Base URL"),
-                    value=config.kokoro.get("base_url")
-                    or DEFAULT_KOKORO_BASE_URL,
-                    key="kokoro_base_url_input",
-                    placeholder=tr("Kokoro Base URL Placeholder"),
-                )
-                _set_runtime_config(
-                    "kokoro", "base_url", (kokoro_base_url or "").strip()
-                )
-
-                kokoro_api_key = st.text_input(
-                    tr("Kokoro API Key"),
-                    value=config.kokoro.get("api_key", ""),
-                    type="password",
-                    key="kokoro_api_key_input",
-                )
-                _set_runtime_config("kokoro", "api_key", kokoro_api_key)
-
-                kokoro_model = st.text_input(
-                    tr("Kokoro Model"),
-                    value=config.kokoro.get("model_id") or DEFAULT_KOKORO_MODEL,
-                    key="kokoro_model_input",
-                )
-                _set_runtime_config(
-                    "kokoro",
-                    "model_id",
-                    (kokoro_model or DEFAULT_KOKORO_MODEL).strip(),
-                )
-
-                _saved_kokoro_voices = (
-                    _parse_chatterbox_voices(config.kokoro.get("voices"))
-                    or DEFAULT_KOKORO_VOICES
-                )
-                if isinstance(_saved_kokoro_voices, list):
-                    _saved_kokoro_voices = ", ".join(_saved_kokoro_voices)
-                kokoro_voices = st.text_input(
-                    tr("Kokoro Voices"),
-                    value=str(_saved_kokoro_voices or ""),
-                    key="kokoro_voices_input",
-                    placeholder=tr("Kokoro Voices Placeholder"),
-                )
-                _set_runtime_config(
-                    "kokoro",
-                    "voices",
-                    _parse_chatterbox_voices(kokoro_voices),
-                )
+            # Chatterbox/Kokoro 等自托管服务的凭证与端点已在服务商配置页维护；
+            # 音频面板只按已保存配置渲染音色列表。
 
             # 三种模式只渲染当前任务真正需要的控件。自动配音可调音量和语速；
             # 上传音频只需要文件和音量；无配音不再展示无效设置。
@@ -10261,10 +10626,7 @@ def _render_audio_settings(panel, params):
                             "Custom audio will be used directly. TTS synthesis will be skipped for this task."
                         )
                     )
-            uploaded_bgm_file = _render_background_music_settings(
-                params,
-                elevenlabs_api_key_rendered=elevenlabs_api_key_rendered,
-            )
+            uploaded_bgm_file = _render_background_music_settings(params)
     return uploaded_audio_file, uploaded_bgm_file, voice_mode
 
 
@@ -12075,7 +12437,7 @@ NAV_PAGES = (
     ("pro", "Nav Pro Drama", ":material/movie:", "creation"),
     ("tasks", "Task Manager", ":material/checklist:", "publish"),
     ("publish_history", "Publish History Tab", ":material/history:", "publish"),
-    ("llm", "LLM Settings Tab", ":material/psychology:", "config"),
+    ("llm", "Service Providers Tab", ":material/hub:", "config"),
     ("material", "Material API Tab", ":material/video_library:", "config"),
     ("publish", "Auto-Publish Settings", ":material/send:", "config"),
     ("presets", "Preset Library", ":material/tune:", "config"),
@@ -12340,6 +12702,7 @@ def _render_nav_sidebar(active_page, collapsed):
             width="stretch",
             help=toggle_label if collapsed else None,
         )
+        brand_theme.render_nav_brand(collapsed)
         current_group = None
         for page, label_key, icon, group in NAV_PAGES:
             if group != current_group:
@@ -12359,6 +12722,9 @@ def _render_nav_sidebar(active_page, collapsed):
                 # 展开态文本可见无需悬浮提示；收起态纯图标时保留。
                 help=tr(label_key) if collapsed else None,
             )
+        if not collapsed:
+            # 常驻品牌主题控制区：改动经 on_change 同步会话主题并整页重渲染。
+            brand_theme.render_controls("cfnav", tr)
     _render_shell_shortcuts()
 
 
