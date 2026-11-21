@@ -6,7 +6,7 @@
 
 只需提供一个<b>主题</b>或<b>脚本</b>，ChangoFilm 即可完成文案、画面、配音、字幕与配乐，并在你自己的机器上合成整集成片。
 
-[![Version](https://img.shields.io/badge/version-1.7.0-blue)](https://github.com/wyg5208/changofilm)
+[![Version](https://img.shields.io/badge/version-1.8.0-blue)](https://github.com/wyg5208/changofilm)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/wyg5208/changofilm)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

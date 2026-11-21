@@ -1614,7 +1614,7 @@ wheels = [
 
 [[package]]
 name = "changofilm"
-version = "1.7.0"
+version = "1.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
