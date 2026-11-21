@@ -77,7 +77,7 @@ class CodexSessionBinding:
 @contextmanager
 def _store_guard():
     # Use the same reentrant lock instance for nested credential operations.
-    # A file lock coordinates different API/WebUI processes sharing MPT_HOME.
+    # A file lock coordinates different API/WebUI processes sharing CHANGOFILM_HOME.
     with _lock:
         path = _credential_path()
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -555,8 +555,8 @@ def request_image(payload, *, generation, session, timeout, read_result):
                         "chatgpt-account-id": credentials["account_id"],
                         "Accept": "text/event-stream",
                         "OpenAI-Beta": "responses=experimental",
-                        "originator": "moneyprinterturbo",
-                        "User-Agent": "MoneyPrinterTurbo/1.5.0",
+                        "originator": "changofilm",
+                        "User-Agent": "ChangoFilm/1.7.0",
                     },
                     json=payload,
                 )
@@ -667,8 +667,8 @@ def generate_text(prompt, model, timeout=300):
                     "chatgpt-account-id": credentials["account_id"],
                     "Accept": "text/event-stream",
                     "OpenAI-Beta": "responses=experimental",
-                    "originator": "moneyprinterturbo",
-                    "User-Agent": "MoneyPrinterTurbo/1.5.0",
+                    "originator": "changofilm",
+                    "User-Agent": "ChangoFilm/1.7.0",
                 },
                 json={
                     "model": model,

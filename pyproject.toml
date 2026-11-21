@@ -6,9 +6,9 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mpt"
-version = "1.5.0"
-description = "Official MoneyPrinterTurbo package with WebUI and CLI, maintained by harry0703."
+name = "changofilm"
+version = "1.7.0"
+description = "ChangoFilm: a local-first studio for professional series short dramas, with WebUI and CLI."
 readme = "docs/pypi-description.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -47,11 +47,11 @@ dependencies = [
 ]
 
 [project.scripts]
-mpt = "app.launcher:main"
+changofilm = "app.launcher:main"
 
 [project.urls]
-Homepage = "https://github.com/harry0703/MoneyPrinterTurbo"
-Issues = "https://github.com/harry0703/MoneyPrinterTurbo/issues"
+Homepage = "https://github.com/wyg5208/changofilm"
+Issues = "https://github.com/wyg5208/changofilm/issues"
 
 [project.optional-dependencies]
 # Optional TwelveLabs (https://twelvelabs.io) video-understanding/embedding
