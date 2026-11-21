@@ -14,7 +14,10 @@ change the order in the manifest to reorder the video.
 
 ## Requirements
 
-Python 3.11 or newer and FFmpeg/FFprobe on PATH, including the `libx264` encoder.
+Python 3.11 or newer and FFmpeg on PATH, including the `libx264` encoder and the
+`subtitles` (libass) filter for burned-in captions. FFprobe is optional: when it
+is missing, the timing stage measures duration with `ffmpeg -i` instead and the
+revision records `ffprobe: "unavailable"` in its toolchain fingerprint.
 Prepared inputs must be standalone encoded media: MOV/MP4, Matroska/WebM, AVI,
 MPEG-TS/video, Ogg, FLV, WAV, MP3, FLAC or AAC. HLS/DASH/concat playlists and
 external-reference media are rejected; copying only a playlist would not snapshot
@@ -44,7 +47,11 @@ Save `episode.json` beside your prepared assets:
       "id": "opening",
       "footage": "opening.mp4",
       "audio": "opening.wav",
-      "narration": "Introduce the product."
+      "narration": "Introduce the product.",
+      "transition": "fade",
+      "subtitle": {
+        "cues": [{"start": 0.0, "end": 2.5, "text": "Introduce the product."}]
+      }
     },
     {
       "id": "product-detail",
@@ -79,9 +86,18 @@ narration away. Zero BGM volume produces an unmixed export.
 
 `narration` is provenance text, not a TTS request. When changing narration, provide
 its newly prepared audio too; the CLI cannot verify that the recording speaks the
-text. Word-aligned subtitles, transitions, overlays and provider generation are
-not implemented by this first local renderer. The timing stage records duration,
-not generated word alignments.
+text. Each scene accepts a `transition` (`none`, `fade`, `slide`, `zoom` or
+`match_cut`, applied to that scene's own clip like the main moviepy path) and a
+`subtitle` cue list burned in via ASS/libass with the bundled STHeitiMedium font,
+scaled from the main path's 1080x1920@60px style. Cues are clamped to the scene
+duration; braces and newlines in cue text are neutralized. Overlays and provider
+generation are still not implemented by this local renderer. The timing stage
+records duration, not generated word alignments.
+
+`app.services.plan_compiler.build_project_request(plan, scene_media, project_id=...)`
+bridges a confirmed `ScriptPlan` plus per-scene prepared media into this manifest
+format, carrying `transition_to_next`, `subtitle_cues` and measured durations
+over with the same semantics as `compile_timeline`.
 
 ## Replace, compare and reuse
 
@@ -98,6 +114,7 @@ python -m app.services.video_project --project storage/projects/product-episode 
 |---|---|
 | One scene's footage | That scene's render, assembly and final export |
 | One scene's narration/audio | That scene's audio normalization, timing and render; assembly and export |
+| One scene's subtitle cues or transition | That scene's render, assembly and final export |
 | BGM file or volume | Final mix/export only |
 | Scene order | Assembly and export only |
 | Dimensions/frame rate | Scene renders, assembly and export |

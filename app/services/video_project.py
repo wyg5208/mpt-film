@@ -1,7 +1,7 @@
 """Opt-in, local revision rendering. No providers, credentials or publishing.
 
 Run ``python -m app.services.video_project --help``. Prepared footage and audio
-can come from an existing MoneyPrinter task; this module does not regenerate them.
+can come from an existing ChangoFilm task; this module does not regenerate them.
 """
 
 from __future__ import annotations
@@ -26,6 +26,10 @@ PREPARED_FORMATS = "mov,matroska,avi,mpegts,mpegvideo,ogg,flv,wav,mp3,flac,aac"
 SCHEMA_VERSION = 1
 RENDERER_VERSION = "local-ffmpeg-v1"
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# 场景级转场（与 ScriptScene.transition_to_next 同集）；match_cut 是硬切。
+SCENE_TRANSITIONS = ("none", "fade", "slide", "zoom", "match_cut")
+# imageio-ffmpeg 内置二进制不带 ffprobe；缺失时时长测量降级 ffmpeg -i。
+FFPROBE_UNAVAILABLE = "unavailable"
 
 
 class ProjectError(ValueError):
@@ -168,6 +172,117 @@ def _tool_version(executable: str) -> str:
         raise ProjectError(f"working {executable} is required") from exc
 
 
+def _optional_tool_version(executable: str) -> str:
+    try:
+        return _tool_version(executable)
+    except ProjectError:
+        return FFPROBE_UNAVAILABLE
+
+
+def _duration_via_ffmpeg(ffmpeg: str, audio: str, timeout: float) -> float:
+    """ffprobe 缺失时用 ffmpeg -i 的 stderr Duration 行测量时长。"""
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", audio],
+            capture_output=True,
+            text=True,
+            timeout=max(1.0, min(timeout, 60.0)),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProjectError(f"working {ffmpeg} is required") from exc
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not match:
+        raise ProjectError("prepared audio duration could not be measured")
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def _filter_path(path: Path) -> str:
+    """filtergraph 路径转义：统一正斜杠，冒号/单引号转义（Windows 盘码）。"""
+    value = str(path).replace("\\", "/").replace("'", "\\'").replace(":", "\\:")
+    return f"'{value}'"
+
+
+def _parse_subtitle(value: object) -> dict | None:
+    """字幕 fail-closed 校验：只收 cues 列表，时间/文本越界一律拒绝。"""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - {"cues"}:
+        raise ProjectError("subtitle accepts only a cues list")
+    cues = value.get("cues")
+    if not isinstance(cues, list) or not 1 <= len(cues) <= 2000:
+        raise ProjectError("subtitle cues must be a non-empty list under 2000 entries")
+    parsed = []
+    for cue in cues:
+        if not isinstance(cue, dict) or set(cue) - {"start", "end", "text"}:
+            raise ProjectError("unknown subtitle cue fields")
+        start, end = cue.get("start"), cue.get("end")
+        for number in (start, end):
+            if (
+                isinstance(number, bool)
+                or not isinstance(number, (int, float))
+                or not math.isfinite(number)
+                or not 0 <= number <= 3600
+            ):
+                raise ProjectError(
+                    "subtitle cue times must be finite and between 0 and 3600 seconds"
+                )
+        if end <= start:
+            raise ProjectError("subtitle cue end must be after its start")
+        text = cue.get("text", "")
+        if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+            raise ProjectError(
+                "subtitle cue text must be non-empty and under 2000 characters"
+            )
+        parsed.append({"start": float(start), "end": float(end), "text": text})
+    return {"cues": parsed}
+
+
+def _ass_timestamp(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    hours = int(seconds // 3600)
+    minutes = int(seconds % 3600 // 60)
+    return f"{hours}:{minutes:02d}:{seconds % 60:05.2f}"
+
+
+def _ass_document(cues: list[dict], settings: RenderSettings, duration: float) -> str:
+    """白字黑描边底部居中，字号/描边按主路径 1080x1920@60px/1.5 等比缩放。"""
+    font_size = max(12, round(settings.height * 60 / 1920))
+    outline = max(1, round(font_size * 1.5 / 60))
+    margin_v = round(font_size * 1.2)
+    margin_lr = round(settings.width * 0.05)
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {settings.width}",
+        f"PlayResY: {settings.height}",
+        "WrapStyle: 0",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+        "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+        "MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,STHeitiMedium,{font_size},&H00FFFFFF,&H000000FF,"
+        f"&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,{outline},0,2,"
+        f"{margin_lr},{margin_lr},{margin_v},1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for cue in cues:
+        start, end = cue["start"], min(cue["end"], duration)
+        if start >= duration or end <= start:
+            continue
+        # 花括号是 ASS 特效块语法；换行转 \N，避免旁白文本被解释成指令。
+        text = cue["text"].replace("{", "(").replace("}", ")").replace("\n", "\\N")
+        lines.append(
+            f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},"
+            f"Default,,0,0,0,,{text}"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def stage_graph(spec: dict) -> list[Stage]:
     """Pure dependency selection: BGM never invalidates an individual scene."""
     stages: list[Stage] = []
@@ -203,6 +318,14 @@ def stage_graph(spec: dict) -> list[Stage]:
                 settings.width,
                 settings.height,
                 settings.fps,
+                # 新字段仅在生效时进入指纹：旧 spec（无键）与显式
+                # none/None 的新 spec 指纹逐字节一致，缓存不失效。
+                *(
+                    [["transition", scene["transition"]]]
+                    if scene.get("transition", "none") != "none"
+                    else []
+                ),
+                *([["subtitle", scene["subtitle"]]] if scene.get("subtitle") else []),
             ]
         )
         stages.extend(
@@ -289,7 +412,14 @@ class VideoProject:
         finally:
             Path(name).unlink(missing_ok=True)
 
-    def create_revision(self, request: dict, *, relative_to: str | Path = ".") -> dict:
+    def create_revision(
+        self,
+        request: dict,
+        *,
+        relative_to: str | Path = ".",
+        ffmpeg: str = "ffmpeg",
+        ffprobe: str = "ffprobe",
+    ) -> dict:
         """Snapshot caller-supplied prepared media; unknown/credential fields fail."""
         if not isinstance(request, dict) or set(request) - {
             "project_id",
@@ -313,6 +443,8 @@ class VideoProject:
                 "audio",
                 "narration",
                 "duration",
+                "transition",
+                "subtitle",
             }:
                 raise ProjectError("unknown scene fields")
             scene_id = _identifier(raw["id"])
@@ -333,11 +465,17 @@ class VideoProject:
                 raise ProjectError(
                     "narration requires prepared audio; this renderer does not generate speech"
                 )
+            transition = raw.get("transition", "none")
+            if transition not in SCENE_TRANSITIONS:
+                raise ProjectError(f"unknown scene transition: {transition}")
+            subtitle = _parse_subtitle(raw.get("subtitle"))
             scenes.append(
                 {
                     "id": scene_id,
                     "narration": narration,
                     "duration": duration,
+                    "transition": transition,
+                    "subtitle": subtitle,
                     "footage": self._asset(raw["footage"], Path(relative_to)),
                     "audio": self._asset(raw["audio"], Path(relative_to))
                     if raw.get("audio")
@@ -360,8 +498,8 @@ class VideoProject:
             "settings": asdict(settings),
             "bgm": bgm,
             "toolchain": {
-                "ffmpeg": _tool_version("ffmpeg"),
-                "ffprobe": _tool_version("ffprobe"),
+                "ffmpeg": _tool_version(ffmpeg),
+                "ffprobe": _optional_tool_version(ffprobe),
             },
         }
         with _lock(self.lock_path):
@@ -572,7 +710,11 @@ class VideoProject:
             try:
                 actual_tools = {
                     "ffmpeg": _tool_version(ffmpeg),
-                    "ffprobe": _tool_version(ffprobe),
+                    "ffprobe": (
+                        FFPROBE_UNAVAILABLE
+                        if spec["toolchain"].get("ffprobe") == FFPROBE_UNAVAILABLE
+                        else _tool_version(ffprobe)
+                    ),
                 }
                 if actual_tools != spec["toolchain"]:
                     raise ProjectError(
@@ -700,22 +842,25 @@ class VideoProject:
                 )
             elif stage.kind == "timing":
                 audio = results[f"{scene['id']}:audio"]["path"]
-                duration = float(
-                    self._run(
-                        [
-                            ffprobe,
-                            "-v",
-                            "error",
-                            "-show_entries",
-                            "format=duration",
-                            "-of",
-                            "default=noprint_wrappers=1:nokey=1",
-                            audio,
-                        ],
-                        cancel,
-                        timeout,
-                    ).strip()
-                )
+                if spec["toolchain"].get("ffprobe") == FFPROBE_UNAVAILABLE:
+                    duration = _duration_via_ffmpeg(ffmpeg, audio, timeout)
+                else:
+                    duration = float(
+                        self._run(
+                            [
+                                ffprobe,
+                                "-v",
+                                "error",
+                                "-show_entries",
+                                "format=duration",
+                                "-of",
+                                "default=noprint_wrappers=1:nokey=1",
+                                audio,
+                            ],
+                            cancel,
+                            timeout,
+                        ).strip()
+                    )
                 if not math.isfinite(duration) or not 0 < duration <= 3600:
                     raise ProjectError(
                         "prepared audio duration must be between 0 and 3600 seconds"
@@ -726,44 +871,101 @@ class VideoProject:
                     "duration"
                 ]
                 vf = f"scale={settings.width}:{settings.height}:force_original_aspect_ratio=increase,crop={settings.width}:{settings.height},setsar=1,fps={settings.fps}"
-                self._run(
-                    base
-                    + [
-                        "-stream_loop",
-                        "-1",
-                        "-format_whitelist",
-                        PREPARED_FORMATS,
-                        "-i",
-                        str(self._asset_path(scene["footage"])),
-                        "-i",
-                        results[f"{scene['id']}:audio"]["path"],
-                        "-map",
-                        "0:v:0",
-                        "-map",
-                        "1:a:0",
-                        "-vf",
-                        vf,
-                        "-t",
-                        str(duration),
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "veryfast",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-c:a",
-                        "aac",
-                        "-ar",
-                        "48000",
-                        "-ac",
-                        "2",
-                        "-movflags",
-                        "+faststart",
-                        str(output),
-                    ],
-                    cancel,
-                    timeout,
-                )
+                # 转场与 moviepy 主路径观感对齐：FadeIn 黑场淡入、SlideIn
+                # 黑底位移、ZoomIn 全片段 1.0→1.2；match_cut/none 硬切。
+                transition = scene.get("transition", "none")
+                transition_seconds = min(1.0, duration)
+                if transition == "fade":
+                    vf += f",fade=t=in:st=0:d={transition_seconds}"
+                elif transition == "zoom":
+                    frames = max(int(round(duration * settings.fps)), 1)
+                    vf += (
+                        f",zoompan=z='min(1+0.2*on/{frames},1.2)'"
+                        f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                        f":d=1:s={settings.width}x{settings.height}:fps={settings.fps}"
+                    )
+                if scene.get("subtitle"):
+                    ass = temporary / "subs.ass"
+                    ass.write_text(
+                        _ass_document(scene["subtitle"]["cues"], settings, duration),
+                        encoding="utf-8",
+                    )
+                    vf += f",subtitles=filename={_filter_path(ass)}"
+                    fonts = Path(__file__).resolve().parents[2] / "resource" / "fonts"
+                    if fonts.is_dir():
+                        vf += f":fontsdir={_filter_path(fonts)}"
+                source = [
+                    "-stream_loop",
+                    "-1",
+                    "-format_whitelist",
+                    PREPARED_FORMATS,
+                    "-i",
+                    str(self._asset_path(scene["footage"])),
+                ]
+                tail = [
+                    "-t",
+                    str(duration),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    "-movflags",
+                    "+faststart",
+                    str(output),
+                ]
+                if transition == "slide":
+                    # 黑底 + 位移动画；字幕层在前景上随画面一起滑入。
+                    filter_complex = (
+                        f"[0:v]{vf}[fg];[1:v][fg]"
+                        f"overlay=x='-W+W*min(t/{transition_seconds},1)':y=0:shortest=1[v]"
+                    )
+                    self._run(
+                        base
+                        + source
+                        + [
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            f"color=c=black:s={settings.width}x{settings.height}:r={settings.fps}:d={duration}",
+                            "-i",
+                            results[f"{scene['id']}:audio"]["path"],
+                            "-filter_complex",
+                            filter_complex,
+                            "-map",
+                            "[v]",
+                            "-map",
+                            "2:a:0",
+                        ]
+                        + tail,
+                        cancel,
+                        timeout,
+                    )
+                else:
+                    self._run(
+                        base
+                        + source
+                        + [
+                            "-i",
+                            results[f"{scene['id']}:audio"]["path"],
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "1:a:0",
+                            "-vf",
+                            vf,
+                        ]
+                        + tail,
+                        cancel,
+                        timeout,
+                    )
             elif stage.kind == "assembly":
                 # Relative numeric links avoid concat syntax/path injection, including apostrophes.
                 for index, scene_spec in enumerate(spec["scenes"]):
