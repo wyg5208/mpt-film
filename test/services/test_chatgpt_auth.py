@@ -107,7 +107,7 @@ def test_real_loopback_callback_registers_and_saves_verified_identity(issuer):
     attempt = auth._attempts[flow["id"]]
     params = parse_qs(urlsplit(flow["authorize_url"]).query)
     assert params["client_id"] == ["dynamic_agent_client"]
-    assert params["agent_name_hint"] == ["MoneyPrinterTurbo"]
+    assert params["agent_name_hint"] == ["ChangoFilm"]
     assert params["ext_agent_host_id"][0].startswith("urn:uuid:")
     assert params["resource"] == [auth.RESOURCE]
     assert set(params["scope"][0].split()) == set(auth.SCOPES.split())

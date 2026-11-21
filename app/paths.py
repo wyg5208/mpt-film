@@ -18,21 +18,46 @@ def is_source_checkout() -> bool:
 
 
 def runtime_root() -> Path:
-    """源码沿用项目目录；安装版使用用户目录，也允许显式指定 MPT_HOME。"""
-    override = os.environ.get("MPT_HOME", "").strip()
+    """源码沿用项目目录；安装版使用用户目录，也允许显式指定 CHANGOFILM_HOME。
+
+    品牌升级兼容：旧 MPT_HOME 环境变量仍被接受（新变量优先）；
+    旧 MoneyPrinterTurbo 数据目录在首次启动时迁移为 ChangoFilm。
+    """
+    override = os.environ.get("CHANGOFILM_HOME", "").strip() or os.environ.get(
+        "MPT_HOME", ""
+    ).strip()
     if override:
         return Path(override).expanduser().resolve()
     if is_source_checkout():
         return SOURCE_ROOT
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "MoneyPrinterTurbo"
+        return _brand_data_dir(
+            Path.home() / "Library" / "Application Support"
+        )
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     else:
         base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
         if not base.is_absolute():
             base = Path.home() / ".local" / "share"
-    return base / "MoneyPrinterTurbo"
+    return _brand_data_dir(base)
+
+
+def _brand_data_dir(base: Path) -> Path:
+    """ChangoFilm 数据目录；仅存在旧品牌目录时一次性迁移。
+
+    同卷优先原子改名；跨卷/占用等失败时退化为复制（旧目录保留为
+    备份，不删除用户数据）。两者都在时以新目录为准，不做合并。
+    """
+    target = base / "ChangoFilm"
+    legacy = base / "MoneyPrinterTurbo"
+    if target.exists() or not legacy.is_dir():
+        return target
+    try:
+        os.rename(legacy, target)
+    except OSError:
+        shutil.copytree(legacy, target)
+    return target
 
 
 def config_template() -> Path:

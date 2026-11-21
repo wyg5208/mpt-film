@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 
-spec = importlib.util.spec_from_file_location("mpt_agent_spawn_manifest", Path(__file__).resolve().parents[2] / "docs/skill/mpt_agent.py")
+spec = importlib.util.spec_from_file_location("changofilm_agent_spawn_manifest", Path(__file__).resolve().parents[2] / "docs/skill/changofilm_agent.py")
 agent = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent)
 

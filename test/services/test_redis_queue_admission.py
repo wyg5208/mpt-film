@@ -18,9 +18,9 @@ from app.services import task as tm
 
 class TestRedisQueueAdmission(unittest.TestCase):
     def setUp(self):
-        host = os.getenv("MPT_TEST_REDIS_HOST", "127.0.0.1")
-        port = int(os.getenv("MPT_TEST_REDIS_PORT", "6379"))
-        db = int(os.getenv("MPT_TEST_REDIS_DB", "15"))
+        host = os.getenv("CHANGOFILM_TEST_REDIS_HOST", "127.0.0.1")
+        port = int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379"))
+        db = int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15"))
         self.managers = [
             RedisTaskManager(0, f"redis://{host}:{port}/{db}", max_queued_tasks=1)
             for _ in range(2)

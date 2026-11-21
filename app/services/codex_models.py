@@ -101,7 +101,7 @@ def _download():
             "GET",
             requests.get,
             CATALOG_URL,
-            headers={"Accept": "application/json", "User-Agent": "MoneyPrinterTurbo"},
+            headers={"Accept": "application/json", "User-Agent": "ChangoFilm"},
             stream=True,
             timeout=(5, 10),
             allow_redirects=False,

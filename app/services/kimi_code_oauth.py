@@ -16,7 +16,7 @@ Both regions are supported: China (auth.kimi.com / api.kimi.com) and Global
 a refresh survives restarts; access tokens expire after 15 minutes and are
 renewed transparently with the stored refresh token.
 
-Requests identify themselves genuinely as MoneyPrinterTurbo (X-Msh-* headers
+Requests identify themselves genuinely as ChangoFilm (X-Msh-* headers
 and User-Agent), following Kimi's third-party guideline to keep the tool's
 real client identity — the same shape CLIProxyAPI uses in production.
 """
@@ -38,7 +38,7 @@ from app.config import config
 # client registration today, so every integration with the device flow uses
 # this id (CLIProxyAPI and many others do the same); what identifies the
 # application is the genuine identity headers below, not the client id. A
-# dedicated MoneyPrinterTurbo client id can be set later through the
+# dedicated ChangoFilm client id can be set later through the
 # `kimi_code_client_id` config field once issued.
 DEFAULT_CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
 
@@ -134,15 +134,15 @@ def site_base_url(region: str) -> str:
 
 def _identity_headers() -> dict:
     # 真实身份（对齐 Kimi 第三方指引与 CLIProxyAPI 的生产实践）：platform 与
-    # 版本都是 MoneyPrinterTurbo 自己的，不伪装成 kimi_code_cli。
+    # 版本都是 ChangoFilm 自己的，不伪装成 kimi_code_cli。
     return {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
-        "User-Agent": f"MoneyPrinterTurbo/{__version__}",
-        "X-Msh-Platform": "MoneyPrinterTurbo",
+        "User-Agent": f"ChangoFilm/{__version__}",
+        "X-Msh-Platform": "ChangoFilm",
         "X-Msh-Version": __version__,
-        "X-Msh-Device-Name": "MoneyPrinterTurbo",
-        "X-Msh-Device-Model": "MoneyPrinterTurbo",
+        "X-Msh-Device-Name": "ChangoFilm",
+        "X-Msh-Device-Model": "ChangoFilm",
         "X-Msh-Os-Version": "any",
         "X-Msh-Device-Id": device_id(),
     }

@@ -147,7 +147,7 @@ oauth.RESPONSES_URL = {url + "/responses"!r}
 
     def child(script):
         environment = dict(
-            os.environ, MPT_HOME=str(tmp_path / "runtime"), PYTHONPATH=str(ROOT)
+            os.environ, CHANGOFILM_HOME=str(tmp_path / "runtime"), PYTHONPATH=str(ROOT)
         )
         process = subprocess.Popen(
             [sys.executable, "-X", "utf8", "-c", prelude + script],

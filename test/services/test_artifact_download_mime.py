@@ -16,7 +16,7 @@ from app.controllers.v1 import video as controller
     ('subtitle.srt', ('application/x-subrip', 'text/plain')),
     ('script.json', 'application/json'),
     ('final-1.mp4', 'video/mp4'),
-    ('artifact.unknown-mpt-extension', 'application/octet-stream'),
+    ('artifact.unknown-changofilm-extension', 'application/octet-stream'),
 ])
 def test_download_reports_artifact_media_type(filename, expected):
     with TemporaryDirectory() as directory:

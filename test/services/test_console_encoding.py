@@ -72,7 +72,7 @@ def test_app_config_keeps_log_records_the_code_page_cannot_encode(
     run = subprocess.run(
         [sys.executable, "-c", code],
         cwd=ROOT,
-        env=dict(os.environ, MPT_HOME=str(tmp_path), PYTHONIOENCODING=code_page),
+        env=dict(os.environ, CHANGOFILM_HOME=str(tmp_path), PYTHONIOENCODING=code_page),
         capture_output=True,
         check=True,
         timeout=60,

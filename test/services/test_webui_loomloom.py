@@ -262,7 +262,7 @@ def test_loomloom_webui_quotes_then_requires_confirmation_before_execute():
         assert (
             execute_call.call_args.kwargs["listing_version_id"] == "listing-version-1"
         )
-        assert execute_call.call_args.kwargs["client_request_id"].startswith("mpt-")
+        assert execute_call.call_args.kwargs["client_request_id"].startswith("changofilm-")
         assert app.session_state["loomloom_script_quote"] is None
         assert app.session_state["loomloom_script_batch"] is None
         assert [str(item.value) for item in app.exception] == []
@@ -411,7 +411,7 @@ def test_loomloom_video_source_quotes_then_passes_secret_in_confirmed_request():
         assert video_request.settings.api_token == "session-user-token"
         assert "session-user-token" not in repr(video_request)
         assert video_request.listing_version_id == "video-version-1"
-        assert video_request.client_request_id.startswith("mpt-video-")
+        assert video_request.client_request_id.startswith("changofilm-video-")
         assert app.session_state["loomloom_video_quote"] is None
         assert [str(item.value) for item in app.exception] == []
 

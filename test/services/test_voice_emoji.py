@@ -67,7 +67,7 @@ def test_remove_emoji_keeps_line_breaks_and_leaves_no_space_before_punctuation()
     [
         ("✅Free shipping ✅Easy returns", "Free shipping Easy returns"),
         ("Big news 🚀Launching today", "Big news Launching today"),
-        ("Follow us 👉@moneyprinter", "Follow us @moneyprinter"),
+        ("Follow us 👉@changofilm", "Follow us @changofilm"),
         ("I love🍕pizza", "I love pizza"),
         ("Good morning☀\ufe0feveryone", "Good morning everyone"),
         ("Done.✅Next", "Done. Next"),

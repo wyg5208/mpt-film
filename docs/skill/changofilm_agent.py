@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform installation and video generation for the MoneyPrinterTurbo Skill."""
+"""Cross-platform installation and video generation for the ChangoFilm Skill."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ from pathlib import Path
 
 
 PROJECT_ARCHIVE_URL = (
-    "https://github.com/harry0703/MoneyPrinterTurbo/archive/refs/heads/main.zip"
+    "https://github.com/wyg5208/changofilm/archive/refs/heads/main.zip"
 )
-DEFAULT_ROOT = Path.home() / "MoneyPrinterTurbo"
+DEFAULT_ROOT = Path.home() / "ChangoFilm"
 DEFAULT_VOICE_NAME = "zh-CN-XiaoxiaoNeural-Female"
 DEFAULT_UV_LOCK_TIMEOUT = "1200"
 NEEDS_INPUT_EXIT_CODE = 10
@@ -88,7 +88,7 @@ RECOMMENDED_LLM_PROVIDERS = {
 # ``app/models/llm_provider.py``; asking the user for a key that the provider
 # never reads leaves the Skill stuck.
 KEYLESS_LLM_PROVIDERS = {
-    "ollama", "litellm", "claude_code", "kimi_code", "openai_codex", "openai_chatgpt"
+    "ollama", "llamacpp", "litellm", "claude_code", "kimi_code", "openai_codex", "openai_chatgpt"
 }
 CUSTOM_OPENAI_PROVIDER = "oneapi"
 
@@ -104,24 +104,24 @@ class SkillError(RuntimeError):
 
 def log(message: str) -> None:
     """Flush concise progress so the agent knows the long-running job started."""
-    print(f"[MoneyPrinterTurbo] {message}", flush=True)
+    print(f"[ChangoFilm] {message}", flush=True)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Install MoneyPrinterTurbo and generate a final video from a topic."
+        description="Install ChangoFilm and generate a final video from a topic."
     )
     parser.add_argument("--subject", required=True, help="video topic")
     parser.add_argument(
         "--root",
         type=Path,
         default=DEFAULT_ROOT,
-        help=f"MoneyPrinterTurbo installation directory (default: {DEFAULT_ROOT})",
+        help=f"ChangoFilm installation directory (default: {DEFAULT_ROOT})",
     )
     parser.add_argument(
         "cli_args",
         nargs=argparse.REMAINDER,
-        help="additional MoneyPrinterTurbo CLI arguments placed after --",
+        help="additional ChangoFilm CLI arguments placed after --",
     )
     args = parser.parse_args(argv)
     args.subject = args.subject.strip()
@@ -153,12 +153,12 @@ def ensure_project(root: Path) -> None:
 
     root.parent.mkdir(parents=True, exist_ok=True)
     log(f"first-time installation: downloading the official project to {root}")
-    with tempfile.TemporaryDirectory(prefix="mpt-install-") as temp_dir_value:
+    with tempfile.TemporaryDirectory(prefix="changofilm-install-") as temp_dir_value:
         temp_dir = Path(temp_dir_value)
-        archive_path = temp_dir / "MoneyPrinterTurbo.zip"
+        archive_path = temp_dir / "ChangoFilm.zip"
         request = urllib.request.Request(
             PROJECT_ARCHIVE_URL,
-            headers={"User-Agent": "MoneyPrinterTurbo-Agent-Skill"},
+            headers={"User-Agent": "ChangoFilm-Agent-Skill"},
         )
         with urllib.request.urlopen(request, timeout=120) as response:
             # Stream the archive to avoid holding a second full copy in memory.
@@ -173,7 +173,7 @@ def ensure_project(root: Path) -> None:
             if path.is_dir() and (path / "cli.py").is_file()
         ]
         if len(candidates) != 1:
-            raise SkillError("download completed but no valid MoneyPrinterTurbo project was found")
+            raise SkillError("download completed but no valid ChangoFilm project was found")
         if root.exists():
             root.rmdir()
         shutil.move(str(candidates[0]), str(root))
@@ -253,21 +253,21 @@ def _parse_string_list(value: str) -> list[str]:
 
 def apply_environment_config(config_path: Path) -> None:
     """Write supplied credentials while logging field names only."""
-    provider = os.environ.get("MPT_LLM_PROVIDER", "").strip().lower()
+    provider = os.environ.get("CHANGOFILM_LLM_PROVIDER", "").strip().lower()
     if provider == "openai_compatible":
         provider = CUSTOM_OPENAI_PROVIDER
-    llm_key = os.environ.get("MPT_LLM_API_KEY", "").strip()
-    base_url = os.environ.get("MPT_LLM_BASE_URL", "").strip()
-    model_name = os.environ.get("MPT_LLM_MODEL_NAME", "").strip()
-    pexels_key = os.environ.get("MPT_PEXELS_API_KEY", "").strip()
-    seedance_key = os.environ.get("MPT_VOLCENGINE_ARK_API_KEY", "").strip()
-    ofox_key = os.environ.get("MPT_OFOX_API_KEY", "").strip()
+    llm_key = os.environ.get("CHANGOFILM_LLM_API_KEY", "").strip()
+    base_url = os.environ.get("CHANGOFILM_LLM_BASE_URL", "").strip()
+    model_name = os.environ.get("CHANGOFILM_LLM_MODEL_NAME", "").strip()
+    pexels_key = os.environ.get("CHANGOFILM_PEXELS_API_KEY", "").strip()
+    seedance_key = os.environ.get("CHANGOFILM_VOLCENGINE_ARK_API_KEY", "").strip()
+    ofox_key = os.environ.get("CHANGOFILM_OFOX_API_KEY", "").strip()
     metaso_minimax_key = os.environ.get(
-        "MPT_METASO_MINIMAX_API_KEY", ""
+        "CHANGOFILM_METASO_MINIMAX_API_KEY", ""
     ).strip()
-    muapi_key = os.environ.get("MPT_MUAPI_API_KEY", "").strip()
-    infistar_video_key = os.environ.get("MPT_INFISTAR_VIDEO_API_KEY", "").strip()
-    jalapeno_video_key = os.environ.get("MPT_JALAPENO_VIDEO_API_KEY", "").strip()
+    muapi_key = os.environ.get("CHANGOFILM_MUAPI_API_KEY", "").strip()
+    infistar_video_key = os.environ.get("CHANGOFILM_INFISTAR_VIDEO_API_KEY", "").strip()
+    jalapeno_video_key = os.environ.get("CHANGOFILM_JALAPENO_VIDEO_API_KEY", "").strip()
     if not any(
         (
             provider,
@@ -289,7 +289,7 @@ def apply_environment_config(config_path: Path) -> None:
     current_provider = (_plain_config_value(text, "llm_provider") or "moonshot").lower()
     provider = provider or current_provider
     changes: list[str] = []
-    if os.environ.get("MPT_LLM_PROVIDER", "").strip():
+    if os.environ.get("CHANGOFILM_LLM_PROVIDER", "").strip():
         text = _replace_config_value(text, "llm_provider", provider)
         changes.append("llm_provider")
     if llm_key:
@@ -518,7 +518,7 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
             missing.append("codex_image_model_name")
         # This bootstrap helper runs without application dependencies. Presence
         # is only a hint; the runtime validates/decrypts the shared session.
-        runtime_root = Path(os.environ.get("MPT_HOME") or config_path.parent)
+        runtime_root = Path(os.environ.get("CHANGOFILM_HOME") or config_path.parent)
         connected = (runtime_root / "storage" / "auth" / "openai_codex.bin").is_file()
         if not connected:
             missing.append("codex_sign_in")
@@ -538,7 +538,7 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
 
 def report_missing_config(provider: str, missing: list[str]) -> int:
     """Tell the agent exactly which credentials must be requested."""
-    print("MPT_NEEDS_INPUT")
+    print("CHANGOFILM_NEEDS_INPUT")
     print(f"LLM_PROVIDER={provider}")
     for field in missing:
         print(f"MISSING={field}")
@@ -585,18 +585,18 @@ def report_missing_config(provider: str, missing: list[str]) -> int:
         )
     if "volcengine_seedance_api_key" in missing:
         print(f"VOLCENGINE_ARK_API_KEY_URL={VOLCENGINE_ARK_API_KEY_URL}")
-        print("VOLCENGINE_ARK_API_KEY_ENV=MPT_VOLCENGINE_ARK_API_KEY")
+        print("VOLCENGINE_ARK_API_KEY_ENV=CHANGOFILM_VOLCENGINE_ARK_API_KEY")
     if "confirm_seedance_charge" in missing:
         print("SEEDANCE_CHARGE_CONFIRMATION_REQUIRED=--confirm-seedance-charge")
     if "confirm_wavespeed_charge" in missing:
         print("WAVESPEED_CHARGE_CONFIRMATION_REQUIRED=--confirm-wavespeed-charge")
     if "ofox_api_key" in missing:
         print(f"OFOX_API_KEY_URL={OFOX_API_KEY_URL}")
-        print("OFOX_API_KEY_ENV=MPT_OFOX_API_KEY")
+        print("OFOX_API_KEY_ENV=CHANGOFILM_OFOX_API_KEY")
     if "confirm_ofox_charge" in missing:
         print("OFOX_CHARGE_CONFIRMATION_REQUIRED=--confirm-ofox-charge")
     if "metaso_minimax_api_key" in missing:
-        print("METASO_MINIMAX_API_KEY_ENV=MPT_METASO_MINIMAX_API_KEY")
+        print("METASO_MINIMAX_API_KEY_ENV=CHANGOFILM_METASO_MINIMAX_API_KEY")
     if "confirm_metaso_minimax_charge" in missing:
         print(
             "METASO_MINIMAX_CHARGE_CONFIRMATION_REQUIRED="
@@ -604,18 +604,18 @@ def report_missing_config(provider: str, missing: list[str]) -> int:
         )
     if "muapi_api_key" in missing:
         print(f"MUAPI_API_KEY_URL={MUAPI_API_KEY_URL}")
-        print("MUAPI_API_KEY_ENV=MPT_MUAPI_API_KEY")
+        print("MUAPI_API_KEY_ENV=CHANGOFILM_MUAPI_API_KEY")
     if "confirm_muapi_charge" in missing:
         print("MUAPI_CHARGE_CONFIRMATION_REQUIRED=--confirm-muapi-charge")
     if "infistar_video_api_key" in missing:
         print(f"INFISTAR_VIDEO_API_KEY_URL={INFISTAR_VIDEO_API_KEY_URL}")
-        print("INFISTAR_VIDEO_API_KEY_ENV=MPT_INFISTAR_VIDEO_API_KEY")
+        print("INFISTAR_VIDEO_API_KEY_ENV=CHANGOFILM_INFISTAR_VIDEO_API_KEY")
     if "confirm_infistar_charge" in missing:
         print("INFISTAR_CHARGE_CONFIRMATION_REQUIRED=--confirm-infistar-charge")
     if "jalapeno_video_api_key" in missing or "jalapeno_api_key" in missing:
         print(f"JALAPENO_API_KEY_URL={JALAPENO_API_KEY_URL}")
     if "jalapeno_video_api_key" in missing:
-        print("JALAPENO_VIDEO_API_KEY_ENV=MPT_JALAPENO_VIDEO_API_KEY")
+        print("JALAPENO_VIDEO_API_KEY_ENV=CHANGOFILM_JALAPENO_VIDEO_API_KEY")
     if "confirm_jalapeno_charge" in missing:
         print("JALAPENO_CHARGE_CONFIRMATION_REQUIRED=--confirm-jalapeno-charge")
     print("Request only the listed values, set the environment variables, and rerun the same command.")
@@ -624,7 +624,7 @@ def report_missing_config(provider: str, missing: list[str]) -> int:
 
 def report_invalid_pexels_config() -> int:
     """Request only a new Pexels key when every configured key is rejected."""
-    print("MPT_NEEDS_INPUT")
+    print("CHANGOFILM_NEEDS_INPUT")
     print("INVALID=pexels_api_keys")
     print(f"PEXELS_API_KEY_URL={PEXELS_API_KEY_URL}")
     print(f"PEXELS_API_KEY_HELP_URL={PEXELS_API_KEY_HELP_URL}")
@@ -646,7 +646,7 @@ def _validate_pexels_key(api_key: str) -> str:
         PEXELS_VALIDATION_URL,
         headers={
             "Authorization": api_key,
-            "User-Agent": "MoneyPrinterTurbo-Agent-Skill",
+            "User-Agent": "ChangoFilm-Agent-Skill",
         },
     )
     try:
@@ -711,7 +711,7 @@ def validate_pexels_config(config_path: Path, cli_args: list[str]) -> bool:
 
 
 def result_manifest_path(root: Path) -> Path:
-    return root / ".agent-logs" / "moneyprinterturbo-video" / "latest-result.json"
+    return root / ".agent-logs" / "changofilm-video" / "latest-result.json"
 
 
 def write_result_manifest(root: Path, payload: dict[str, object]) -> Path:
@@ -784,7 +784,7 @@ def generate_video(
 
     task_id = str(uuid.uuid4())
     task_dir = root / "storage" / "tasks" / task_id
-    log_dir = root / ".agent-logs" / "moneyprinterturbo-video"
+    log_dir = root / ".agent-logs" / "changofilm-video"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"run-{task_id}.log"
     write_result_manifest(
@@ -938,10 +938,10 @@ def main(argv: list[str] | None = None) -> int:
             root, args.subject, args.cli_args
         )
     except (OSError, SkillError, urllib.error.URLError, zipfile.BadZipFile) as exc:
-        print(f"MPT_ERROR={exc}", file=sys.stderr)
+        print(f"CHANGOFILM_ERROR={exc}", file=sys.stderr)
         return 1
 
-    print("MPT_RESULT")
+    print("CHANGOFILM_RESULT")
     for video in videos:
         print(f"VIDEO_FILE={video}")
     print(f"TASK_DIR={task_dir}")

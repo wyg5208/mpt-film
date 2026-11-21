@@ -266,7 +266,7 @@ def _schedule_deferred_config_flush():
     try:
         threading.Thread(
             target=_run_deferred_config_flush,
-            name="mpt-config-flush",
+            name="changofilm-config-flush",
             daemon=True,
         ).start()
     except Exception:
@@ -694,16 +694,16 @@ hostname = socket.gethostname()
 log_level = _cfg.get("log_level", "DEBUG")
 listen_host = _cfg.get("listen_host", "0.0.0.0")
 listen_port = _cfg.get("listen_port", 8080)
-project_name = _cfg.get("project_name", "MoneyPrinterTurbo")
+project_name = _cfg.get("project_name", "ChangoFilm")
 project_description = _cfg.get(
     "project_description",
-    "<a href='https://github.com/harry0703/MoneyPrinterTurbo'>https://github.com/harry0703/MoneyPrinterTurbo</a>",
+    "A local-first studio for professional series short dramas.",
 )
 project_version = _cfg.get("project_version", __version__)
 reload_debug = False
 
 app["redis_host"] = os.getenv(
-    "MPT_APP_REDIS_HOST",
+    "CHANGOFILM_APP_REDIS_HOST",
     os.getenv("REDIS_HOST", app.get("redis_host", "localhost")),
 )
 

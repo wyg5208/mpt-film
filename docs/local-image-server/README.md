@@ -42,7 +42,7 @@ video_clip_duration = 6
 
 Measured on the RTX 5070 Ti: SDXL's weights take 6.7 GB, and painting one 832x1216 image peaks at 10.6 GB allocated. qwen3:14b in Ollama takes 9.0 GB. They don't fit on a 16 GB card together, so the server keeps one of them on the GPU at a time:
 
-- Before every image, it asks Ollama which models are loaded, unloads them, and waits until Ollama reports them gone. This runs on every request, not just the first, because MPT may load the LLM again between images or between back-to-back videos.
+- Before every image, it asks Ollama which models are loaded, unloads them, and waits until Ollama reports them gone. This runs on every request, not just the first, because ChangoFilm may load the LLM again between images or between back-to-back videos.
 - After each request it releases PyTorch's cached buffers. Without that, the process keeps about 14 GB reserved between images.
 - After `IMAGE_IDLE_SECONDS` (90 by default) without a request, a background worker moves SDXL to the CPU, so Ollama gets the whole GPU for the next script.
 

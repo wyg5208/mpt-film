@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the production image with current base packages
         run: >-
-          docker build --pull --tag mpt:security
+          docker build --pull --tag changofilm:security
           --build-arg DOCKER_BUILD_MIRROR=default
           --build-arg PIP_USE_OFFICIAL=1 .
 
@@ -41,7 +41,7 @@ jobs:
           TRIVY_SKIP_VERSION_CHECK: "true"
         with:
           version: v0.74.0
-          image-ref: mpt:security
+          image-ref: changofilm:security
           scanners: vuln
           severity: HIGH,CRITICAL
           format: json
@@ -61,4 +61,4 @@ jobs:
         run: >-
           trivy image --cache-dir .cache/trivy --scanners vuln --severity HIGH,CRITICAL
           --ignore-unfixed --exit-code 1 --skip-version-check
-          --timeout 10m mpt:security
+          --timeout 10m changofilm:security

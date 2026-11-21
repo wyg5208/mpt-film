@@ -319,15 +319,15 @@ class TestRedisState(unittest.TestCase):
         self.assertEqual([task["task_id"] for task in tasks], ["task:0"])
 
     @unittest.skipUnless(
-        os.getenv("MPT_TEST_REDIS_HOST"),
-        "MPT_TEST_REDIS_HOST not set",
+        os.getenv("CHANGOFILM_TEST_REDIS_HOST"),
+        "CHANGOFILM_TEST_REDIS_HOST not set",
     )
     def test_real_redis_get_all_tasks_ignores_queue_keys(self):
         """真实 Redis 中的 List 队列不能被任务列表误当作 Hash 读取。"""
         state = RedisState(
-            host=os.environ["MPT_TEST_REDIS_HOST"],
-            port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")),
-            db=int(os.getenv("MPT_TEST_REDIS_DB", "15")),
+            host=os.environ["CHANGOFILM_TEST_REDIS_HOST"],
+            port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")),
+            db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")),
         )
         suffix = uuid.uuid4()
         task_ids = [f"ci-list-{suffix}-{index}" for index in range(3)]
@@ -351,15 +351,15 @@ class TestRedisState(unittest.TestCase):
             state._redis.delete(queue_key, *task_ids)
 
     @unittest.skipUnless(
-        os.getenv("MPT_TEST_REDIS_HOST"),
-        "MPT_TEST_REDIS_HOST not set",
+        os.getenv("CHANGOFILM_TEST_REDIS_HOST"),
+        "CHANGOFILM_TEST_REDIS_HOST not set",
     )
     def test_real_redis_pagination_keeps_a_stable_task_order(self):
         """真实 Redis 的多批 SCAN 不应让跨页任务重复或丢失。"""
         state = RedisState(
-            host=os.environ["MPT_TEST_REDIS_HOST"],
-            port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")),
-            db=int(os.getenv("MPT_TEST_REDIS_DB", "15")),
+            host=os.environ["CHANGOFILM_TEST_REDIS_HOST"],
+            port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")),
+            db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")),
         )
         task_ids = [f"ci-page-{uuid.uuid4()}-{index}" for index in range(13)]
         try:
@@ -399,15 +399,15 @@ class TestRedisState(unittest.TestCase):
         self.assertFalse(state.patch_task("missing", value="ignored"))
 
     @unittest.skipUnless(
-        os.getenv("MPT_TEST_REDIS_HOST"),
-        "MPT_TEST_REDIS_HOST not set",
+        os.getenv("CHANGOFILM_TEST_REDIS_HOST"),
+        "CHANGOFILM_TEST_REDIS_HOST not set",
     )
     def test_real_redis_patch_and_delete_are_atomic(self):
         """真实 Redis 中并发删除和局部更新不能重新创建残缺任务。"""
         state = RedisState(
-            host=os.environ["MPT_TEST_REDIS_HOST"],
-            port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")),
-            db=int(os.getenv("MPT_TEST_REDIS_DB", "15")),
+            host=os.environ["CHANGOFILM_TEST_REDIS_HOST"],
+            port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")),
+            db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")),
         )
 
         for _ in range(50):

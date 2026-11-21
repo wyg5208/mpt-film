@@ -298,7 +298,7 @@ def test_invalid_trace_config_preserves_valid_error_level(tmp_path):
             "-c",
             "from app.config import config; from app.utils.logging_utils import get_logging_options; import json; print(json.dumps(get_logging_options()))",
         ],
-        env=dict(os.environ, MPT_HOME=str(tmp_path)),
+        env=dict(os.environ, CHANGOFILM_HOME=str(tmp_path)),
         capture_output=True,
         text=True,
         check=True,

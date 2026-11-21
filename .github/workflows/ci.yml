@@ -29,9 +29,9 @@ jobs:
           --health-retries 10
 
     env:
-      MPT_TEST_REDIS_HOST: 127.0.0.1
-      MPT_TEST_REDIS_PORT: 6379
-      MPT_TEST_REDIS_DB: 15
+      CHANGOFILM_TEST_REDIS_HOST: 127.0.0.1
+      CHANGOFILM_TEST_REDIS_PORT: 6379
+      CHANGOFILM_TEST_REDIS_DB: 15
 
     steps:
       - name: Check out repository

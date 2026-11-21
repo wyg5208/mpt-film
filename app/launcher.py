@@ -1,4 +1,4 @@
-"""pip 安装后的 mpt 启动入口，复用现有 WebUI 和 CLI。"""
+"""pip 安装后的 changofilm 启动入口，复用现有 WebUI 和 CLI。"""
 
 import argparse
 import socket
@@ -46,10 +46,10 @@ def main(argv: list[str] | None = None) -> int:
         force_utf8_console()
         return cli.run_cli(argv[1:])
 
-    parser = argparse.ArgumentParser(prog="mpt", description="MoneyPrinterTurbo")
+    parser = argparse.ArgumentParser(prog="changofilm", description="ChangoFilm")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command")
-    commands.add_parser("cli", help="generate videos (mpt cli --help)")
+    commands.add_parser("cli", help="generate videos (changofilm cli --help)")
     webui = commands.add_parser("webui", help="start the WebUI")
     webui.add_argument("--host", default="127.0.0.1", help="listen address")
     webui.add_argument("--port", type=_port_number, help="listen port (default: first free port from 8501)")
@@ -70,6 +70,6 @@ def main(argv: list[str] | None = None) -> int:
             "--logger.hideWelcomeMessage=true", "--server.showEmailPrompt=false",
         ])
     except OSError as exc:
-        parser.exit(1, f"mpt: {exc}\n")
+        parser.exit(1, f"changofilm: {exc}\n")
     except KeyboardInterrupt:
         return 130

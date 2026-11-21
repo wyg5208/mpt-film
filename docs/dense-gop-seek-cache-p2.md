@@ -5,9 +5,9 @@ Status: design for the deferred P2 ("快进友好 GOP") item of
 traced from the local OpenFilm checkout (`opensources/openfilm/packages/openfilm/src/`) on
 2026-11-09 and verified against the real-footage project `opensources/films/media`.
 
-## 1. The problem, measured on MPT
+## 1. The problem, measured on ChangoFilm
 
-MPT re-encodes everything with libx264 defaults and never passes `-g`. libx264's default
+ChangoFilm re-encodes everything with libx264 defaults and never passes `-g`. libx264's default
 GOP is 250 frames with scene-cut detection on; for a near-static zoom render this means one
 keyframe per file:
 
@@ -97,16 +97,16 @@ server. In `host.mjs:116` every file request becomes
 * Before any swap exists, `madeCopy` (read-only lookup) lets a page served mid-render start
   using the copy as soon as it is whole.
 
-## 3. Mapping onto MPT
+## 3. Mapping onto ChangoFilm
 
-| OpenFilm | MPT equivalent | Gap |
+| OpenFilm | ChangoFilm equivalent | Gap |
 |---|---|---|
 | Render browser frame-seeks every clip every frame | MoviePy reader seeks once per `subclipped()` start, then streams forward | Same root cause (decode-from-keyframe), lower frequency → fix the writers first, copies second |
 | `-g 8 -keyint_min 8` (+ `-sc_threshold 0` via hardwareOptions/crf path) in `makeCopy` | `build_command` and `write_videofile(ffmpeg_params=…)` pass no `-g` | **default GOP 250 → keyframes=1** on 5 s clips |
-| `slowSeeking` gate: copy only when keyframe spacing > 0.5 s and the render is ≥ 2 s | none — MPT never inspects source GOP | P2b probe |
+| `slowSeeking` gate: copy only when keyframe spacing > 0.5 s and the render is ≥ 2 s | none — ChangoFilm never inspects source GOP | P2b probe |
 | Content-keyed cache (VERSION+path+size+mtime), part-file + rename | zoom cache keyed by image **pixels**+duration+tag (`_ZOOM_CACHE_TAG`), which *does* change content | P2a must bump the tag; a source-video copy cache needs its own key |
 | Swap at HTTP layer, film.html unchanged | no indirection layer; `file_path` is read directly by moviepy | P2b rewrites the path handed to `SubClippedVideoClip` instead |
-| Audio mixed from originals | copies would be video-only (`-an`) — source audio is not used by MPT anyway (TTS voiceover) | benign |
+| Audio mixed from originals | copies would be video-only (`-an`) — source audio is not used by ChangoFilm anyway (TTS voiceover) | benign |
 
 ## 4. P2 concrete design
 
@@ -115,7 +115,7 @@ Two independent shippable halves. **P2a is the plan's original minimal item (wri
 dominant cost. Neither changes any edit decision, so P0 determinism and P1 review results are
 bit-identical unless GOP config itself is changed.
 
-### 4.1 P2a — dense keyframes on everything MPT encodes
+### 4.1 P2a — dense keyframes on everything ChangoFilm encodes
 
 Config (default keeps current behavior, like the plan's draft):
 
@@ -160,7 +160,7 @@ Port of `seekable.mjs` shape onto `download_videos` / `combine_videos`:
   logic, a VERSION bump orphans safely, barking at algorithm changes is free.
 * **Generate**: `ffmpeg -fps_mode passthrough -map 0:v:0 -an -c:v libx264 -preset superfast
   -crf 16 -g <fps/4> -keyint_min <fps/4> -pix_fmt yuv420p`, part-file + atomic rename,
-  per-path in-process dedup. Video-only mirrors OpenFilm and is safe for MPT because
+  per-path in-process dedup. Video-only mirrors OpenFilm and is safe for ChangoFilm because
   `combine_videos` never uses source audio (`_open_video_clip_quietly(..., audio=False)`).
 * **Swap point**: not an HTTP layer — the swap belongs where `SubClippedVideoClip.file_path`
   is built (the download path handed to `_open_video_clip_quietly` in `process_one_clip`):
@@ -189,10 +189,10 @@ combine time, ship P2a only and close P2.
 
 ## 5. What deliberately is *not* ported
 
-* Browser-decodability (`unplayable`/`firstFrame`/presentsVideo/vulkanFirst) — MPT's decoder
+* Browser-decodability (`unplayable`/`firstFrame`/presentsVideo/vulkanFirst) — ChangoFilm's decoder
   is ffmpeg via moviepy, which is not codec-limited like Chromium; the whole "will this play
-  here" layer has no MPT counterpart.
-* `madeCopy`'s 2-second miss TTL — an optimization for per-range-request server loops; MPT's
+  here" layer has no ChangoFilm counterpart.
+* `madeCopy`'s 2-second miss TTL — an optimization for per-range-request server loops; ChangoFilm's
   swap point is consulted once per clip, so a plain dict without TTL is enough.
-* VP9/yuva alpha copies — MPT's pipeline has no transparent-video sources; image alpha is
+* VP9/yuva alpha copies — ChangoFilm's pipeline has no transparent-video sources; image alpha is
   resolved before mp4 rendering (`_open_image_clip_with_fallback`).

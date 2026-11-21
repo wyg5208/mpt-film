@@ -16,13 +16,13 @@ from app.models.llm_provider import LLM_PROVIDER_REGISTRY
 
 
 SKILL_SCRIPT = (
-    Path(__file__).parent.parent.parent / "docs" / "skill" / "mpt_agent.py"
+    Path(__file__).parent.parent.parent / "docs" / "skill" / "changofilm_agent.py"
 )
 SKILL_DOCUMENT = SKILL_SCRIPT.with_name("SKILL.md")
-SPEC = importlib.util.spec_from_file_location("mpt_agent_skill", SKILL_SCRIPT)
-mpt_agent = importlib.util.module_from_spec(SPEC)
+SPEC = importlib.util.spec_from_file_location("changofilm_agent_skill", SKILL_SCRIPT)
+changofilm_agent = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
-SPEC.loader.exec_module(mpt_agent)
+SPEC.loader.exec_module(changofilm_agent)
 
 
 MINIMAL_CONFIG = """\
@@ -64,16 +64,16 @@ class TestMptAgentSkill(unittest.TestCase):
                         if last_source == "local":
                             forwarded += ["--video-materials", "./owned.mp4"]
                         actual = cli.parse_args(["--video-subject", "owned topic", *forwarded])
-                        parsed = mpt_agent.parse_args(["--subject", "owned topic", "--", *forwarded])
+                        parsed = changofilm_agent.parse_args(["--subject", "owned topic", "--", *forwarded])
                         self.assertEqual(parsed.cli_args, forwarded)
-                        self.assertEqual(mpt_agent.selected_video_source(parsed.cli_args), actual.video_source)
+                        self.assertEqual(changofilm_agent.selected_video_source(parsed.cli_args), actual.video_source)
                         with tempfile.TemporaryDirectory() as temp_dir:
                             config = Path(temp_dir) / "config.toml"
                             text = '[app]\nllm_provider = "ollama"\n'
                             if last_source == "pexels":
                                 text += 'pexels_api_keys = ["owned-fixture-key"]\n'
                             config.write_text(text, encoding="utf-8")
-                            provider, missing = mpt_agent.missing_config(config, parsed.cli_args)
+                            provider, missing = changofilm_agent.missing_config(config, parsed.cli_args)
                             self.assertEqual((provider, missing), ("ollama", []))
 
     def test_helper_main_accepts_keyless_local_override_after_source_defaults(self):
@@ -90,12 +90,12 @@ class TestMptAgentSkill(unittest.TestCase):
                 manifest = root / "result.json"
                 with (
                     patch.dict(os.environ, {}, clear=True),
-                    patch.object(mpt_agent, "validate_pexels_config", wraps=mpt_agent.validate_pexels_config) as validation,
-                    patch.object(mpt_agent, "generate_video", return_value=([video], task, log, manifest)) as generate,
-                    patch.object(mpt_agent.urllib.request, "urlopen", side_effect=AssertionError("local source must not probe Pexels")),
+                    patch.object(changofilm_agent, "validate_pexels_config", wraps=changofilm_agent.validate_pexels_config) as validation,
+                    patch.object(changofilm_agent, "generate_video", return_value=([video], task, log, manifest)) as generate,
+                    patch.object(changofilm_agent.urllib.request, "urlopen", side_effect=AssertionError("local source must not probe Pexels")),
                     redirect_stdout(io.StringIO()),
                 ):
-                    status = mpt_agent.main(["--subject", "owned topic", "--root", str(root), "--", *forwarded])
+                    status = changofilm_agent.main(["--subject", "owned topic", "--root", str(root), "--", *forwarded])
                 self.assertEqual(status, 0)
                 validation.assert_called_once()
                 generate.assert_called_once_with(root.resolve(), "owned topic", forwarded)
@@ -107,7 +107,7 @@ class TestMptAgentSkill(unittest.TestCase):
                           ["--video-source", "local", "--video-materials", "./owned.mp4"]):
             with self.subTest(forwarded=forwarded):
                 actual = cli.parse_args(["--video-subject", "owned topic", *forwarded])
-                self.assertEqual(mpt_agent.selected_video_source(forwarded), actual.video_source)
+                self.assertEqual(changofilm_agent.selected_video_source(forwarded), actual.video_source)
 
     def create_project(self, root: Path) -> None:
         """创建足够完成安装和配置检查的最小项目结构。"""
@@ -136,20 +136,20 @@ class TestMptAgentSkill(unittest.TestCase):
                 config_path = Path(directory) / "config.toml"
                 config_path.write_text(text, encoding="utf-8")
                 with patch.dict(os.environ, {}, clear=True):
-                    self.assertEqual(mpt_agent.reuse_existing_llm_provider(config_path), "ollama")
-                    self.assertEqual(mpt_agent.missing_config(config_path, ["--video-source", "local", "--video-materials", directory]), ("ollama", []))
-                    with patch.object(mpt_agent, "_validate_pexels_key", return_value="valid") as validate:
-                        self.assertTrue(mpt_agent.validate_pexels_config(config_path, []))
+                    self.assertEqual(changofilm_agent.reuse_existing_llm_provider(config_path), "ollama")
+                    self.assertEqual(changofilm_agent.missing_config(config_path, ["--video-source", "local", "--video-materials", directory]), ("ollama", []))
+                    with patch.object(changofilm_agent, "_validate_pexels_key", return_value="valid") as validate:
+                        self.assertTrue(changofilm_agent.validate_pexels_config(config_path, []))
                     validate.assert_called_once_with("fixture#key")
                 self.assertEqual(config_path.read_text(encoding="utf-8"), text)
 
     def test_config_reader_uses_app_table_not_unrelated_provider_fields(self):
         text = "[other]\nllm_provider = 'moonshot'\n[app]\nllm_provider = 'ollama'\n"
-        self.assertEqual(mpt_agent._plain_config_value(text, "llm_provider"), "ollama")
+        self.assertEqual(changofilm_agent._plain_config_value(text, "llm_provider"), "ollama")
 
     def test_config_reader_reports_invalid_toml_without_echoing_contents(self):
-        with self.assertRaises(mpt_agent.SkillError) as error:
-            mpt_agent._plain_config_value("[app]\nllm_provider = 'fixture\n", "llm_provider")
+        with self.assertRaises(changofilm_agent.SkillError) as error:
+            changofilm_agent._plain_config_value("[app]\nllm_provider = 'fixture\n", "llm_provider")
         self.assertNotIn("fixture", str(error.exception))
         self.assertIn("TOML", str(error.exception))
 
@@ -158,26 +158,26 @@ class TestMptAgentSkill(unittest.TestCase):
         text = SKILL_DOCUMENT.read_text(encoding="utf-8")
 
         self.assertIn(
-            'uv run --no-project --python 3.11 python mpt_agent.py --subject',
+            'uv run --no-project --python 3.11 python changofilm_agent.py --subject',
             text,
         )
         self.assertIn("workdir=SKILL_DIR", text)
-        self.assertNotIn('python "<SKILL_DIR>/mpt_agent.py"', text)
+        self.assertNotIn('python "<SKILL_DIR>/changofilm_agent.py"', text)
 
     def test_first_run_only_requests_missing_api_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir) / "MoneyPrinterTurbo"
+            root = Path(temp_dir) / "ChangoFilm"
             self.create_project(root)
             output = io.StringIO()
 
             with patch.dict(os.environ, {}, clear=True), redirect_stdout(output):
-                code = mpt_agent.main(
+                code = changofilm_agent.main(
                     ["--subject", "人工智能如何改变生活", "--root", str(root)]
                 )
 
-            self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+            self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
             text = output.getvalue()
-            self.assertIn("MPT_NEEDS_INPUT", text)
+            self.assertIn("CHANGOFILM_NEEDS_INPUT", text)
             self.assertIn("MISSING=moonshot_api_key", text)
             self.assertIn("MISSING=pexels_api_keys", text)
             self.assertIn("LLM_PROVIDER_OPTION=deepseek|DeepSeek|", text)
@@ -189,7 +189,7 @@ class TestMptAgentSkill(unittest.TestCase):
             self.assertNotIn("Microsoft Azure OpenAI", text)
             self.assertNotIn("xAI Grok", text)
             self.assertIn(
-                f"PEXELS_API_KEY_URL={mpt_agent.PEXELS_API_KEY_URL}", text
+                f"PEXELS_API_KEY_URL={changofilm_agent.PEXELS_API_KEY_URL}", text
             )
 
     def test_environment_keys_are_written_without_being_logged(self):
@@ -206,16 +206,16 @@ class TestMptAgentSkill(unittest.TestCase):
             with patch.dict(
                 os.environ,
                 {
-                    "MPT_LLM_PROVIDER": "deepseek",
-                    "MPT_LLM_API_KEY": llm_key,
-                    "MPT_PEXELS_API_KEY": pexels_key,
-                    "MPT_VOLCENGINE_ARK_API_KEY": seedance_key,
-                    "MPT_METASO_MINIMAX_API_KEY": metaso_key,
-                    "MPT_MUAPI_API_KEY": muapi_key,
+                    "CHANGOFILM_LLM_PROVIDER": "deepseek",
+                    "CHANGOFILM_LLM_API_KEY": llm_key,
+                    "CHANGOFILM_PEXELS_API_KEY": pexels_key,
+                    "CHANGOFILM_VOLCENGINE_ARK_API_KEY": seedance_key,
+                    "CHANGOFILM_METASO_MINIMAX_API_KEY": metaso_key,
+                    "CHANGOFILM_MUAPI_API_KEY": muapi_key,
                 },
                 clear=True,
             ), redirect_stdout(output):
-                mpt_agent.apply_environment_config(config_path)
+                changofilm_agent.apply_environment_config(config_path)
 
             config = config_path.read_text(encoding="utf-8")
             self.assertIn('llm_provider = "deepseek"', config)
@@ -242,8 +242,8 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            _, default_missing = mpt_agent.missing_config(config_path, [])
-            _, pixabay_missing = mpt_agent.missing_config(
+            _, default_missing = changofilm_agent.missing_config(config_path, [])
+            _, pixabay_missing = changofilm_agent.missing_config(
                 config_path, ["--video-source", "pixabay"]
             )
 
@@ -262,15 +262,15 @@ class TestMptAgentSkill(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(
-                mpt_agent.SkillError, "--video-materials"
+                changofilm_agent.SkillError, "--video-materials"
             ):
-                mpt_agent.missing_config(config_path, ["--video-source", "local"])
+                changofilm_agent.missing_config(config_path, ["--video-source", "local"])
 
-            _, missing = mpt_agent.missing_config(
+            _, missing = changofilm_agent.missing_config(
                 config_path,
                 ["--video-source", "local", "--video-materials", "./clips"],
             )
-            _, missing_eq = mpt_agent.missing_config(
+            _, missing_eq = changofilm_agent.missing_config(
                 config_path,
                 ["--video-source=local", "--video-materials=./clips"],
             )
@@ -295,7 +295,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            _, missing = mpt_agent.missing_config(
+            _, missing = changofilm_agent.missing_config(
                 config_path, ["--video-source", "openai_image"]
             )
 
@@ -312,17 +312,17 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            _, missing = mpt_agent.missing_config(
+            _, missing = changofilm_agent.missing_config(
                 config_path, ["--video-source", "openai_image"]
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                code = mpt_agent.report_missing_config("moonshot", missing)
+                code = changofilm_agent.report_missing_config("moonshot", missing)
 
             self.assertEqual(
                 missing, ["openai_image_base_url", "openai_image_model"]
             )
-            self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+            self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
             self.assertIn("OPENAI_IMAGE_REQUIRED=", output.getvalue())
             self.assertNotIn("LLM_PROVIDER_OPTIONS_BEGIN", output.getvalue())
 
@@ -337,7 +337,7 @@ class TestMptAgentSkill(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {}, clear=True):
-                _, missing = mpt_agent.missing_config(
+                _, missing = changofilm_agent.missing_config(
                     config_path, ["--video-source", "ofox"]
                 )
             self.assertEqual(missing, ["ofox_api_key", "confirm_ofox_charge"])
@@ -349,7 +349,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch.dict(os.environ, {}, clear=True):
-                _, confirmed_missing = mpt_agent.missing_config(
+                _, confirmed_missing = changofilm_agent.missing_config(
                     config_path,
                     ["--video-source", "ofox", "--confirm-ofox-charge"],
                 )
@@ -370,7 +370,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 {"OFOX_API_KEY": "environment-ofox-key"},
                 clear=True,
             ):
-                _, missing = mpt_agent.missing_config(
+                _, missing = changofilm_agent.missing_config(
                     config_path,
                     ["--video-source", "ofox", "--confirm-ofox-charge"],
                 )
@@ -386,10 +386,10 @@ class TestMptAgentSkill(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"MPT_OFOX_API_KEY": ofox_key},
+                {"CHANGOFILM_OFOX_API_KEY": ofox_key},
                 clear=True,
             ), redirect_stdout(output):
-                mpt_agent.apply_environment_config(config_path)
+                changofilm_agent.apply_environment_config(config_path)
 
             config = config_path.read_text(encoding="utf-8")
             self.assertIn(f'ofox_api_key = "{ofox_key}"', config)
@@ -398,14 +398,14 @@ class TestMptAgentSkill(unittest.TestCase):
     def test_missing_ofox_inputs_report_signup_and_charge_flag(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "deepseek",
                 ["ofox_api_key", "confirm_ofox_charge"],
             )
 
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
-        self.assertIn(f"OFOX_API_KEY_URL={mpt_agent.OFOX_API_KEY_URL}", text)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertIn(f"OFOX_API_KEY_URL={changofilm_agent.OFOX_API_KEY_URL}", text)
         self.assertIn(
             "OFOX_CHARGE_CONFIRMATION_REQUIRED=--confirm-ofox-charge", text
         )
@@ -423,7 +423,7 @@ class TestMptAgentSkill(unittest.TestCase):
             config_path.write_text(config_text, encoding="utf-8")
 
             with patch.dict(os.environ, {}, clear=True):
-                _, missing = mpt_agent.missing_config(
+                _, missing = changofilm_agent.missing_config(
                     config_path, ["--video-source", "wavespeed"]
                 )
             self.assertEqual(
@@ -437,7 +437,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch.dict(os.environ, {}, clear=True):
-                _, confirmed_missing = mpt_agent.missing_config(
+                _, confirmed_missing = changofilm_agent.missing_config(
                     config_path,
                     ["--video-source", "wavespeed", "--confirm-wavespeed-charge"],
                 )
@@ -446,13 +446,13 @@ class TestMptAgentSkill(unittest.TestCase):
     def test_missing_wavespeed_inputs_report_the_charge_flag(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "moonshot",
                 ["wavespeed_api_keys", "confirm_wavespeed_charge"],
             )
 
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
         self.assertIn(
             "WAVESPEED_CHARGE_CONFIRMATION_REQUIRED=--confirm-wavespeed-charge",
             text,
@@ -481,7 +481,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 break
 
         self.assertIsNotNone(cli_sources)
-        self.assertEqual(set(mpt_agent.SUPPORTED_SOURCES), cli_sources)
+        self.assertEqual(set(changofilm_agent.SUPPORTED_SOURCES), cli_sources)
 
     def test_seedance_source_requires_key_and_explicit_charge_confirmation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -493,7 +493,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            _, missing = mpt_agent.missing_config(
+            _, missing = changofilm_agent.missing_config(
                 config_path, ["--video-source", "volcengine_seedance"]
             )
             self.assertEqual(
@@ -508,7 +508,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            _, confirmed_missing = mpt_agent.missing_config(
+            _, confirmed_missing = changofilm_agent.missing_config(
                 config_path,
                 [
                     "--video-source",
@@ -533,7 +533,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 {"VOLCENGINE_ARK_API_KEY": "environment-ark-key"},
                 clear=True,
             ):
-                _, missing = mpt_agent.missing_config(
+                _, missing = changofilm_agent.missing_config(
                     config_path,
                     [
                         "--video-source",
@@ -554,7 +554,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            _, missing = mpt_agent.missing_config(
+            _, missing = changofilm_agent.missing_config(
                 config_path, ["--video-source", "metaso_minimax"]
             )
             self.assertEqual(
@@ -567,7 +567,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 {"METASO_MINIMAX_API_KEY": "environment-metaso-key"},
                 clear=True,
             ):
-                _, confirmed_missing = mpt_agent.missing_config(
+                _, confirmed_missing = changofilm_agent.missing_config(
                     config_path,
                     [
                         "--video-source",
@@ -588,7 +588,7 @@ class TestMptAgentSkill(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {}, clear=True):
-                _, missing = mpt_agent.missing_config(
+                _, missing = changofilm_agent.missing_config(
                     config_path, ["--video-source", "muapi"]
                 )
             self.assertEqual(missing, ["muapi_api_key", "confirm_muapi_charge"])
@@ -600,7 +600,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch.dict(os.environ, {}, clear=True):
-                _, confirmed_missing = mpt_agent.missing_config(
+                _, confirmed_missing = changofilm_agent.missing_config(
                     config_path,
                     ["--video-source", "muapi", "--confirm-muapi-charge"],
                 )
@@ -620,7 +620,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 {"MUAPI_API_KEY": "environment-muapi-key"},
                 clear=True,
             ):
-                _, missing = mpt_agent.missing_config(
+                _, missing = changofilm_agent.missing_config(
                     config_path,
                     ["--video-source", "muapi", "--confirm-muapi-charge"],
                 )
@@ -660,7 +660,7 @@ class TestMptAgentSkill(unittest.TestCase):
                     self.subTest(key=key, environment_key=environment_key, confirmed=confirmed),
                     patch.dict(os.environ, {"INFISTAR_VIDEO_API_KEY": environment_key}, clear=True),
                 ):
-                    provider, missing = mpt_agent.missing_config(config_path, args)
+                    provider, missing = changofilm_agent.missing_config(config_path, args)
                     self.assertEqual(provider, "ollama")
                     self.assertEqual(missing, expected)
                     self.assertEqual(
@@ -676,12 +676,12 @@ class TestMptAgentSkill(unittest.TestCase):
             secret = "secret-infistar-video-key"
             output = io.StringIO()
             with (
-                patch.dict(os.environ, {"MPT_INFISTAR_VIDEO_API_KEY": secret}, clear=True),
+                patch.dict(os.environ, {"CHANGOFILM_INFISTAR_VIDEO_API_KEY": secret}, clear=True),
                 redirect_stdout(output),
             ):
-                mpt_agent.apply_environment_config(config_path)
+                changofilm_agent.apply_environment_config(config_path)
             self.assertEqual(
-                mpt_agent._plain_config_value(config_path.read_text(), "infistar_video_api_key"),
+                changofilm_agent._plain_config_value(config_path.read_text(), "infistar_video_api_key"),
                 secret,
             )
             self.assertNotIn(secret, output.getvalue())
@@ -691,13 +691,13 @@ class TestMptAgentSkill(unittest.TestCase):
         """只缺视频接入信息时，不应误提示更换大模型 Provider。"""
         output = io.StringIO()
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "ollama", ["infistar_video_api_key", "confirm_infistar_charge"]
             )
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
         self.assertIn("INFISTAR_VIDEO_API_KEY_URL=https://infistar.cc/keys", text)
-        self.assertIn("INFISTAR_VIDEO_API_KEY_ENV=MPT_INFISTAR_VIDEO_API_KEY", text)
+        self.assertIn("INFISTAR_VIDEO_API_KEY_ENV=CHANGOFILM_INFISTAR_VIDEO_API_KEY", text)
         self.assertIn(
             "INFISTAR_CHARGE_CONFIRMATION_REQUIRED=--confirm-infistar-charge", text
         )
@@ -732,7 +732,7 @@ class TestMptAgentSkill(unittest.TestCase):
                     self.subTest(provider=provider, dedicated=dedicated, environment=environment, shared=shared),
                     patch.dict(os.environ, {"JALAPENO_VIDEO_API_KEY": environment}, clear=True),
                 ):
-                    self.assertEqual(mpt_agent.missing_config(path, args), (provider, expected))
+                    self.assertEqual(changofilm_agent.missing_config(path, args), (provider, expected))
                     self.assertEqual(jalapeno_video.is_enabled(settings), bool(dedicated or environment or shared))
 
     def test_jalapeno_environment_key_and_missing_input_report(self):
@@ -742,18 +742,18 @@ class TestMptAgentSkill(unittest.TestCase):
             output = io.StringIO()
             secret = "secret-jalapeno-test-key"
             with (
-                patch.dict(os.environ, {"MPT_JALAPENO_VIDEO_API_KEY": secret}, clear=True),
+                patch.dict(os.environ, {"CHANGOFILM_JALAPENO_VIDEO_API_KEY": secret}, clear=True),
                 redirect_stdout(output),
             ):
-                mpt_agent.apply_environment_config(path)
-                code = mpt_agent.report_missing_config(
+                changofilm_agent.apply_environment_config(path)
+                code = changofilm_agent.report_missing_config(
                     "ollama", ["jalapeno_video_api_key", "confirm_jalapeno_charge"]
                 )
-            self.assertEqual(mpt_agent._plain_config_value(path.read_text(), "jalapeno_video_api_key"), secret)
+            self.assertEqual(changofilm_agent._plain_config_value(path.read_text(), "jalapeno_video_api_key"), secret)
             self.assertNotIn(secret, output.getvalue())
-            self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+            self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
             self.assertIn("JALAPENO_API_KEY_URL=https://www.jalapeno-cloud.ai/MoneyPrinterTurbo", output.getvalue())
-            self.assertIn("JALAPENO_VIDEO_API_KEY_ENV=MPT_JALAPENO_VIDEO_API_KEY", output.getvalue())
+            self.assertIn("JALAPENO_VIDEO_API_KEY_ENV=CHANGOFILM_JALAPENO_VIDEO_API_KEY", output.getvalue())
             self.assertIn("JALAPENO_CHARGE_CONFIRMATION_REQUIRED=--confirm-jalapeno-charge", output.getvalue())
             self.assertNotIn("LLM_PROVIDER_OPTIONS_BEGIN", output.getvalue())
 
@@ -770,8 +770,8 @@ class TestMptAgentSkill(unittest.TestCase):
             output = io.StringIO()
 
             with redirect_stdout(output):
-                provider = mpt_agent.reuse_existing_llm_provider(config_path)
-            _, missing = mpt_agent.missing_config(config_path, [])
+                provider = changofilm_agent.reuse_existing_llm_provider(config_path)
+            _, missing = changofilm_agent.missing_config(config_path, [])
 
             self.assertEqual(provider, "deepseek")
             self.assertEqual(missing, [])
@@ -789,7 +789,7 @@ class TestMptAgentSkill(unittest.TestCase):
             if not provider.requires_api_key
         }
 
-        self.assertEqual(mpt_agent.KEYLESS_LLM_PROVIDERS, registry_keyless)
+        self.assertEqual(changofilm_agent.KEYLESS_LLM_PROVIDERS, registry_keyless)
 
     def test_claude_code_subscription_provider_needs_no_api_key(self):
         """
@@ -809,8 +809,8 @@ class TestMptAgentSkill(unittest.TestCase):
             output = io.StringIO()
 
             with redirect_stdout(output):
-                provider = mpt_agent.reuse_existing_llm_provider(config_path)
-            active_provider, missing = mpt_agent.missing_config(config_path, [])
+                provider = changofilm_agent.reuse_existing_llm_provider(config_path)
+            active_provider, missing = changofilm_agent.missing_config(config_path, [])
 
             # 即使别的 Provider 已经配置了 Key，也不能悄悄把订阅用户切走。
             self.assertEqual(provider, "claude_code")
@@ -834,8 +834,8 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
             with redirect_stdout(io.StringIO()):
-                provider = mpt_agent.reuse_existing_llm_provider(config_path)
-            active, missing = mpt_agent.missing_config(config_path, [])
+                provider = changofilm_agent.reuse_existing_llm_provider(config_path)
+            active, missing = changofilm_agent.missing_config(config_path, [])
             self.assertEqual(provider, "openai_codex")
             self.assertEqual(active, "openai_codex")
             self.assertEqual(missing, [])
@@ -862,8 +862,8 @@ class TestMptAgentSkill(unittest.TestCase):
             output = io.StringIO()
 
             with redirect_stdout(output):
-                provider = mpt_agent.reuse_existing_llm_provider(config_path)
-            active_provider, missing = mpt_agent.missing_config(config_path, [])
+                provider = changofilm_agent.reuse_existing_llm_provider(config_path)
+            active_provider, missing = changofilm_agent.missing_config(config_path, [])
 
             self.assertEqual(provider, "kimi_code")
             self.assertEqual(active_provider, "kimi_code")
@@ -885,10 +885,10 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            active_provider, missing = mpt_agent.missing_config(config_path, [])
+            active_provider, missing = changofilm_agent.missing_config(config_path, [])
             output = io.StringIO()
             with redirect_stdout(output):
-                mpt_agent.report_missing_config(active_provider, missing)
+                changofilm_agent.report_missing_config(active_provider, missing)
 
             self.assertEqual(active_provider, "kimi_code")
             self.assertEqual(missing, ["kimi_code_sign_in"])
@@ -899,27 +899,27 @@ class TestMptAgentSkill(unittest.TestCase):
         output = io.StringIO()
 
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "deepseek", ["pexels_api_keys"]
             )
 
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
-        self.assertIn(f"PEXELS_API_KEY_URL={mpt_agent.PEXELS_API_KEY_URL}", text)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertIn(f"PEXELS_API_KEY_URL={changofilm_agent.PEXELS_API_KEY_URL}", text)
         self.assertNotIn("LLM_PROVIDER_OPTIONS_BEGIN", text)
 
     def test_missing_seedance_inputs_report_ark_signup_and_charge_flag(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "deepseek",
                 ["volcengine_seedance_api_key", "confirm_seedance_charge"],
             )
 
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
         self.assertIn(
-            f"VOLCENGINE_ARK_API_KEY_URL={mpt_agent.VOLCENGINE_ARK_API_KEY_URL}",
+            f"VOLCENGINE_ARK_API_KEY_URL={changofilm_agent.VOLCENGINE_ARK_API_KEY_URL}",
             text,
         )
         self.assertIn(
@@ -931,15 +931,15 @@ class TestMptAgentSkill(unittest.TestCase):
     def test_missing_metaso_inputs_report_key_environment_and_charge_flag(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "deepseek",
                 ["metaso_minimax_api_key", "confirm_metaso_minimax_charge"],
             )
 
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
         self.assertIn(
-            "METASO_MINIMAX_API_KEY_ENV=MPT_METASO_MINIMAX_API_KEY", text
+            "METASO_MINIMAX_API_KEY_ENV=CHANGOFILM_METASO_MINIMAX_API_KEY", text
         )
         self.assertIn(
             "METASO_MINIMAX_CHARGE_CONFIRMATION_REQUIRED="
@@ -951,14 +951,14 @@ class TestMptAgentSkill(unittest.TestCase):
     def test_missing_muapi_inputs_report_key_environment_and_charge_flag(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            code = mpt_agent.report_missing_config(
+            code = changofilm_agent.report_missing_config(
                 "deepseek", ["muapi_api_key", "confirm_muapi_charge"]
             )
 
         text = output.getvalue()
-        self.assertEqual(code, mpt_agent.NEEDS_INPUT_EXIT_CODE)
-        self.assertIn(f"MUAPI_API_KEY_URL={mpt_agent.MUAPI_API_KEY_URL}", text)
-        self.assertIn("MUAPI_API_KEY_ENV=MPT_MUAPI_API_KEY", text)
+        self.assertEqual(code, changofilm_agent.NEEDS_INPUT_EXIT_CODE)
+        self.assertIn(f"MUAPI_API_KEY_URL={changofilm_agent.MUAPI_API_KEY_URL}", text)
+        self.assertIn("MUAPI_API_KEY_ENV=CHANGOFILM_MUAPI_API_KEY", text)
         self.assertIn(
             "MUAPI_CHARGE_CONFIRMATION_REQUIRED=--confirm-muapi-charge", text
         )
@@ -974,10 +974,10 @@ class TestMptAgentSkill(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            provider, missing = mpt_agent.missing_config(config_path, [])
+            provider, missing = changofilm_agent.missing_config(config_path, [])
             output = io.StringIO()
             with redirect_stdout(output):
-                mpt_agent.report_missing_config(provider, missing)
+                changofilm_agent.report_missing_config(provider, missing)
 
             self.assertEqual(provider, "oneapi")
             self.assertEqual(
@@ -994,14 +994,14 @@ class TestMptAgentSkill(unittest.TestCase):
             with patch.dict(
                 os.environ,
                 {
-                    "MPT_LLM_PROVIDER": "openai_compatible",
-                    "MPT_LLM_API_KEY": "custom-key",
-                    "MPT_LLM_BASE_URL": "https://llm.example.com/v1",
-                    "MPT_LLM_MODEL_NAME": "example-model",
+                    "CHANGOFILM_LLM_PROVIDER": "openai_compatible",
+                    "CHANGOFILM_LLM_API_KEY": "custom-key",
+                    "CHANGOFILM_LLM_BASE_URL": "https://llm.example.com/v1",
+                    "CHANGOFILM_LLM_MODEL_NAME": "example-model",
                 },
                 clear=True,
             ):
-                mpt_agent.apply_environment_config(config_path)
+                changofilm_agent.apply_environment_config(config_path)
 
             config = config_path.read_text(encoding="utf-8")
             self.assertIn('llm_provider = "oneapi"', config)
@@ -1020,9 +1020,9 @@ class TestMptAgentSkill(unittest.TestCase):
                 archive.writestr("../outside.txt", "unsafe")
 
             with zipfile.ZipFile(archive_path) as archive, self.assertRaises(
-                mpt_agent.SkillError
+                changofilm_agent.SkillError
             ):
-                mpt_agent._safe_extract(archive, destination)
+                changofilm_agent._safe_extract(archive, destination)
 
     def test_pexels_validation_filters_rejected_keys_without_logging_values(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1040,18 +1040,18 @@ class TestMptAgentSkill(unittest.TestCase):
 
             def validate(request, timeout):
                 self.assertEqual(
-                    request.full_url, mpt_agent.PEXELS_VALIDATION_URL
+                    request.full_url, changofilm_agent.PEXELS_VALIDATION_URL
                 )
                 if request.get_header("Authorization") == bad_key:
-                    raise mpt_agent.urllib.error.HTTPError(
+                    raise changofilm_agent.urllib.error.HTTPError(
                         request.full_url, 401, "Unauthorized", None, None
                     )
                 return self.FakeHttpResponse()
 
             with patch.object(
-                mpt_agent.urllib.request, "urlopen", side_effect=validate
+                changofilm_agent.urllib.request, "urlopen", side_effect=validate
             ), redirect_stdout(output):
-                valid = mpt_agent.validate_pexels_config(config_path, [])
+                valid = changofilm_agent.validate_pexels_config(config_path, [])
 
             config = config_path.read_text(encoding="utf-8")
             self.assertTrue(valid)
@@ -1069,8 +1069,8 @@ class TestMptAgentSkill(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            error = mpt_agent.urllib.error.HTTPError(
-                mpt_agent.PEXELS_VALIDATION_URL,
+            error = changofilm_agent.urllib.error.HTTPError(
+                changofilm_agent.PEXELS_VALIDATION_URL,
                 403,
                 "Forbidden",
                 None,
@@ -1078,9 +1078,9 @@ class TestMptAgentSkill(unittest.TestCase):
             )
 
             with patch.object(
-                mpt_agent.urllib.request, "urlopen", side_effect=error
+                changofilm_agent.urllib.request, "urlopen", side_effect=error
             ):
-                valid = mpt_agent.validate_pexels_config(config_path, [])
+                valid = changofilm_agent.validate_pexels_config(config_path, [])
 
             self.assertFalse(valid)
 
@@ -1096,14 +1096,14 @@ class TestMptAgentSkill(unittest.TestCase):
                 return SimpleNamespace(returncode=0)
 
             with (
-                patch.object(mpt_agent.shutil, "which", return_value="uv"),
-                patch.object(mpt_agent, "run_checked"),
-                patch.object(mpt_agent.uuid, "uuid4", return_value=task_id),
+                patch.object(changofilm_agent.shutil, "which", return_value="uv"),
+                patch.object(changofilm_agent, "run_checked"),
+                patch.object(changofilm_agent.uuid, "uuid4", return_value=task_id),
                 patch.object(
-                    mpt_agent.subprocess, "run", side_effect=finish_cli
+                    changofilm_agent.subprocess, "run", side_effect=finish_cli
                 ) as run_mock,
             ):
-                videos, task_dir, log_path, result_path = mpt_agent.generate_video(
+                videos, task_dir, log_path, result_path = changofilm_agent.generate_video(
                     root,
                     "测试主题",
                     ["--video-aspect", "16:9", "--stop-at", "script"],
@@ -1117,7 +1117,7 @@ class TestMptAgentSkill(unittest.TestCase):
             command = run_mock.call_args.args[0]
             voice_index = command.index("--voice-name")
             self.assertEqual(
-                command[voice_index + 1], mpt_agent.DEFAULT_VOICE_NAME
+                command[voice_index + 1], changofilm_agent.DEFAULT_VOICE_NAME
             )
             self.assertEqual(command[-2:], ["--stop-at", "video"])
 
@@ -1134,18 +1134,18 @@ class TestMptAgentSkill(unittest.TestCase):
                 return SimpleNamespace(returncode=1)
 
             with (
-                patch.object(mpt_agent.shutil, "which", return_value="uv"),
-                patch.object(mpt_agent, "run_checked"),
-                patch.object(mpt_agent.uuid, "uuid4", return_value=task_id),
-                patch.object(mpt_agent.subprocess, "run", side_effect=reject_model),
+                patch.object(changofilm_agent.shutil, "which", return_value="uv"),
+                patch.object(changofilm_agent, "run_checked"),
+                patch.object(changofilm_agent.uuid, "uuid4", return_value=task_id),
+                patch.object(changofilm_agent.subprocess, "run", side_effect=reject_model),
                 redirect_stderr(stderr),
-                self.assertRaises(mpt_agent.SkillError),
+                self.assertRaises(changofilm_agent.SkillError),
             ):
-                mpt_agent.generate_video(root, "测试主题", [])
+                changofilm_agent.generate_video(root, "测试主题", [])
 
             self.assertIn(model_error, stderr.getvalue())
             result = json.loads(
-                mpt_agent.result_manifest_path(root).read_text(encoding="utf-8")
+                changofilm_agent.result_manifest_path(root).read_text(encoding="utf-8")
             )
             self.assertEqual(result["status"], "failed")
 
@@ -1158,9 +1158,9 @@ class TestMptAgentSkill(unittest.TestCase):
         )
 
         with patch.object(
-            mpt_agent.subprocess, "run", return_value=result
+            changofilm_agent.subprocess, "run", return_value=result
         ), redirect_stdout(stdout), redirect_stderr(stderr):
-            mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+            changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
 
         self.assertNotIn("package-a", stdout.getvalue())
         self.assertNotIn("package-a", stderr.getvalue())
@@ -1172,14 +1172,14 @@ class TestMptAgentSkill(unittest.TestCase):
         # every other PIPE-decoding subprocess.run to UTF-8; derive the requirement
         # from the call so a future regression fails here instead of in the field.
         with patch.object(
-            mpt_agent.subprocess,
+            changofilm_agent.subprocess,
             "run",
             return_value=SimpleNamespace(returncode=0, stdout=""),
         ) as run_mock:
-            mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+            changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
 
         kwargs = run_mock.call_args.kwargs
-        self.assertEqual(kwargs.get("stdout"), mpt_agent.subprocess.PIPE)
+        self.assertEqual(kwargs.get("stdout"), changofilm_agent.subprocess.PIPE)
         self.assertTrue(kwargs.get("text"))
         self.assertEqual(
             kwargs.get("encoding"),
@@ -1193,12 +1193,12 @@ class TestMptAgentSkill(unittest.TestCase):
         with (
             patch.dict(os.environ, environment, clear=True),
             patch.object(
-                mpt_agent.subprocess, "run",
+                changofilm_agent.subprocess, "run",
                 return_value=SimpleNamespace(returncode=0, stdout=""),
             ) as run_mock,
             redirect_stdout(io.StringIO()),
         ):
-            mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+            changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
             child_env = run_mock.call_args.kwargs["env"]
             self.assertEqual(child_env["UV_LOCK_TIMEOUT"], "1200")
             self.assertEqual(child_env["UV_CACHE_DIR"], "cache-fixture")
@@ -1213,12 +1213,12 @@ class TestMptAgentSkill(unittest.TestCase):
                 self.subTest(value=value),
                 patch.dict(os.environ, {"UV_LOCK_TIMEOUT": value}, clear=True),
                 patch.object(
-                    mpt_agent.subprocess, "run",
+                    changofilm_agent.subprocess, "run",
                     return_value=SimpleNamespace(returncode=0, stdout=""),
                 ) as run_mock,
                 redirect_stdout(io.StringIO()),
             ):
-                mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+                changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
                 self.assertEqual(run_mock.call_args.kwargs["env"]["UV_LOCK_TIMEOUT"], value)
                 self.assertEqual(os.environ["UV_LOCK_TIMEOUT"], value)
 
@@ -1229,7 +1229,7 @@ class TestMptAgentSkill(unittest.TestCase):
                 os.environ.pop("UV_LOCK_TIMEOUT", None)
                 if configured is not None:
                     os.environ["UV_LOCK_TIMEOUT"] = configured
-                mpt_agent.run_checked(
+                changofilm_agent.run_checked(
                     [sys.executable, "-c", "import os,sys; assert os.environ['UV_LOCK_TIMEOUT'] == sys.argv[1]", expected],
                     cwd=Path.cwd(),
                 )
@@ -1242,13 +1242,13 @@ class TestMptAgentSkill(unittest.TestCase):
         stderr = io.StringIO()
         with (
             patch.object(
-                mpt_agent.subprocess, "run",
+                changofilm_agent.subprocess, "run",
                 return_value=SimpleNamespace(returncode=1, stdout=output),
             ),
             redirect_stdout(io.StringIO()), redirect_stderr(stderr),
-            self.assertRaisesRegex(mpt_agent.SkillError, "exit code 1"),
+            self.assertRaisesRegex(changofilm_agent.SkillError, "exit code 1"),
         ):
-            mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+            changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
         text = stderr.getvalue()
         self.assertNotIn("line-0\n", text)
         self.assertNotIn("line-4\n", text)
@@ -1264,13 +1264,13 @@ class TestMptAgentSkill(unittest.TestCase):
             with (
                 self.subTest(output=output),
                 patch.object(
-                    mpt_agent.subprocess, "run",
+                    changofilm_agent.subprocess, "run",
                     return_value=SimpleNamespace(returncode=2, stdout=output),
                 ),
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr,
-                self.assertRaisesRegex(mpt_agent.SkillError, "exit code 2"),
+                self.assertRaisesRegex(changofilm_agent.SkillError, "exit code 2"),
             ):
-                mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+                changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
             self.assertNotIn("UV_LOCK_TIMEOUT", stderr.getvalue())
 
     def test_dependency_lock_wait_alternative_wording_has_hint(self):
@@ -1278,23 +1278,23 @@ class TestMptAgentSkill(unittest.TestCase):
         stderr = io.StringIO()
         with (
             patch.object(
-                mpt_agent.subprocess, "run",
+                changofilm_agent.subprocess, "run",
                 return_value=SimpleNamespace(returncode=1, stdout="Timed out waiting for cache lock"),
             ),
             redirect_stdout(io.StringIO()), redirect_stderr(stderr),
-            self.assertRaises(mpt_agent.SkillError),
+            self.assertRaises(changofilm_agent.SkillError),
         ):
-            mpt_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
+            changofilm_agent.run_checked(["uv", "sync", "--frozen"], cwd=Path.cwd())
         self.assertIn("UV_LOCK_TIMEOUT", stderr.getvalue())
 
     def test_explicit_voice_is_not_overridden(self):
         self.assertTrue(
-            mpt_agent.has_cli_option(
+            changofilm_agent.has_cli_option(
                 ["--voice-name", "en-US-JennyNeural-Female"], "--voice-name"
             )
         )
         self.assertTrue(
-            mpt_agent.has_cli_option(
+            changofilm_agent.has_cli_option(
                 ["--voice-name=en-US-JennyNeural-Female"], "--voice-name"
             )
         )

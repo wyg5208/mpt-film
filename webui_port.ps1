@@ -1,6 +1,6 @@
 # webui_port.ps1 - port picker for webui.bat.
 #
-# Reads MPT_WEBUI_HOST / MPT_WEBUI_PORT from the environment (set by the
+# Reads CHANGOFILM_WEBUI_HOST / CHANGOFILM_WEBUI_PORT from the environment (set by the
 # launcher) and prints exactly one port number on stdout. Human-readable
 # messages go through Write-Host (console only), so the batch "for /f" that
 # captures stdout always receives just the port.
@@ -20,8 +20,8 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$hostName = if ($env:MPT_WEBUI_HOST) { $env:MPT_WEBUI_HOST } else { '127.0.0.1' }
-$preferred = if ($env:MPT_WEBUI_PORT) { [int]$env:MPT_WEBUI_PORT } else { 8501 }
+$hostName = if ($env:CHANGOFILM_WEBUI_HOST) { $env:CHANGOFILM_WEBUI_HOST } else { '127.0.0.1' }
+$preferred = if ($env:CHANGOFILM_WEBUI_PORT) { [int]$env:CHANGOFILM_WEBUI_PORT } else { 8501 }
 
 # Dns.GetHostAddresses() rejects 0.0.0.0, so IP addresses are parsed directly
 # and only host names are looked up.

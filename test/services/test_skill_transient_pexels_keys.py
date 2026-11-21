@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-spec = importlib.util.spec_from_file_location("mpt_transient_keys_fixture", Path(__file__).parents[2] / "docs" / "skill" / "mpt_agent.py")
+spec = importlib.util.spec_from_file_location("changofilm_transient_keys_fixture", Path(__file__).parents[2] / "docs" / "skill" / "changofilm_agent.py")
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
 

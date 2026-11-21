@@ -210,7 +210,7 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
 
     def test_missing_preset_song_does_not_interrupt_the_page(self):
         """枚举后文件失效时应显示提示，并且不能创建损坏的播放器。"""
-        missing_song = Path(tempfile.gettempdir()) / "mpt-missing-preset.wav"
+        missing_song = Path(tempfile.gettempdir()) / "changofilm-missing-preset.wav"
         missing_song.unlink(missing_ok=True)
         test_ui = dict(config.ui, language="en", bgm_type="random")
 

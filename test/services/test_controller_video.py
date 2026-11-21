@@ -533,7 +533,7 @@ class TestVideoControllerTasks(unittest.TestCase):
             patch.object(
                 video_controller.utils,
                 "task_dir",
-                return_value="/tmp/mpt-completed-task-test",
+                return_value="/tmp/changofilm-completed-task-test",
             ),
             patch.object(video_controller.os.path, "exists", return_value=False),
             patch.object(video_controller.sm.state, "delete_task") as delete_task,

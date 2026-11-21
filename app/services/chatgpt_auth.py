@@ -1,4 +1,4 @@
-"""Official Sign in with ChatGPT for a local MoneyPrinterTurbo installation.
+"""Official Sign in with ChatGPT for a local ChangoFilm installation.
 
 The application owns its dynamic registration; Codex CLI credentials and the
 legacy device-flow grant are never imported into this flow.
@@ -490,20 +490,20 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             if any(len(values) != 1 for values in query.values()):
                 raise ChatGPTError("login_failed")
             _complete_login(attempt, {key: values[0] for key, values in query.items()})
-            message = "ChatGPT sign-in completed. Return to MoneyPrinterTurbo."
+            message = "ChatGPT sign-in completed. Return to ChangoFilm."
             status = 200
         except ChatGPTError as exc:
             attempt.error = exc
             attempt.status = "failed"
             message, status = (
-                "Sign-in was not completed. Return to MoneyPrinterTurbo.",
+                "Sign-in was not completed. Return to ChangoFilm.",
                 400,
             )
         except Exception:
             attempt.error = ChatGPTError("login_failed")
             attempt.status = "failed"
             message, status = (
-                "Sign-in was not completed. Return to MoneyPrinterTurbo.",
+                "Sign-in was not completed. Return to ChangoFilm.",
                 400,
             )
         body = message.encode("utf-8")
@@ -568,7 +568,7 @@ def begin_login(*, new_account=False, enable_plan=False):
         .rstrip("="),
     }
     if attempt.client_id == "dynamic_agent_client":
-        params["agent_name_hint"] = "MoneyPrinterTurbo"
+        params["agent_name_hint"] = "ChangoFilm"
     elif profile.get("email"):
         params["login_hint"] = profile["email"]
     if enable_plan:

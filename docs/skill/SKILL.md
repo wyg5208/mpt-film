@@ -1,6 +1,6 @@
 ---
-name: moneyprinterturbo-video
-description: Use this skill whenever the user wants to create a finished video from a topic, title, idea, prompt, or script with MoneyPrinterTurbo. This includes short-form, voice-over, educational, marketing, social-media, and stock-footage videos. Also use it when the user mentions MoneyPrinterTurbo, provides this Skill URL, asks an AI agent to install or configure MoneyPrinterTurbo, needs missing API keys identified, wants a failed generation repaired, or wants a generated MP4 located and delivered. Use this skill when the expected outcome is a final video file, not setup instructions.
+name: changofilm-video
+description: Use this skill whenever the user wants to create a finished video from a topic, title, idea, prompt, or script with ChangoFilm. This includes short-form, voice-over, educational, marketing, social-media, and stock-footage videos. Also use it when the user mentions ChangoFilm, provides this Skill URL, asks an AI agent to install or configure ChangoFilm, needs missing API keys identified, wants a failed generation repaired, or wants a generated MP4 located and delivered. Use this skill when the expected outcome is a final video file, not setup instructions.
 compatibility: Requires an AI agent with terminal, network, filesystem, and long-running command support. Supports macOS and Windows and uses uv exclusively.
 metadata:
   author: "harry0703@hotmail.com"
@@ -8,7 +8,7 @@ metadata:
   upstream: "https://github.com/harry0703/MoneyPrinterTurbo"
 ---
 
-# MoneyPrinterTurbo Video Generation
+# ChangoFilm Video Generation
 
 The user only needs to provide a video topic or script. Complete installation, configuration reuse, generation, waiting, and final MP4 delivery automatically. Do not stop after giving instructions or commands.
 
@@ -24,20 +24,20 @@ The user only needs to provide a video topic or script. Complete installation, c
 
 ## Defaults
 
-Unless the user requests otherwise, generate one Chinese `9:16` portrait video with Pexels footage, the default Chinese Edge TTS voice, subtitles, and background music. Install MoneyPrinterTurbo under the user's home directory.
+Unless the user requests otherwise, generate one Chinese `9:16` portrait video with Pexels footage, the default Chinese Edge TTS voice, subtitles, and background music. Install ChangoFilm under the user's home directory.
 
 ## Execution
 
 ### 1. Locate the helper
 
-Resolve `SKILL_DIR` from this `SKILL.md` file. The helper is the adjacent `mpt_agent.py`. Set the terminal tool's working directory to `SKILL_DIR` and invoke the helper by its relative filename. Do not put the absolute helper path in the command, and do not run an extra `ls` or `dir` check.
+Resolve `SKILL_DIR` from this `SKILL.md` file. The helper is the adjacent `changofilm_agent.py`. Set the terminal tool's working directory to `SKILL_DIR` and invoke the helper by its relative filename. Do not put the absolute helper path in the command, and do not run an extra `ls` or `dir` check.
 
-This is required on Windows because some agent terminal validators remove backslashes from absolute paths embedded in commands. Using `mpt_agent.py` with `workdir=SKILL_DIR` avoids that failure and works on both macOS and Windows.
+This is required on Windows because some agent terminal validators remove backslashes from absolute paths embedded in commands. Using `changofilm_agent.py` with `workdir=SKILL_DIR` avoids that failure and works on both macOS and Windows.
 
 If the client loaded only the remote `SKILL.md`, download the helper from the official repository to a temporary directory, then use that temporary directory as the command working directory:
 
 ```text
-https://raw.githubusercontent.com/harry0703/MoneyPrinterTurbo/main/docs/skill/mpt_agent.py
+https://raw.githubusercontent.com/wyg5208/changofilm/main/docs/skill/changofilm_agent.py
 ```
 
 ### 2. Run the helper
@@ -59,7 +59,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 Use this foreground command with `workdir=SKILL_DIR` and a timeout of at least 20 minutes:
 
 ```bash
-uv run --no-project --python 3.11 python mpt_agent.py --subject "<video topic>"
+uv run --no-project --python 3.11 python changofilm_agent.py --subject "<video topic>"
 ```
 
 On Windows, do not try absolute backslash paths, absolute forward-slash paths, or copies in the workspace before this relative command. If a terminal tool reports `referenced_script_path_missing`, verify that its working directory is exactly `SKILL_DIR` and retry the relative command once. Do not cycle through path variants.
@@ -73,19 +73,19 @@ Do not use Docker, Conda, system pip, or a manually managed virtual environment.
 Successful output has this form:
 
 ```text
-MPT_RESULT
+CHANGOFILM_RESULT
 VIDEO_FILE=<absolute path>/final-1.mp4
 TASK_DIR=<absolute path>/storage/tasks/<task_id>
 LOG_FILE=<absolute path>/run-<task_id>.log
 RESULT_FILE=<absolute path>/latest-result.json
 ```
 
-`mpt_agent.py` emits `VIDEO_FILE` only after confirming that the file exists and is non-empty. Do not run another `ls`, `stat`, or file validation command.
+`changofilm_agent.py` emits `VIDEO_FILE` only after confirming that the file exists and is non-empty. Do not run another `ls`, `stat`, or file validation command.
 
-If the terminal reports `exitCode=0` but truncates the output or returns a history-file reference without `MPT_RESULT`, do not infer failure and do not inspect old logs. Read this file once:
+If the terminal reports `exitCode=0` but truncates the output or returns a history-file reference without `CHANGOFILM_RESULT`, do not infer failure and do not inspect old logs. Read this file once:
 
 ```text
-~/MoneyPrinterTurbo/.agent-logs/moneyprinterturbo-video/latest-result.json
+~/ChangoFilm/.agent-logs/changofilm-video/latest-result.json
 ```
 
 Treat `status=completed` as success. Return only the absolute video path and a concise description, for example:
@@ -99,22 +99,22 @@ Summary: Chinese portrait video with voice-over, subtitles, and background music
 
 ### Exit code 10: request credentials once
 
-`MPT_NEEDS_INPUT` includes only the required fields, recommended LLM providers and signup links, custom OpenAI-compatible requirements, and material-provider signup links. Ask only for the listed values and do not request credentials already found in `config.toml`.
+`CHANGOFILM_NEEDS_INPUT` includes only the required fields, recommended LLM providers and signup links, custom OpenAI-compatible requirements, and material-provider signup links. Ask only for the listed values and do not request credentials already found in `config.toml`.
 
 After the user responds, rerun the same foreground command with only the required environment variables:
 
 ```text
-MPT_LLM_PROVIDER
-MPT_LLM_API_KEY
-MPT_LLM_BASE_URL
-MPT_LLM_MODEL_NAME
-MPT_PEXELS_API_KEY
-MPT_VOLCENGINE_ARK_API_KEY
-MPT_OFOX_API_KEY
-MPT_METASO_MINIMAX_API_KEY
-MPT_MUAPI_API_KEY
-MPT_INFISTAR_VIDEO_API_KEY
-MPT_JALAPENO_VIDEO_API_KEY
+CHANGOFILM_LLM_PROVIDER
+CHANGOFILM_LLM_API_KEY
+CHANGOFILM_LLM_BASE_URL
+CHANGOFILM_LLM_MODEL_NAME
+CHANGOFILM_PEXELS_API_KEY
+CHANGOFILM_VOLCENGINE_ARK_API_KEY
+CHANGOFILM_OFOX_API_KEY
+CHANGOFILM_METASO_MINIMAX_API_KEY
+CHANGOFILM_MUAPI_API_KEY
+CHANGOFILM_INFISTAR_VIDEO_API_KEY
+CHANGOFILM_JALAPENO_VIDEO_API_KEY
 ```
 
 When `SEEDANCE_CHARGE_CONFIRMATION_REQUIRED` is present, explain that every
@@ -151,9 +151,9 @@ configured Jalapeno Cloud LLM key; a dedicated video key takes priority.
 
 ### Exit code 1: repair or report
 
-Use `MPT_ERROR` and `LOG_FILE` to repair a recoverable problem and retry once. Ask the user only if the repair requires a new API key. If the retry fails, report the failed stage, a short error, and the log path.
+Use `CHANGOFILM_ERROR` and `LOG_FILE` to repair a recoverable problem and retry once. Ask the user only if the repair requires a new API key. If the retry fails, report the failed stage, a short error, and the log path.
 
-A terminal-tool path validation error is not a video-generation failure because the helper did not start. Correct the working directory and retry the relative command once. Never ask the user to copy `mpt_agent.py`, run commands manually, or confirm whether the agent should continue.
+A terminal-tool path validation error is not a video-generation failure because the helper did not start. Correct the working directory and retry the relative command once. Never ask the user to copy `changofilm_agent.py`, run commands manually, or confirm whether the agent should continue.
 
 ## Configuration and Background Fallback
 
@@ -164,7 +164,7 @@ Use background mode only if the agent platform cannot wait for a foreground proc
 ## Scope
 
 - Support macOS and Windows only.
-- Use uv and the MoneyPrinterTurbo CLI only.
+- Use uv and the ChangoFilm CLI only.
 - Do not start Docker, WebUI, or API services.
 - Do not run multiple video jobs concurrently.
 - Pass additional video requirements after `--`. Run `cli.py --help` once only when an unfamiliar option must be verified.

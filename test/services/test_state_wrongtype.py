@@ -48,9 +48,9 @@ def test_scan_does_not_hide_unrelated_probe_errors():
     assert "NOPERM" in str(exc_info.value)
 
 
-@pytest.mark.skipif(not os.getenv("MPT_TEST_REDIS_HOST"), reason="MPT_TEST_REDIS_HOST not set")
+@pytest.mark.skipif(not os.getenv("CHANGOFILM_TEST_REDIS_HOST"), reason="CHANGOFILM_TEST_REDIS_HOST not set")
 def test_real_redis_non_hash_lookup_and_scan_type_change():
-    state = RedisState(host=os.environ["MPT_TEST_REDIS_HOST"], port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")), db=int(os.getenv("MPT_TEST_REDIS_DB", "15")))
+    state = RedisState(host=os.environ["CHANGOFILM_TEST_REDIS_HOST"], port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")), db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")))
     key = f"ci-type-change-{uuid4()}"
     client = state._redis
     try:

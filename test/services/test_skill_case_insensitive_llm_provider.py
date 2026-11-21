@@ -6,7 +6,7 @@ from unittest.mock import patch
 from app.models.llm_provider import get_llm_provider
 
 
-spec = importlib.util.spec_from_file_location("mpt_provider_case_fixture", Path(__file__).parents[2] / "docs" / "skill" / "mpt_agent.py")
+spec = importlib.util.spec_from_file_location("changofilm_provider_case_fixture", Path(__file__).parents[2] / "docs" / "skill" / "changofilm_agent.py")
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
 
@@ -28,6 +28,6 @@ def test_uppercase_current_provider_is_retained_before_other_configured_provider
 def test_environment_key_uses_existing_lowercase_provider_field(tmp_path):
     config = tmp_path / "config.toml"
     config.write_text('[app]\nllm_provider = "OPENAI"\nopenai_api_key = ""\n', encoding="utf-8")
-    with patch.dict(helper.os.environ, {"MPT_LLM_API_KEY": "new-fixture"}, clear=True):
+    with patch.dict(helper.os.environ, {"CHANGOFILM_LLM_API_KEY": "new-fixture"}, clear=True):
         helper.apply_environment_config(config)
     assert tomllib.loads(config.read_text(encoding="utf-8"))["app"]["openai_api_key"] == "new-fixture"

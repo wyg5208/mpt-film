@@ -7,7 +7,7 @@ import pytest
 from app.services import metaso_minimax, muapi, ofox, volcengine_seedance
 
 
-spec = importlib.util.spec_from_file_location("mpt_whitespace_keys_fixture", Path(__file__).parents[2] / "docs" / "skill" / "mpt_agent.py")
+spec = importlib.util.spec_from_file_location("changofilm_whitespace_keys_fixture", Path(__file__).parents[2] / "docs" / "skill" / "changofilm_agent.py")
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
 

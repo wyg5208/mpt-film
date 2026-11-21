@@ -309,7 +309,7 @@ for content that is already sampled at a similar effective rate.
 
 The concept, the four visual defect families, and the "every message carries a
 timestamp and a measured number" convention are ported. Several mechanisms had
-to be redesigned because MoneyPrinterTurbo is a "fetch/generate footage +
+to be redesigned because ChangoFilm is a "fetch/generate footage +
 FFmpeg-concat" pipeline, not OpenFilm's "code-is-the-film, browser-rendered"
 pipeline.
 
@@ -323,37 +323,37 @@ pipeline.
   measured values (LUFS, dBTP, timestamps) in the message text.
 - Keeping every detection threshold explicit rather than adaptive.
 
-**Redesigned for MPT**
+**Redesigned for ChangoFilm**
 
 - **Determinism mechanism.** OpenFilm forces determinism by re-seeding
   `Math.random` at every rendered timestamp inside a browser render loop
-  (`FILM_CLOCK`). MPT has no such loop; instead each decision is a pure function
+  (`FILM_CLOCK`). ChangoFilm has no such loop; instead each decision is a pure function
   of `(seed, role, role_index)` with its own `random.Random`, specifically so it
   is correct under `ThreadPoolExecutor` without monkey-patching global state.
 - **Review input.** OpenFilm `look` re-renders pages in a browser at 30 fps and
-  pixel-diffs two seeded passes. MPT reviews the *already-rendered mp4* by
+  pixel-diffs two seeded passes. ChangoFilm reviews the *already-rendered mp4* by
   decoding low-resolution grayscale frames with FFmpeg — no browser, no
   re-render, zero new dependencies (stdlib + the already-present NumPy/PIL + the
   repo's FFmpeg binary; note `imageio-ffmpeg` ships FFmpeg but not ffprobe, so
   probing reads FFmpeg's own stderr).
-- **Advisory only.** OpenFilm's `look` gates the render. MPT's review never
+- **Advisory only.** OpenFilm's `look` gates the render. ChangoFilm's review never
   fails a completed task; it can only add warnings.
 - **Limited-range thresholds.** OpenFilm works from a browser RGBA canvas
-  (full 0–255); MPT works from yuv420p limited range, which is exactly why the
+  (full 0–255); ChangoFilm works from yuv420p limited range, which is exactly why the
   black/white luma thresholds had to be recalibrated to 20/230 (§3.3). This
   constraint does not exist upstream.
 - **Single-frame formulation.** `abrupt_gap`'s "two consecutive large diffs with
-  quiet outer baselines" is an MPT formulation suited to a sampled grayscale
+  quiet outer baselines" is an ChangoFilm formulation suited to a sampled grayscale
   stream, not a port of OpenFilm's pixel-diff equality test.
 
 **Explicitly not borrowed**
 
 - Browser frame rendering and the HTML film syntax.
-- `film.html` grammar and the Studio editor (MPT already has WebUI and
+- `film.html` grammar and the Studio editor (ChangoFilm already has WebUI and
   `docs/video-projects.md`).
-- OpenFilm's full bit-exact reproducibility goal. MPT's upstream includes LLM
+- OpenFilm's full bit-exact reproducibility goal. ChangoFilm's upstream includes LLM
   scripts, third-party material search and paid generation that are out of scope
-  (see §1.4); MPT only promises frame-identical *editing* for a *given* landed
+  (see §1.4); ChangoFilm only promises frame-identical *editing* for a *given* landed
   material set.
 
 ---

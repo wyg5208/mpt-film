@@ -17,7 +17,7 @@ from app.services.state import MemoryState, RedisState
 from app.utils import utils
 
 resources_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources")
-RUN_INTEGRATION_TESTS = os.environ.get("MPT_RUN_INTEGRATION_TESTS", "").lower() in {
+RUN_INTEGRATION_TESTS = os.environ.get("CHANGOFILM_RUN_INTEGRATION_TESTS", "").lower() in {
     "1",
     "true",
     "yes",
@@ -595,7 +595,7 @@ class TestTaskService(unittest.TestCase):
             settings=settings,
             batch=batch,
             listing_version_id="version-1",
-            client_request_id="mpt-video-1",
+            client_request_id="changofilm-video-1",
         )
         backend = MagicMock()
         backend.execute.return_value = tm.loomloom.LoomLoomExecution(
@@ -715,7 +715,7 @@ class TestTaskService(unittest.TestCase):
                 )
             ),
             listing_version_id="version-1",
-            client_request_id="mpt-video-state-failure",
+            client_request_id="changofilm-video-state-failure",
         )
         backend = MagicMock()
         backend.execute.return_value = tm.loomloom.LoomLoomExecution(
@@ -2481,15 +2481,15 @@ class TestTaskService(unittest.TestCase):
         self.assertIn("cancelled", task["cross_post_error"])
 
     @unittest.skipUnless(
-        os.getenv("MPT_TEST_REDIS_HOST"),
-        "MPT_TEST_REDIS_HOST not set",
+        os.getenv("CHANGOFILM_TEST_REDIS_HOST"),
+        "CHANGOFILM_TEST_REDIS_HOST not set",
     )
     def test_real_redis_recovers_interrupted_cross_post_state(self):
         """真实 Redis 的多批扫描应恢复全部遗留发布状态并保留视频。"""
         state = RedisState(
-            host=os.environ["MPT_TEST_REDIS_HOST"],
-            port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")),
-            db=int(os.getenv("MPT_TEST_REDIS_DB", "15")),
+            host=os.environ["CHANGOFILM_TEST_REDIS_HOST"],
+            port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")),
+            db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")),
         )
         task_ids = [f"ci-cross-post-recovery-{uuid4()}" for _ in range(3)]
         for task_id, cross_post_state in zip(
@@ -2579,7 +2579,7 @@ class TestTaskService(unittest.TestCase):
 
     @unittest.skipUnless(
         RUN_INTEGRATION_TESTS,
-        "MPT_RUN_INTEGRATION_TESTS not set",
+        "CHANGOFILM_RUN_INTEGRATION_TESTS not set",
     )
     def test_task_local_materials(self):
         task_id = "00000000-0000-0000-0000-000000000000"

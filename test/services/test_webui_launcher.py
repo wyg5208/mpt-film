@@ -1,11 +1,11 @@
-"""webui.bat must start the WebUI from any folder and on the host in MPT_WEBUI_HOST.
+"""webui.bat must start the WebUI from any folder and on the host in CHANGOFILM_WEBUI_HOST.
 
-A ")" in the path of the project folder, as in "MoneyPrinterTurbo-main (1)"
+A ")" in the path of the project folder, as in "ChangoFilm-main (1)"
 from a second download of the source ZIP or "Program Files (x86)", stopped
 the launcher with a cmd syntax error before Python started, and a "&" made it
 miss the project Python.
 
-MPT_WEBUI_HOST=0.0.0.0, which the README gives for access from other devices
+CHANGOFILM_WEBUI_HOST=0.0.0.0, which the README gives for access from other devices
 on the LAN, stopped the launcher with "No available WebUI port found", because
 the port check looked the host up with Dns.GetHostAddresses(), which rejects
 0.0.0.0. Streamlit was also told to open http://0.0.0.0 in the browser, an
@@ -44,7 +44,7 @@ pytestmark = pytest.mark.skipif(
 STREAMLIT_STUB = """\
 import json, os, sys
 
-record = os.environ["MPT_TEST_LAUNCH_RECORD"]
+record = os.environ["CHANGOFILM_TEST_LAUNCH_RECORD"]
 with open(record, "w", encoding="utf-8") as f:
     json.dump(sys.argv[1:], f)
 with open(record + ".cwd", "w", encoding="utf-8") as f:
@@ -96,9 +96,9 @@ def _run_webui_bat(
                 os.path.join(system_root, "System32", "WindowsPowerShell", "v1.0"),
             ]
         ),
-        MPT_WEBUI_HOST=host,
-        MPT_WEBUI_PORT=str(port),
-        MPT_TEST_LAUNCH_RECORD=str(record),
+        CHANGOFILM_WEBUI_HOST=host,
+        CHANGOFILM_WEBUI_PORT=str(port),
+        CHANGOFILM_TEST_LAUNCH_RECORD=str(record),
     )
     result = subprocess.run(
         command,
@@ -115,7 +115,7 @@ def _run_webui_bat(
 
 @pytest.mark.parametrize(
     "folder_name",
-    ["MoneyPrinterTurbo", "MoneyPrinterTurbo (1)", "R&D MoneyPrinterTurbo"],
+    ["ChangoFilm", "ChangoFilm (1)", "R&D ChangoFilm"],
 )
 def test_webui_bat_starts_project_python_from_any_folder(tmp_path, folder_name):
     project = _make_project(tmp_path, folder_name)
@@ -135,11 +135,11 @@ def test_webui_bat_starts_project_python_from_any_folder(tmp_path, folder_name):
 
 
 def test_webui_bat_falls_back_to_uv_from_folder_with_parentheses(tmp_path):
-    project = _make_project(tmp_path, "MoneyPrinterTurbo (1)")
+    project = _make_project(tmp_path, "ChangoFilm (1)")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "uv.bat").write_text(
-        '@echo off\n>"%MPT_TEST_LAUNCH_RECORD%" echo %*\n', encoding="ascii"
+        '@echo off\n>"%CHANGOFILM_TEST_LAUNCH_RECORD%" echo %*\n', encoding="ascii"
     )
     record = tmp_path / "uv_args.txt"
 
@@ -158,7 +158,7 @@ def test_webui_bat_falls_back_to_uv_from_folder_with_parentheses(tmp_path):
 
 @pytest.mark.parametrize(
     "folder_name",
-    ["MoneyPrinterTurbo", "MoneyPrinterTurbo (1)", "R&D MoneyPrinterTurbo"],
+    ["ChangoFilm", "ChangoFilm (1)", "R&D ChangoFilm"],
 )
 def test_webui_bat_starts_project_python_when_started_in_system32(
     tmp_path, folder_name
@@ -186,12 +186,12 @@ def test_webui_bat_starts_project_python_when_started_in_system32(
 
 def test_webui_bat_runs_uv_in_project_folder_when_started_in_system32(tmp_path):
     system32 = Path(os.environ["SYSTEMROOT"], "System32")
-    project = _make_project(tmp_path, "MoneyPrinterTurbo (1)")
+    project = _make_project(tmp_path, "ChangoFilm (1)")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     # Records the folder that uv runs in; cmd /u writes it as UTF-16, whatever the code page.
     (bin_dir / "uv.bat").write_text(
-        '@echo off\n>"%MPT_TEST_LAUNCH_RECORD%" cmd /d /u /c cd\n', encoding="ascii"
+        '@echo off\n>"%CHANGOFILM_TEST_LAUNCH_RECORD%" cmd /d /u /c cd\n', encoding="ascii"
     )
     record = tmp_path / "uv_cwd.txt"
 
@@ -214,7 +214,7 @@ def test_webui_bat_runs_uv_in_project_folder_when_started_in_system32(tmp_path):
 def test_webui_bat_listens_on_host_and_opens_browser_on_reachable_address(
     tmp_path, host, browser_host
 ):
-    project = _make_project(tmp_path, "MoneyPrinterTurbo")
+    project = _make_project(tmp_path, "ChangoFilm")
     _add_venv_with_streamlit_stub(project)
     record = tmp_path / "streamlit_args.json"
 
@@ -230,8 +230,8 @@ def test_webui_bat_listens_on_host_and_opens_browser_on_reachable_address(
 
 
 def test_webui_bat_drops_the_space_a_cmd_one_liner_leaves_in_the_host(tmp_path):
-    # "set MPT_WEBUI_HOST=0.0.0.0 && webui.bat" keeps the space before "&&".
-    project = _make_project(tmp_path, "MoneyPrinterTurbo")
+    # "set CHANGOFILM_WEBUI_HOST=0.0.0.0 && webui.bat" keeps the space before "&&".
+    project = _make_project(tmp_path, "ChangoFilm")
     _add_venv_with_streamlit_stub(project)
     record = tmp_path / "streamlit_args.json"
 
@@ -256,7 +256,7 @@ def test_webui_bat_drops_the_space_a_cmd_one_liner_leaves_in_the_host(tmp_path):
     ],
 )
 def test_webui_bat_lan_host_skips_a_port_already_in_use(tmp_path, held_on):
-    project = _make_project(tmp_path, "MoneyPrinterTurbo")
+    project = _make_project(tmp_path, "ChangoFilm")
     _add_venv_with_streamlit_stub(project)
     record = tmp_path / "streamlit_args.json"
 

@@ -89,7 +89,7 @@ name alone does not establish that access. The separate **ChatGPT (Native OAuth)
 provider does not supply the Codex session used by this image source.
 
 Sign in once through **OpenAI - Codex** in the WebUI, then run the acceptance
-script from the same installation and runtime directory. If using `MPT_HOME`,
+script from the same installation and runtime directory. If using `CHANGOFILM_HOME`,
 keep the same value for the WebUI and the script. Install the locked dependencies
 first with `uv sync --frozen`; FFmpeg must be available through the application's
 normal FFmpeg configuration.

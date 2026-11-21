@@ -251,11 +251,11 @@ def _bgm_type(value: str) -> str:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    command = "mpt cli" if __name__ == "app.cli" else "uv run python cli.py"
+    command = "changofilm cli" if __name__ == "app.cli" else "uv run python cli.py"
     parser = argparse.ArgumentParser(
-        prog="mpt cli" if __name__ == "app.cli" else None,
+        prog="changofilm cli" if __name__ == "app.cli" else None,
         description=(
-            "Generate MoneyPrinterTurbo videos without the WebUI.\n\n"
+            "Generate ChangoFilm videos without the WebUI.\n\n"
             "Provider settings and credentials are read from config.toml.\n"
             "Default full-video generation requires a configured LLM and Pexels API key.\n"
             "The default Edge TTS voice requires no API key."

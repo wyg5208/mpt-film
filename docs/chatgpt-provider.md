@@ -1,6 +1,6 @@
 # OpenAI - ChatGPT (Native OAuth)
 
-This optional provider registers MoneyPrinterTurbo using OpenAI's official
+This optional provider registers ChangoFilm using OpenAI's official
 [Sign in with ChatGPT flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in).
 Select **OpenAI - ChatGPT (Native OAuth)** explicitly in LLM settings. Its
 configuration ID is `openai_chatgpt`; it uses the authorized ChatGPT plan through
@@ -26,7 +26,7 @@ Native sign-in, cancellation and disconnect never modify device-flow credentials
 
 ## Local sign-in
 
-1. Run MoneyPrinterTurbo and select **OpenAI - ChatGPT (Native OAuth)**.
+1. Run ChangoFilm and select **OpenAI - ChatGPT (Native OAuth)**.
 2. Choose **Continue with ChatGPT**, then open the OpenAI authorization page.
 3. Sign in and authorize this application. The browser returns to a temporary
    `http://127.0.0.1:<port>/auth/callback` listener owned by the Python process.
@@ -48,7 +48,7 @@ attempt uses fresh state, nonce and PKCE. ID-token signatures, issuer, audience,
 expiry, nonce and returning identity are verified. Inference requires the granted
 `chatgpt.tokens.use.direct` scope.
 
-The stores under the runtime root (`MPT_HOME` when set) are separate:
+The stores under the runtime root (`CHANGOFILM_HOME` when set) are separate:
 
 | Provider | Credential file | Model configuration |
 | --- | --- | --- |

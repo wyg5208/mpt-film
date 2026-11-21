@@ -47,13 +47,13 @@ def test_delete_does_not_hide_errors_or_fall_back_to_unsafe_delete(error):
 
 @pytest.fixture
 def native_state():
-    host = os.getenv("MPT_TEST_REDIS_HOST")
+    host = os.getenv("CHANGOFILM_TEST_REDIS_HOST")
     if not host:
-        pytest.skip("MPT_TEST_REDIS_HOST not set")
+        pytest.skip("CHANGOFILM_TEST_REDIS_HOST not set")
     state = RedisState(
         host=host,
-        port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")),
-        db=int(os.getenv("MPT_TEST_REDIS_DB", "15")),
+        port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")),
+        db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")),
     )
     key = f"ci-delete-owner-{uuid4()}"
     try:

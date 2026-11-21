@@ -39,7 +39,7 @@ text_zh = """
 
 voice_rate=1.0
 voice_volume=1.0
-RUN_INTEGRATION_TESTS = os.environ.get("MPT_RUN_INTEGRATION_TESTS", "").lower() in {
+RUN_INTEGRATION_TESTS = os.environ.get("CHANGOFILM_RUN_INTEGRATION_TESTS", "").lower() in {
     "1",
     "true",
     "yes",
@@ -228,7 +228,7 @@ class TestVoiceService(unittest.TestCase):
 
     @unittest.skipUnless(
         RUN_INTEGRATION_TESTS,
-        "MPT_RUN_INTEGRATION_TESTS not set",
+        "CHANGOFILM_RUN_INTEGRATION_TESTS not set",
     )
     def test_siliconflow(self):
         # SiliconFlow 的 API Key 存在 [siliconflow].api_key 中，运行时代码也是从
@@ -266,7 +266,7 @@ class TestVoiceService(unittest.TestCase):
     
     @unittest.skipUnless(
         RUN_INTEGRATION_TESTS,
-        "MPT_RUN_INTEGRATION_TESTS not set",
+        "CHANGOFILM_RUN_INTEGRATION_TESTS not set",
     )
     def test_azure_tts_v1(self):
         voice_name = "zh-CN-XiaoyiNeural-Female"
@@ -426,7 +426,7 @@ class TestVoiceService(unittest.TestCase):
 
     @unittest.skipUnless(
         RUN_INTEGRATION_TESTS,
-        "MPT_RUN_INTEGRATION_TESTS not set",
+        "CHANGOFILM_RUN_INTEGRATION_TESTS not set",
     )
     def test_azure_tts_v2(self):
         if not vs.config.azure.get("speech_key") or not vs.config.azure.get("speech_region"):

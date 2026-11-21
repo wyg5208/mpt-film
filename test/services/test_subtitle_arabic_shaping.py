@@ -255,7 +255,7 @@ def test_arabic_words_are_never_split_across_lines():
 
 
 def test_non_arabic_wrapping_gets_no_direction_marks():
-    for text in ("Hello world from MoneyPrinterTurbo " * 4, "你好世界，这是一个很长的中文字幕句子。" * 3):
+    for text in ("Hello world from ChangoFilm " * 4, "你好世界，这是一个很长的中文字幕句子。" * 3):
         wrapped, _ = wrap_text(text, 300, font=DEFAULT_FONT, fontsize=48)
         assert RLM not in wrapped and LRM not in wrapped
 

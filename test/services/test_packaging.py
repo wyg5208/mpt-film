@@ -13,6 +13,7 @@ from app import launcher, paths
 
 
 def test_source_checkout_keeps_legacy_paths(monkeypatch):
+    monkeypatch.delenv("CHANGOFILM_HOME", raising=False)
     monkeypatch.delenv("MPT_HOME", raising=False)
     assert paths.runtime_root() == paths.SOURCE_ROOT
     assert paths.resource_directory("fonts") == paths.SOURCE_ROOT / "resource/fonts"
@@ -23,24 +24,72 @@ def test_installed_data_is_in_user_directory(monkeypatch, tmp_path, platform):
     monkeypatch.setattr(paths, "is_source_checkout", lambda: False)
     monkeypatch.setattr(paths.sys, "platform", platform)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    for key in ("MPT_HOME", "LOCALAPPDATA", "XDG_DATA_HOME"):
+    for key in ("CHANGOFILM_HOME", "MPT_HOME", "LOCALAPPDATA", "XDG_DATA_HOME"):
         monkeypatch.delenv(key, raising=False)
     expected = {
-        "darwin": tmp_path / "Library/Application Support/MoneyPrinterTurbo",
-        "win32": tmp_path / "AppData/Local/MoneyPrinterTurbo",
-        "linux": tmp_path / ".local/share/MoneyPrinterTurbo",
+        "darwin": tmp_path / "Library/Application Support/ChangoFilm",
+        "win32": tmp_path / "AppData/Local/ChangoFilm",
+        "linux": tmp_path / ".local/share/ChangoFilm",
     }
     assert paths.runtime_root() == expected[platform]
 
 
 def test_explicit_home_and_linux_xdg_directory(monkeypatch, tmp_path):
-    monkeypatch.setenv("MPT_HOME", str(tmp_path / "explicit"))
+    monkeypatch.setenv("CHANGOFILM_HOME", str(tmp_path / "explicit"))
     assert paths.runtime_root() == tmp_path / "explicit"
-    monkeypatch.delenv("MPT_HOME")
+    monkeypatch.delenv("CHANGOFILM_HOME")
+    monkeypatch.delenv("MPT_HOME", raising=False)
     monkeypatch.setattr(paths, "is_source_checkout", lambda: False)
     monkeypatch.setattr(paths.sys, "platform", "linux")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    assert paths.runtime_root() == tmp_path / "xdg/MoneyPrinterTurbo"
+    assert paths.runtime_root() == tmp_path / "xdg/ChangoFilm"
+
+
+def test_legacy_mpt_home_env_still_accepted(monkeypatch, tmp_path):
+    """品牌升级后旧 MPT_HOME 仍可用，新 CHANGOFILM_HOME 优先。"""
+    monkeypatch.delenv("CHANGOFILM_HOME", raising=False)
+    monkeypatch.setenv("MPT_HOME", str(tmp_path / "legacy-home"))
+    assert paths.runtime_root() == tmp_path / "legacy-home"
+    monkeypatch.setenv("CHANGOFILM_HOME", str(tmp_path / "new-home"))
+    assert paths.runtime_root() == tmp_path / "new-home"
+
+
+def test_brand_data_dir_migrates_legacy_directory(tmp_path):
+    legacy = tmp_path / "MoneyPrinterTurbo"
+    (legacy / "tasks").mkdir(parents=True)
+    (legacy / "tasks" / "params.json").write_text("{}", encoding="utf-8")
+    target = paths._brand_data_dir(tmp_path)
+    assert target == tmp_path / "ChangoFilm"
+    assert not legacy.exists()
+    assert (target / "tasks" / "params.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_brand_data_dir_prefers_existing_new_directory(tmp_path):
+    legacy = tmp_path / "MoneyPrinterTurbo"
+    legacy.mkdir()
+    (legacy / "old.txt").write_text("old", encoding="utf-8")
+    target = tmp_path / "ChangoFilm"
+    target.mkdir()
+    (target / "new.txt").write_text("new", encoding="utf-8")
+    assert paths._brand_data_dir(tmp_path) == target
+    assert (target / "new.txt").read_text(encoding="utf-8") == "new"
+    assert (legacy / "old.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_brand_data_dir_copy_fallback_keeps_legacy_backup(monkeypatch, tmp_path):
+    legacy = tmp_path / "MoneyPrinterTurbo"
+    legacy.mkdir()
+    (legacy / "config.toml").write_text("data", encoding="utf-8")
+
+    def _fail_rename(src, dst):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(paths.os, "rename", _fail_rename)
+    target = paths._brand_data_dir(tmp_path)
+    assert target == tmp_path / "ChangoFilm"
+    assert (target / "config.toml").read_text(encoding="utf-8") == "data"
+    # 复制降级时旧目录保留为备份，不删除用户数据。
+    assert (legacy / "config.toml").read_text(encoding="utf-8") == "data"
 
 
 def test_concurrent_resource_seeding_preserves_existing_files(monkeypatch, tmp_path):
@@ -55,7 +104,7 @@ def test_concurrent_resource_seeding_preserves_existing_files(monkeypatch, tmp_p
     (target / "custom.ttf").write_bytes(b"user font")
     monkeypatch.setattr(paths, "is_source_checkout", lambda: False)
     monkeypatch.setattr(paths, "BUNDLED_ROOT", bundle)
-    monkeypatch.setenv("MPT_HOME", str(home))
+    monkeypatch.setenv("CHANGOFILM_HOME", str(home))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: paths.resource_directory("fonts"), range(8)))
     assert results == [target] * 8
@@ -104,7 +153,7 @@ def test_sdist_and_wheel_allowlists_exclude_private_files():
 
     project = tomllib.loads((paths.SOURCE_ROOT / "pyproject.toml").read_text())
     build = project["tool"]["hatch"]["build"]["targets"]
-    assert project["project"]["scripts"]["mpt"] == "app.launcher:main"
+    assert project["project"]["scripts"]["changofilm"] == "app.launcher:main"
     assert build["wheel"]["force-include"]["cli.py"] == "app/cli.py"
     for entry in build["sdist"]["include"]:
         assert entry not in ("/config.toml", "/storage", "/AGENTS.md", "/.env")
@@ -114,7 +163,7 @@ def test_sdist_and_wheel_allowlists_exclude_private_files():
 
 def test_cli_stdout_contains_only_json(tmp_path):
     env = os.environ.copy()
-    env["MPT_HOME"] = str(tmp_path / "data")
+    env["CHANGOFILM_HOME"] = str(tmp_path / "data")
     result = subprocess.run(
         [sys.executable, str(paths.SOURCE_ROOT / "cli.py"), "--video-script", "本地测试",
          "--stop-at", "script"],

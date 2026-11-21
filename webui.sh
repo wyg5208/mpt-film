@@ -13,8 +13,8 @@ export PYTHONPATH="$CURRENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 # 0.0.0.0 只能表示“监听所有网卡”，不适合作为浏览器访问地址。
 # macOS/Linux 下浏览器打开 http://0.0.0.0:8501 可能会经过代理或网关，
 # 最终出现 502。默认绑定并打开 127.0.0.1，与 Windows 启动脚本保持一致。
-MPT_WEBUI_HOST="${MPT_WEBUI_HOST:-127.0.0.1}"
-MPT_WEBUI_PORT="${MPT_WEBUI_PORT:-8501}"
+CHANGOFILM_WEBUI_HOST="${CHANGOFILM_WEBUI_HOST:-127.0.0.1}"
+CHANGOFILM_WEBUI_PORT="${CHANGOFILM_WEBUI_PORT:-8501}"
 
 if [ -x "$CURRENT_DIR/.venv/bin/python" ]; then
   set -- "$CURRENT_DIR/.venv/bin/python" -m streamlit
@@ -32,7 +32,7 @@ else
 fi
 
 find_available_port() {
-  WEBUI_HOST="$MPT_WEBUI_HOST" WEBUI_PORT="$MPT_WEBUI_PORT" "$@" - <<'PY' 2>/dev/null
+  WEBUI_HOST="$CHANGOFILM_WEBUI_HOST" WEBUI_PORT="$CHANGOFILM_WEBUI_PORT" "$@" - <<'PY' 2>/dev/null
 import os
 import socket
 import sys
@@ -58,21 +58,21 @@ PY
 SELECTED_WEBUI_PORT=$(find_port)
 
 if [ -z "$SELECTED_WEBUI_PORT" ]; then
-  echo "***** No available WebUI port found in 8501-8599 for $MPT_WEBUI_HOST. *****"
+  echo "***** No available WebUI port found in 8501-8599 for $CHANGOFILM_WEBUI_HOST. *****"
   exit 1
 fi
 
-if [ "$SELECTED_WEBUI_PORT" != "$MPT_WEBUI_PORT" ]; then
-  echo "***** Port $MPT_WEBUI_PORT is unavailable, using $SELECTED_WEBUI_PORT instead. *****"
+if [ "$SELECTED_WEBUI_PORT" != "$CHANGOFILM_WEBUI_PORT" ]; then
+  echo "***** Port $CHANGOFILM_WEBUI_PORT is unavailable, using $SELECTED_WEBUI_PORT instead. *****"
 fi
 
-MPT_WEBUI_PORT="$SELECTED_WEBUI_PORT"
+CHANGOFILM_WEBUI_PORT="$SELECTED_WEBUI_PORT"
 
-echo "***** WebUI address: http://$MPT_WEBUI_HOST:$MPT_WEBUI_PORT *****"
+echo "***** WebUI address: http://$CHANGOFILM_WEBUI_HOST:$CHANGOFILM_WEBUI_PORT *****"
 "$@" run "$CURRENT_DIR/webui/Main.py" \
-  --server.address="$MPT_WEBUI_HOST" \
-  --server.port="$MPT_WEBUI_PORT" \
-  --browser.serverAddress="$MPT_WEBUI_HOST" \
+  --server.address="$CHANGOFILM_WEBUI_HOST" \
+  --server.port="$CHANGOFILM_WEBUI_PORT" \
+  --browser.serverAddress="$CHANGOFILM_WEBUI_HOST" \
   --browser.gatherUsageStats=False \
   --client.toolbarMode=minimal \
   --logger.hideWelcomeMessage=True \

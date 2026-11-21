@@ -7,10 +7,10 @@ from app.services.state import RedisState
 
 @pytest.fixture
 def redis_state():
-    host = os.getenv("MPT_TEST_REDIS_HOST")
+    host = os.getenv("CHANGOFILM_TEST_REDIS_HOST")
     if not host:
-        pytest.skip("MPT_TEST_REDIS_HOST not set")
-    return RedisState(host=host, port=int(os.getenv("MPT_TEST_REDIS_PORT", "6379")), db=int(os.getenv("MPT_TEST_REDIS_DB", "15")))
+        pytest.skip("CHANGOFILM_TEST_REDIS_HOST not set")
+    return RedisState(host=host, port=int(os.getenv("CHANGOFILM_TEST_REDIS_PORT", "6379")), db=int(os.getenv("CHANGOFILM_TEST_REDIS_DB", "15")))
 
 
 @pytest.mark.parametrize("kind", ["foreign_hash", "queue", "mismatched_marker"])

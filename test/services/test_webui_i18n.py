@@ -440,8 +440,8 @@ class TestWebuiI18n(unittest.TestCase):
                 )
                 self.assertEqual(_markdown_urls(rendered), expected_urls)
 
-    def test_metaso_api_key_label_keeps_mpt_referral_link(self):
-        """秘塔 Key 获取入口必须保留 MPT 追踪参数，避免赞助转化链路失效。"""
+    def test_metaso_api_key_label_keeps_referral_link(self):
+        """秘塔 Key 获取入口必须保留 legacy 追踪参数（?s=MPT），避免赞助转化链路失效。"""
         expected_url = "https://metaso.cn/minimax-h3/?s=MPT"
 
         for locale in ("zh", "en"):

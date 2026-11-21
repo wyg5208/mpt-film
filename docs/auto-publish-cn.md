@@ -1,6 +1,6 @@
 # Auto-Publishing to Domestic Platforms
 
-MoneyPrinterTurbo can automatically publish generated videos to **Douyin (抖音),
+ChangoFilm can automatically publish generated videos to **Douyin (抖音),
 WeChat Channels (视频号), Xiaohongshu (小红书) and Bilibili (B站)** through the
 free, MIT-licensed [social-auto-upload](https://github.com/dreammis/social-auto-upload)
 CLI (`sau`). Kuaishou, Weibo and Baijiahao are optional extra platforms.
@@ -19,7 +19,7 @@ restoration, browser identity, QR login and toolchain-download pitfalls), see
 
 ## 1. Install social-auto-upload (one-time)
 
-Install it in its own environment — MoneyPrinterTurbo calls it as an external
+Install it in its own environment — ChangoFilm calls it as an external
 subprocess and gains no new Python dependencies.
 
 ```bash
@@ -61,7 +61,7 @@ version/revision are printed by `patchright install chromium --dry-run`.
 When browsers live outside the default location, either fill the **Browser
 Directory (PLAYWRIGHT_BROWSERS_PATH)** field under Settings → Auto-Publish →
 Advanced, or set the `PLAYWRIGHT_BROWSERS_PATH` environment variable in the
-environment that starts MoneyPrinterTurbo. Publishing and session checks inject
+environment that starts ChangoFilm. Publishing and session checks inject
 the variable into the `sau` subprocess automatically, with the priority
 **UI field > system environment variable > bundled `opensources/pw-browsers`**
 (used when that folder exists), so no `setx` or WebUI restart is needed for
@@ -89,7 +89,7 @@ sau douyin check --account default
 The WebUI publish settings also provide a **Check login sessions** button that
 runs these checks and shows the exact re-login command for any expired session.
 
-## 3. Configure MoneyPrinterTurbo
+## 3. Configure ChangoFilm
 
 Open **Settings → Auto-Publish**. The domestic section is the primary area:
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 
-spec = importlib.util.spec_from_file_location("mpt_prepared_script_fixture", Path(__file__).parents[2] / "docs" / "skill" / "mpt_agent.py")
+spec = importlib.util.spec_from_file_location("changofilm_prepared_script_fixture", Path(__file__).parents[2] / "docs" / "skill" / "changofilm_agent.py")
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
 

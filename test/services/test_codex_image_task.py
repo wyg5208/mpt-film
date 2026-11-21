@@ -139,12 +139,12 @@ def test_cli_and_bootstrap_accept_codex_without_an_api_key(tmp_path, monkeypatch
     import cli
     args = cli.parse_args(["--video-subject", "Pyramids", "--video-source", "codex_image", "--image-motion", "static"])
     assert cli.build_video_params(args).video_source == "codex_image"
-    spec = importlib.util.spec_from_file_location("image_bootstrap", Path(__file__).resolve().parents[2] / "docs/skill/mpt_agent.py")
+    spec = importlib.util.spec_from_file_location("image_bootstrap", Path(__file__).resolve().parents[2] / "docs/skill/changofilm_agent.py")
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
     config_file = tmp_path / "config.toml"
     config_file.write_text('llm_provider="ollama"\ncodex_image_model_name="responses-model"\n', encoding="utf-8")
-    monkeypatch.setenv("MPT_HOME", str(tmp_path))
+    monkeypatch.setenv("CHANGOFILM_HOME", str(tmp_path))
     provider, missing = helper.missing_config(config_file, ["--video-source", "codex_image"])
     assert missing == ["codex_sign_in"]
     auth = tmp_path / "storage/auth/openai_codex.bin"
