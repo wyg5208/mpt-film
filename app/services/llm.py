@@ -16,6 +16,7 @@ from openai.types.chat import ChatCompletion
 
 from app.config import config
 from app.models.llm_provider import DEFAULT_LLM_PROVIDER_ID, get_llm_provider
+from app.models.schema import ScriptPlan, estimate_scene_duration
 from app.utils import utils
 from app.utils.request_logging import trace_sdk_call
 
@@ -317,6 +318,7 @@ def _generate_response(
     app_config=None,
     request_timeout: float | None = None,
     max_retries: int | None = None,
+    json_mode: bool = False,
 ) -> str:
     sdk_client = None
     sdk_stream = None
@@ -774,9 +776,16 @@ def _generate_response(
             **_sdk_transport_options(request_timeout, max_retries),
         )
 
+        create_kwargs = {}
+        if json_mode and llm_provider == "ollama":
+            # Ollama 的 OpenAI-compatible 端点把 response_format json_object
+            # 映射为原生 format:"json"，约束结构化输出，降低本地模型
+            # 畸形 JSON 概率。其它 provider 不传该参数，行为零变化。
+            create_kwargs["response_format"] = {"type": "json_object"}
         response = trace_sdk_call(
             llm_provider, base_url, client.chat.completions.create,
-            model=model_name, messages=[{"role": "user", "content": prompt}]
+            model=model_name, messages=[{"role": "user", "content": prompt}],
+            **create_kwargs,
         )
         if response:
             if isinstance(response, ChatCompletion):
@@ -1035,6 +1044,289 @@ def _extract_embedded_json(text: str, opening: str):
             continue
         return value
     raise ValueError("response contains no complete JSON value")
+
+
+# ---------------------------
+# ----- SCRIPT PLAN GENERATION (脚本方案专业模式，B2) -----
+# ---------------------------
+
+_PLAN_RELATIONS = (
+    "establish", "continue", "contrast", "escalate", "match_cut", "unknown"
+)
+_PLAN_TRANSITIONS = ("none", "fade", "slide", "zoom", "match_cut")
+
+
+def build_script_plan_prompt(
+    video_subject: str,
+    language: str = "",
+    video_script: str = "",
+    target_duration: float = 60.0,
+    scene_count: int | None = None,
+    aspect: str = "9:16",
+    video_script_prompt: str = "",
+    series_context: dict | None = None,
+) -> str:
+    """构造分镜方案 prompt：只要求模型输出语义字段，机械字段由
+    _normalize_llm_plan 补齐，降低本地模型畸形 JSON 的概率。"""
+    video_script_prompt = _limit_script_text(
+        video_script_prompt, MAX_SCRIPT_PROMPT_LENGTH, "video_script_prompt"
+    )
+    if scene_count is None:
+        # 默认每场景 ≈10s（旁白驱动），限制在 3–12 段避免极端输出。
+        scene_count = max(3, min(12, round(float(target_duration) / 10.0)))
+    scene_count = max(2, min(20, int(scene_count)))
+
+    prompt = f"""
+# Role: Short-Drama Storyboard Writer
+
+## Goals:
+Turn the video subject into a scene-by-scene storyboard plan for a {aspect} short video.
+Return ONE JSON object and nothing else.
+
+## JSON shape (exact keys):
+{{
+  "title": "short film title",
+  "logline": "one-sentence story summary",
+  "style": {{"tone": "...", "palette": "...", "camera": "..."}},
+  "scenes": [
+    {{
+      "narration": "voiceover text for this scene",
+      "visual": "what the camera sees (AI prompt base)",
+      "keywords": ["english stock-footage term", "..."],
+      "relation_to_prev": "establish|continue|contrast|escalate|match_cut",
+      "relation_note": "why this scene follows the previous one",
+      "transition_to_next": "none|fade|slide|zoom|match_cut"
+    }}
+  ]
+}}
+
+## Constrains:
+1. exactly {scene_count} scenes, ordered; the first scene uses relation_to_prev "establish".
+2. narration is spoken voiceover only: no markdown, no stage directions, no speaker labels.
+3. total narration length should fit ~{float(target_duration):.0f} seconds of speech
+   (Chinese ≈ 4.2 characters/second, English ≈ 2.5 words/second).
+4. each scene must connect to the previous one; relation_note explains the connection.
+5. keywords: 2-4 English search terms per scene, 1-3 words each, matching that scene's visual.
+6. do not reference this prompt; output raw JSON only, no code fence.
+7. respond in the same language as the video subject for title/logline/narration/visual.
+""".strip()
+
+    if video_script:
+        prompt += f"""
+
+# Existing Script (split it into scenes, keep every sentence verbatim):
+{video_script}
+""".rstrip()
+    prompt += f"""
+
+# Initialization:
+- video subject: {video_subject}
+- aspect: {aspect}
+""".rstrip()
+    if language:
+        prompt += f"\n- language: {language}"
+    if video_script_prompt:
+        prompt += f"""
+
+# Additional User Requirements:
+{video_script_prompt}
+""".rstrip()
+    if series_context:
+        # 系列上下文：风格圣经 + 角色外貌 + 上集悬念，保证跨集连贯。
+        style_bible = series_context.get("style_bible") or {}
+        characters = series_context.get("characters") or []
+        previous_hook = series_context.get("previous_hook") or ""
+        if style_bible:
+            prompt += "\n\n# Series Style Bible (keep consistent):\n" + json.dumps(
+                style_bible, ensure_ascii=False
+            )
+        if characters:
+            lines = [
+                f"- {c.get('name', c.get('id', '?'))}: {c.get('appearance_prompt', '')}"
+                for c in characters
+                if isinstance(c, dict)
+            ]
+            if lines:
+                prompt += (
+                    "\n\n# Series Characters (keep appearance consistent):\n"
+                    + "\n".join(lines)
+                )
+        if previous_hook:
+            prompt += (
+                "\n\n# Previous Episode Cliffhanger (continue from it):\n"
+                + str(previous_hook)
+            )
+    return prompt
+
+
+def _normalize_llm_plan(
+    payload,
+    *,
+    target_duration: float,
+    aspect: str,
+    voice_name: str,
+    llm_provider: str,
+    llm_model: str,
+    series_id: str | None = None,
+    episode_id: str | None = None,
+) -> ScriptPlan:
+    """把 LLM 的语义字段 payload 补齐为完整 ScriptPlan（fail-closed 校验）。
+
+    LLM 路径对未知键宽容（本地模型偶发多余字段），但类型/枚举/非空
+    约束严格；导入路径（ScriptPlan.model_validate）则拒绝一切未知字段。
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("plan payload must be a JSON object")
+    raw_scenes = payload.get("scenes")
+    if not isinstance(raw_scenes, list) or not raw_scenes:
+        raise ValueError("plan payload must contain a non-empty scenes array")
+
+    scenes = []
+    for index, raw in enumerate(raw_scenes):
+        if not isinstance(raw, dict):
+            raise ValueError(f"scene {index + 1} must be a JSON object")
+        narration = str(raw.get("narration") or "").strip()
+        if not narration:
+            raise ValueError(f"scene {index + 1} has empty narration")
+        keywords = [
+            str(term).strip()
+            for term in (raw.get("keywords") or [])
+            if isinstance(term, str) and str(term).strip()
+        ]
+        relation = raw.get("relation_to_prev")
+        if relation not in _PLAN_RELATIONS:
+            relation = "unknown"
+        transition = raw.get("transition_to_next")
+        if transition not in _PLAN_TRANSITIONS:
+            transition = "none"
+        scenes.append(
+            {
+                "id": f"s{index + 1}",
+                "order": index + 1,
+                "narration": narration,
+                "est_duration": estimate_scene_duration(narration),
+                "visual": str(raw.get("visual") or "").strip(),
+                "keywords": keywords,
+                "relation_to_prev": relation,
+                "relation_note": str(raw.get("relation_note") or "").strip(),
+                "transition_to_next": transition,
+                # 新生成的方案默认库存源；本地/云端引擎由用户在方案页逐段选择。
+                "engine": "stock",
+                "boundary_health": "unknown",
+            }
+        )
+
+    raw_style = payload.get("style")
+    style = raw_style if isinstance(raw_style, dict) else {}
+    plan = ScriptPlan.model_validate(
+        {
+            "title": str(payload.get("title") or "").strip(),
+            "logline": str(payload.get("logline") or "").strip(),
+            "style": {
+                "tone": str(style.get("tone") or ""),
+                "palette": str(style.get("palette") or ""),
+                "camera": str(style.get("camera") or ""),
+            },
+            "target_duration": float(target_duration),
+            "aspect": aspect if aspect in ("9:16", "16:9") else "9:16",
+            "voice": {"name": voice_name or "zh-CN-XiaoxiaoNeural"},
+            "llm": {"provider": llm_provider, "model": llm_model},
+            "series_id": series_id,
+            "episode_id": episode_id,
+            "scenes": scenes,
+        }
+    )
+    return plan
+
+
+def generate_script_plan(
+    video_subject: str,
+    language: str = "",
+    video_script: str = "",
+    target_duration: float = 60.0,
+    scene_count: int | None = None,
+    aspect: str = "9:16",
+    voice_name: str = "",
+    video_script_prompt: str = "",
+    series_context: dict | None = None,
+    series_id: str | None = None,
+    episode_id: str | None = None,
+    app_config=None,
+) -> dict | None:
+    """生成分镜脚本方案。失败重试后返回 None，由调用方降级为 legacy
+    扁平脚本（快速模式零影响）。默认 provider 沿用 config 的 llm_provider，
+    推荐本地 ollama；Ollama 路径传 json_mode 约束结构化输出。"""
+    runtime_app_config = app_config if app_config is not None else config.app
+    provider_id = str(
+        runtime_app_config.get("llm_provider", DEFAULT_LLM_PROVIDER_ID)
+    ).lower()
+    provider = get_llm_provider(provider_id)
+    llm_model = ""
+    if provider is not None:
+        llm_model = provider.resolve_model_name(
+            runtime_app_config.get(provider.config_key("model_name"), "")
+        )
+
+    prompt = build_script_plan_prompt(
+        video_subject=video_subject,
+        language=language,
+        video_script=video_script,
+        target_duration=target_duration,
+        scene_count=scene_count,
+        aspect=aspect,
+        video_script_prompt=video_script_prompt,
+        series_context=series_context,
+    )
+    logger.info(
+        "generating script plan: "
+        f"subject={video_subject}, target_duration={target_duration}, "
+        f"scene_count={scene_count}, provider={provider_id}, model={llm_model}"
+    )
+
+    feedback = ""
+    for i in range(_max_retries):
+        try:
+            response = _generate_response(
+                prompt=prompt + feedback,
+                app_config=app_config,
+                json_mode=True,
+            )
+            if isinstance(response, str) and response.startswith("Error: "):
+                raise ValueError(response)
+            if not response:
+                raise ValueError("llm returned an empty response")
+            text = _strip_code_fence(response)
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = _extract_embedded_json(text, "{")
+            plan = _normalize_llm_plan(
+                payload,
+                target_duration=target_duration,
+                aspect=aspect,
+                voice_name=voice_name,
+                llm_provider=provider_id,
+                llm_model=llm_model,
+                series_id=series_id,
+                episode_id=episode_id,
+            )
+            logger.success(
+                f"script plan generated: {len(plan.scenes)} scenes, "
+                f"estimated {plan.estimated_total_duration()}s"
+            )
+            return plan.model_dump(by_alias=True)
+        except Exception as e:
+            logger.error(f"failed to generate script plan: {e}")
+            # 修复重试：把校验错误反馈给模型，要求只返回修正后的 JSON。
+            feedback = (
+                "\n\n# Previous attempt failed validation:\n"
+                f"{str(e)[:500]}\n"
+                "Return the corrected JSON object only, no prose."
+            )
+        if i < _max_retries - 1:
+            logger.warning(f"failed to generate script plan, trying again... {i + 1}")
+    logger.error("failed to generate script plan after retries; fallback to legacy script")
+    return None
 
 
 def generate_terms(

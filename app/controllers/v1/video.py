@@ -232,6 +232,24 @@ def create_audio(
     return create_task(request, body, stop_at="audio")
 
 
+@router.post(
+    "/script-plans",
+    response_model=TaskResponse,
+    summary="Generate a script plan (storyboard) only",
+    description=(
+        "Professional opt-in mode: runs the script stage then generates a "
+        "scene-by-scene ScriptPlan (script-plan.json artifact). On plan "
+        "generation failure the task still completes with the legacy flat "
+        "script and a script_plan_fallback warning; the fast pipeline is "
+        "unaffected."
+    ),
+)
+def create_script_plan(
+    background_tasks: BackgroundTasks, request: Request, body: TaskVideoRequest
+):
+    return create_task(request, body, stop_at="plan")
+
+
 def create_task(
     request: Request,
     body: Union[TaskVideoRequest, SubtitleRequest, AudioRequest],

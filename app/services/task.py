@@ -15,23 +15,33 @@ from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import VideoConcatMode, VideoParams
+from app.models.schema import (
+    PLAN_DURATION_TOLERANCE,
+    ScriptPlan,
+    VideoConcatMode,
+    VideoParams,
+)
 from app.services import bgm as bgm_service
 from app.services import (
     codex_image,
     codex_oauth,
+    comfy_local,
     determinism,
+    dialogue_timeline,
     elevenlabs_music,
     generation_progress,
     infistar_video,
     jalapeno_video,
+    keyframe_chain,
     llm,
     loomloom,
     material,
     metaso_minimax,
     muapi,
     ofox,
+    plan_compiler,
     review,
+    series_store,
     sonilo,
     subtitle,
     task_artifacts,
@@ -53,7 +63,7 @@ from app.utils.subtitle_writer import staged_subtitle_file
 # 立即进入完成状态。
 _cross_post_executor = ThreadPoolExecutor(
     max_workers=2,
-    thread_name_prefix="mpt-cross-post",
+    thread_name_prefix="changofilm-cross-post",
 )
 _cross_post_max_pending_tasks = max(
     1,
@@ -118,6 +128,7 @@ _SUPPORTED_VIDEO_SOURCES = frozenset({
     "pexels", "pixabay", "coverr", "local", "wavespeed",
     "volcengine_seedance", "ofox", "metaso_minimax", "muapi",
     "loomloom", "openai_image", "codex_image", "infistar", "jalapeno",
+    "pexels_image", "pixabay_image",
 })
 
 
@@ -395,6 +406,28 @@ def generate_script(task_id, params):
         return None
 
     return video_script
+
+
+def generate_plan(task_id, params, video_script):
+    """脚本方案阶段（stop_at="plan"）：基于文案生成分镜方案。
+
+    失败返回 None，由主流程降级为 legacy 扁平脚本（快速模式零影响）。
+    方案是 opt-in 产物：只有显式 stop_at="plan" 才会走到这里。
+    """
+    logger.info("\n\n## generating script plan")
+    aspect = params.video_aspect.value if params.video_aspect else "9:16"
+    if aspect not in ("9:16", "16:9"):
+        aspect = "9:16"
+    return llm.generate_script_plan(
+        video_subject=params.video_subject,
+        language=params.video_language,
+        video_script=utils.remove_pause_tags(video_script),
+        target_duration=params.plan_target_duration or 60.0,
+        scene_count=params.plan_scene_count,
+        aspect=aspect,
+        voice_name=params.voice_name or "",
+        video_script_prompt=params.video_script_prompt,
+    )
 
 
 def generate_terms(task_id, params, video_script):
@@ -1076,14 +1109,64 @@ def _get_material_source_groups(task_id: str, video_paths: list[str]) -> dict[st
         return {}
 
 
+def _plan_review_boundaries(plan_context: dict | None) -> list | None:
+    """方案切点清单（B5 边界审查）：每个场景窗的结束时刻即切点，
+    携带场景 order、共享边界帧标记与转场遮蔽信息。无方案返回 None。"""
+    if not plan_context:
+        return None
+    plan = plan_context["plan"]
+    windows = plan_context["windows"]
+    scenes = {scene.id: scene for scene in plan.scenes}
+    boundaries = []
+    for index, window in enumerate(windows[:-1]):
+        scene = scenes.get(window["scene_id"])
+        next_scene = scenes.get(windows[index + 1]["scene_id"])
+        boundaries.append({
+            "scene_id": window["scene_id"],
+            "order": scene.order if scene else index + 1,
+            "cut": window["end"],
+            "shared": bool(next_scene and next_scene.keyframe.shared_with_prev),
+            "transition": scene.transition_to_next if scene else "none",
+        })
+    return boundaries or None
+
+
 def generate_final_videos(
     task_id, params, downloaded_videos, audio_file, subtitle_path, audio_duration,
     *, partial_results: dict | None = None, review_mode: str | None = None,
+    plan_context: dict | None = None,
 ):
     """Record completed outputs even if a later clip raises before returning."""
     final_video_paths = []
     combined_video_paths = []
     warnings = []
+    # 方案驱动（B4）：单条成片按场景时间线渲染，批量语义不适用；
+    # 无方案时 video_count 与下方所有编排分支保持原样。
+    video_count = 1 if plan_context is not None else params.video_count
+    timeline = None
+    if plan_context is not None:
+        timeline = plan_compiler.compile_timeline(
+            plan_context["plan"],
+            plan_context["bindings"],
+            plan_context["windows"],
+            clip_speed=params.video_clip_speed or 1.0,
+        )
+        measured_total = round(
+            sum(window["duration"] for window in plan_context["windows"]), 3
+        )
+        target_duration = plan_context["plan"].target_duration
+        if target_duration > 0:
+            deviation = abs(measured_total - target_duration) / target_duration
+            if deviation > PLAN_DURATION_TOLERANCE:
+                warnings.append({
+                    "code": "plan_duration_out_of_tolerance",
+                    "message": (
+                        f"measured total {measured_total:.1f}s deviates from target "
+                        f"{target_duration:.1f}s by {deviation:.0%} (tolerance ±10%)"
+                    ),
+                    "measured_total": measured_total,
+                    "target_duration": target_duration,
+                })
     if partial_results is not None:
         # The caller owns this snapshot so it can report completed files even
         # when the state backend fails during a progress/checkpoint write.
@@ -1091,7 +1174,7 @@ def generate_final_videos(
             videos=final_video_paths, combined_videos=combined_video_paths,
             warnings=warnings,
         )
-    allocate_batch_materials = params.video_count > 1 and params.video_source in {
+    allocate_batch_materials = video_count > 1 and params.video_source in {
         "pexels", "pixabay", "coverr", "local"
     }
     source_usage = {}
@@ -1110,7 +1193,7 @@ def generate_final_videos(
     # Matching preserves keyword order; batch allocation varies each keyword's candidates.
     if params.match_materials_to_script:
         video_concat_mode = VideoConcatMode.sequential
-    elif params.video_count == 1:
+    elif video_count == 1:
         video_concat_mode = params.video_concat_mode
     else:
         video_concat_mode = VideoConcatMode.random
@@ -1122,11 +1205,11 @@ def generate_final_videos(
     logger.info(
         f"video seed: {effective_seed}, "
         f"explicit={getattr(params, 'video_seed', None) is not None}, "
-        f"count={params.video_count}"
+        f"count={video_count}"
     )
 
     _progress = 50
-    for i in range(params.video_count):
+    for i in range(video_count):
         index = i + 1
         if partial_results is not None:
             partial_results["failed_video_index"] = index
@@ -1145,7 +1228,7 @@ def generate_final_videos(
         )
         # 每条视频占 50% 进度中的一份，合成与最终编码各占一半。片段处理是
         # 合成里最耗时的部分，逐段推进这一半的进度。
-        combine_share = 50 / params.video_count / 2
+        combine_share = 50 / video_count / 2
         video.combine_videos(
             combined_video_path=combined_video_path,
             video_paths=downloaded_videos,
@@ -1159,6 +1242,7 @@ def generate_final_videos(
             clip_speed=params.video_clip_speed,
             seed=effective_seed,
             video_index=index,
+            timeline=timeline,
             progress_callback=_stage_progress_reporter(
                 task_id, _progress, _progress + combine_share
             ),
@@ -1186,7 +1270,7 @@ def generate_final_videos(
                     "count": len(reused_sources),
                 })
 
-        _progress += 50 / params.video_count / 2
+        _progress += 50 / video_count / 2
         sm.state.update_task(task_id, progress=_progress)
 
         final_video_path = path.join(utils.task_dir(task_id), f"final-{index}.mp4")
@@ -1259,6 +1343,7 @@ def generate_final_videos(
                     final_video_path,
                     audio_path=audio_file,
                     mode=review_mode,
+                    boundaries=_plan_review_boundaries(plan_context),
                 ):
                     warnings.append(finding.to_warning(video_index=index))
             except Exception as exc:
@@ -1267,7 +1352,7 @@ def generate_final_videos(
                     f"video_index={index}, error={exc}"
                 )
 
-        _progress += 50 / params.video_count / 2
+        _progress += 50 / video_count / 2
         sm.state.update_task(
             task_id, progress=_progress, videos=list(final_video_paths),
             combined_videos=list(combined_video_paths), warnings=list(warnings) or None,
@@ -2136,7 +2221,7 @@ def _run_pipeline(
     # CLI 和 WebUI 都通过这个共享入口执行任务，因此在此统一探测，而不是
     # 分别在各个入口重复检查，能保证三条路径的行为一致。放在配乐 Key 校验
     # 之后，是为了不改变那些校验原有的"最先失败"顺序和错误信息。
-    if stop_at not in ("script", "terms") and not utils.check_ffmpeg_ready():
+    if stop_at not in ("script", "terms", "plan") and not utils.check_ffmpeg_ready():
         return _mark_task_failed(
             task_id,
             "preflight",
@@ -2146,15 +2231,98 @@ def _run_pipeline(
 
     # 1. Generate script
     generation_progress.stage("script")
-    video_script = generate_script(task_id, params)
-    # The LLM adapter uses a leading "Error: " as its failure sentinel. A
-    # user-provided script may legitimately quote that text anywhere, including
-    # at the beginning, so only interpret it for an LLM-generated script.
-    is_provider_error = (
-        not (params.video_script or "").strip()
-        and isinstance(video_script, str)
-        and video_script.startswith("Error: ")
-    )
+    # 方案驱动执行（B4/B5）：携带方案时旁白由方案编译，不再走 LLM 文案；
+    # 付费场景必须 confirmed（确认门禁）；库存源逐场景下载，本地引擎
+    # 场景走关键帧链（B5）。无方案时下方快速路径逐字节不变。
+    exec_plan = getattr(params, "script_plan", None)
+    dialogue_series = None
+    if exec_plan is not None:
+        paid_scenes = [
+            scene.id for scene in exec_plan.scenes
+            if scene.engine == "cloud_ai" or scene.cost.tier == "paid"
+        ]
+        if paid_scenes and exec_plan.status != "confirmed":
+            return _mark_task_failed(
+                task_id,
+                "preflight",
+                "paid scenes require a confirmed plan: " + ", ".join(paid_scenes),
+            )
+        cloud_scenes = [
+            scene.id for scene in exec_plan.scenes if scene.engine == "cloud_ai"
+        ]
+        if cloud_scenes:
+            # 云端图生视频链是保留升级项（§5.3）：provider 层已支持
+            # image_url 首尾帧条件化，任务编排接入在后续批次。
+            return _mark_task_failed(
+                task_id,
+                "preflight",
+                "cloud_ai scenes are not wired into plan-driven execution yet "
+                "(use local_fl2v/local_i2v or stock): " + ", ".join(cloud_scenes),
+            )
+        local_scenes = [
+            scene for scene in exec_plan.scenes
+            if scene.engine in keyframe_chain.LOCAL_ENGINES
+        ]
+        stock_scenes = [
+            scene for scene in exec_plan.scenes if scene.engine == "stock"
+        ]
+        if params.video_source == "local":
+            if stock_scenes or not local_scenes:
+                return _mark_task_failed(
+                    task_id,
+                    "preflight",
+                    "video_source=local requires all scenes on local engines; "
+                    "mixed plans need a stock source (pexels/pixabay/coverr)",
+                )
+        elif params.video_source not in {"pexels", "pixabay", "coverr"}:
+            return _mark_task_failed(
+                task_id,
+                "preflight",
+                "plan-driven execution supports stock sources "
+                "(pexels/pixabay/coverr), local engine scenes, or a mix of both",
+            )
+        if local_scenes and not comfy_local.is_online():
+            return _mark_task_failed(
+                task_id,
+                "preflight",
+                "ComfyUI is not running; local engine scenes need it online "
+                "(绘世启动器 one-click start), or switch the scenes to stock",
+            )
+        if dialogue_timeline.has_dialogue(exec_plan):
+            # B6 多音色对白：角色音色路由必须在持久化系列里可解析，
+            # 且不支持整段自定义音频替代（逐句合成是该模式的本体）。
+            if getattr(params, "custom_audio_file", None):
+                return _mark_task_failed(
+                    task_id,
+                    "preflight",
+                    "dialogue mode synthesizes per-character audio; "
+                    "custom_audio_file is not supported with non-narrator speakers",
+                )
+            try:
+                dialogue_series = (
+                    series_store.load_series(exec_plan.series_id)
+                    if exec_plan.series_id
+                    else None
+                )
+            except series_store.SeriesStoreError as exc:
+                return _mark_task_failed(task_id, "preflight", str(exc))
+            routing_error = dialogue_timeline.validate_dialogue_routing(
+                exec_plan, dialogue_series
+            )
+            if routing_error:
+                return _mark_task_failed(task_id, "preflight", routing_error)
+        video_script = plan_compiler.plan_to_script(exec_plan)
+        is_provider_error = False
+    else:
+        video_script = generate_script(task_id, params)
+        # The LLM adapter uses a leading "Error: " as its failure sentinel. A
+        # user-provided script may legitimately quote that text anywhere, including
+        # at the beginning, so only interpret it for an LLM-generated script.
+        is_provider_error = (
+            not (params.video_script or "").strip()
+            and isinstance(video_script, str)
+            and video_script.startswith("Error: ")
+        )
     if not video_script or is_provider_error:
         error = (
             video_script.removeprefix("Error: ").strip()
@@ -2171,10 +2339,53 @@ def _run_pipeline(
         )
         return {"script": video_script}
 
+    if stop_at == "plan":
+        # 脚本方案阶段：在 script 之后、terms 之前插入。方案生成失败时
+        # 降级保留 legacy 扁平脚本，经现有 warnings 通路提示，不阻断任务。
+        generation_progress.stage("plan")
+        plan = generate_plan(task_id, params, video_script)
+        save_script_data(task_id, video_script, "", params)
+        plan_warnings = []
+        if plan is None:
+            plan_warnings.append(
+                {
+                    "code": "script_plan_fallback",
+                    "message": (
+                        "script plan generation failed; legacy flat script kept "
+                        "(fast mode unaffected)"
+                    ),
+                }
+            )
+        else:
+            task_artifacts.write_script_plan(task_id, plan)
+            # script.json 增加方案引用，便于任务清单追溯到具体修订。
+            task_artifacts.patch_script_data(
+                task_id,
+                plan_revision=plan.get("revision"),
+                series_id=plan.get("series_id"),
+            )
+            plan_warnings.extend(ScriptPlan.model_validate(plan).duration_warnings())
+        sm.state.update_task(
+            task_id,
+            state=const.TASK_STATE_COMPLETE,
+            progress=100,
+            script=video_script,
+            plan=plan,
+            warnings=plan_warnings or None,
+        )
+        return {"script": video_script, "plan": plan}
+
     generation_progress.stage("terms")
     # 2. Generate terms
     video_terms = ""
-    if stop_at in {"terms", "materials", "video"} and params.video_source != "local":
+    if exec_plan is not None:
+        # 逐场景 keywords 绑定替代全局 terms 轮询；扁平列表仅供产物兼容。
+        video_terms = [
+            term
+            for terms in plan_compiler.scene_search_terms(exec_plan).values()
+            for term in terms
+        ]
+    elif stop_at in {"terms", "materials", "video"} and params.video_source != "local":
         video_terms = generate_terms(task_id, params, video_script)
         if not video_terms:
             return _mark_task_failed(
@@ -2195,26 +2406,60 @@ def _run_pipeline(
 
     generation_progress.stage("audio")
     # 3. Generate audio
-    generate_audio_kwargs = {
-        "voice_preview": voice_preview,
-        "allow_server_file_input": allow_server_file_input,
-    }
-    if voxcpm_reference_audio is not None:
-        generate_audio_kwargs["voxcpm_reference_audio"] = voxcpm_reference_audio
-    if voxcpm_prompt_audio is not None:
-        generate_audio_kwargs["voxcpm_prompt_audio"] = voxcpm_prompt_audio
-        generate_audio_kwargs["voxcpm_prompt_text"] = voxcpm_prompt_text
-    audio_file, audio_duration, sub_maker = generate_audio(
-        task_id,
-        params,
-        video_script,
-        **generate_audio_kwargs,
-    )
-    if not audio_file:
-        return _mark_task_failed(
+    scene_windows = []
+    scene_bindings = {}
+    if exec_plan is not None and dialogue_timeline.has_dialogue(exec_plan):
+        # B6 多音色对白：独立装配器（逐句 TTS 拼接），不走整篇旁白
+        # 一次 TTS 主路径；窗口边界取累计样本偏移，无需字符插值。
+        try:
+            audio_file, audio_duration, sub_maker, scene_windows = (
+                dialogue_timeline.assemble_dialogue_audio(
+                    exec_plan,
+                    dialogue_series,
+                    path.join(utils.task_dir(task_id), "audio.mp3"),
+                )
+            )
+        except dialogue_timeline.DialogueError as exc:
+            return _mark_task_failed(task_id, "audio", str(exc))
+    else:
+        generate_audio_kwargs = {
+            "voice_preview": voice_preview,
+            "allow_server_file_input": allow_server_file_input,
+        }
+        if voxcpm_reference_audio is not None:
+            generate_audio_kwargs["voxcpm_reference_audio"] = voxcpm_reference_audio
+        if voxcpm_prompt_audio is not None:
+            generate_audio_kwargs["voxcpm_prompt_audio"] = voxcpm_prompt_audio
+            generate_audio_kwargs["voxcpm_prompt_text"] = voxcpm_prompt_text
+        audio_file, audio_duration, sub_maker = generate_audio(
             task_id,
-            "audio",
-            "failed to prepare narration audio",
+            params,
+            video_script,
+            **generate_audio_kwargs,
+        )
+        if not audio_file:
+            return _mark_task_failed(
+                task_id,
+                "audio",
+                "failed to prepare narration audio",
+            )
+        # 方案驱动（旁白主路径）：整篇一次 TTS 后，cues 按场景旁白
+        # 字符边界切窗（§5.4）。
+        if exec_plan is not None:
+            scene_windows = plan_compiler.build_scene_windows(
+                exec_plan, sub_maker, audio_duration
+            )
+
+    # measured_duration / subtitle_cues 回填并持久化（两条音频路径同契约）。
+    if exec_plan is not None:
+        exec_plan = plan_compiler.backfill_plan(exec_plan, scene_windows)
+        task_artifacts.write_script_plan(
+            task_id, exec_plan.model_dump(by_alias=True)
+        )
+        task_artifacts.patch_script_data(
+            task_id,
+            plan_revision=exec_plan.revision,
+            series_id=exec_plan.series_id,
         )
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=30)
@@ -2273,17 +2518,91 @@ def _run_pipeline(
 
     generation_progress.stage("materials")
     # 5. Get video materials
-    downloaded_videos = get_video_materials(
-        task_id,
-        params,
-        video_terms,
-        audio_duration,
-        loomloom_video_request=loomloom_video_request,
-        **({"codex_image_context": codex_image_context}
-           if codex_image_context is not None else {}),
-        **({"jalapeno_video_endpoint": jalapeno_video_endpoint}
-           if jalapeno_video_endpoint is not None else {}),
-    )
+    if exec_plan is not None:
+        # 逐场景素材绑定：本地引擎场景走关键帧链（B5），库存场景
+        # 只下自己时间窗需要的量；两类绑定汇入同一条显式时间线。
+        scene_bindings = {}
+        local_scenes = [
+            scene for scene in exec_plan.scenes
+            if scene.engine in keyframe_chain.LOCAL_ENGINES
+        ]
+        stock_scenes = [
+            scene for scene in exec_plan.scenes if scene.engine == "stock"
+        ]
+        if local_scenes:
+            try:
+                local_bindings, scene_keyframes = keyframe_chain.generate_local_scene_videos(
+                    task_id,
+                    exec_plan,
+                    scene_windows,
+                    aspect=params.video_aspect,
+                    progress_callback=_stage_progress_reporter(
+                        task_id, 40, 45 if stock_scenes else 50
+                    ),
+                )
+            except keyframe_chain.KeyframeChainError as exc:
+                return _mark_task_failed(task_id, "materials", str(exc))
+            scene_bindings.update(local_bindings)
+            # 关键帧实际路径回填并持久化：共享边界帧约束（first ==
+            # prev.last）回填后仍成立，增量重渲染与边界审查据此追溯。
+            for scene in exec_plan.scenes:
+                paths = scene_keyframes.get(scene.id)
+                if paths:
+                    scene.keyframe.first = paths["first"]
+                    scene.keyframe.last = paths["last"]
+            task_artifacts.write_script_plan(
+                task_id, exec_plan.model_dump(by_alias=True)
+            )
+        if stock_scenes:
+            stock_ids = {scene.id for scene in stock_scenes}
+            stock_bindings = material.download_scene_materials(
+                task_id,
+                {
+                    scene_id: terms
+                    for scene_id, terms in plan_compiler.scene_search_terms(exec_plan).items()
+                    if scene_id in stock_ids
+                },
+                {
+                    window["scene_id"]: window["duration"]
+                    for window in scene_windows
+                    if window["scene_id"] in stock_ids
+                },
+                source=params.video_source,
+                video_aspect=params.video_aspect,
+                max_clip_duration=params.video_clip_duration,
+                seed=_resolve_video_seed(task_id, params),
+                progress_callback=_stage_progress_reporter(
+                    task_id, 45 if local_scenes else 40, 50
+                ),
+            )
+            scene_bindings.update(stock_bindings)
+        missing_scenes = [
+            scene.id for scene in exec_plan.scenes
+            if not scene_bindings.get(scene.id)
+        ]
+        if missing_scenes:
+            return _mark_task_failed(
+                task_id,
+                "materials",
+                "no materials found for scenes: " + ", ".join(missing_scenes),
+            )
+        downloaded_videos = [
+            file_path
+            for files in scene_bindings.values()
+            for file_path in files
+        ]
+    else:
+        downloaded_videos = get_video_materials(
+            task_id,
+            params,
+            video_terms,
+            audio_duration,
+            loomloom_video_request=loomloom_video_request,
+            **({"codex_image_context": codex_image_context}
+               if codex_image_context is not None else {}),
+            **({"jalapeno_video_endpoint": jalapeno_video_endpoint}
+               if jalapeno_video_endpoint is not None else {}),
+        )
     if not downloaded_videos:
         return _mark_task_failed(
             task_id,
@@ -2310,6 +2629,11 @@ def _run_pipeline(
     generation_progress.stage("rendering")
     # 6. Generate final videos
     partial_results = {}
+    plan_context = (
+        {"plan": exec_plan, "windows": scene_windows, "bindings": scene_bindings}
+        if exec_plan is not None
+        else None
+    )
     try:
         final_video_paths, combined_video_paths, generation_warnings = generate_final_videos(
             task_id,
@@ -2319,6 +2643,7 @@ def _run_pipeline(
             subtitle_path,
             audio_duration,
             partial_results=partial_results,
+            plan_context=plan_context,
         )
     except Exception as exc:
         logger.exception(f"video batch failed, task_id: {task_id}, error: {exc}")

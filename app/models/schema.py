@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, List, Literal, Optional, Union
 
 import pydantic
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import config
 
@@ -172,6 +172,17 @@ class VideoParams(BaseModel):
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
 
+    # 脚本方案（stop_at="plan"）的可选输入。None 表示沿用默认目标时长与
+    # 由模型决定的场景数；快速流水线不读取这两个字段，行为零变化。
+    plan_target_duration: Optional[float] = Field(
+        default=None, gt=0, le=600, allow_inf_nan=False
+    )
+    plan_scene_count: Optional[int] = Field(default=None, ge=2, le=20)
+    # 方案驱动执行（B4）：携带 confirmed 方案时，流水线改走逐场景素材
+    # 绑定 + 显式时间线；None 时快速路径行为零变化。前向引用，
+    # ScriptPlan 定义后在模块内 model_rebuild。
+    script_plan: Optional["ScriptPlan"] = None
+
 
 class SubtitleRequest(BaseModel):
     video_script: str
@@ -288,6 +299,324 @@ class VideoTermsRequest(VideoTermsParams, BaseModel):
 
 class VideoSocialMetadataRequest(VideoSocialMetadataParams, BaseModel):
     pass
+
+
+# ---------------------------
+# ----- SCRIPT PLAN / SERIES (脚本方案专业模式，B2) -----
+# ---------------------------
+# 三层数据模型：Series → Episode → ScriptPlan → Scene。ScriptPlan 是
+# “文案（需求输入端）”与“生成执行”之间的一等公民产物：可见、可编辑、
+# 可锁定、可导出。所有新模型 fail-closed（extra="forbid"），对齐
+# video_project 的未知字段拒绝惯例；导入校验失败即拒绝，不静默丢弃。
+
+_PLAN_EXTRA_FORBID = ConfigDict(extra="forbid", populate_by_name=True)
+
+# 中文旁白语速经验值（字/秒），用于估算场景时长；与 Demo 保持一致。
+PLAN_NARRATION_CHARS_PER_SECOND = 4.2
+# 总时长容差：估算总和与目标时长偏差超过 ±10% 时仪表变色并警告，
+# 但不阻塞编辑（TTS 语速浮动，执行后以实测回填为准）。
+PLAN_DURATION_TOLERANCE = 0.10
+
+PlanRelation = Literal[
+    "establish", "continue", "contrast", "escalate", "match_cut", "unknown"
+]
+PlanTransition = Literal["none", "fade", "slide", "zoom", "match_cut"]
+PlanEngine = Literal["local_fl2v", "local_i2v", "stock", "cloud_ai"]
+PlanBoundaryHealth = Literal["ok", "warn", "unknown"]
+
+
+class PlanStyle(BaseModel):
+    """影片风格一致性约束，注入每个 AI 生成 prompt。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    tone: str = ""
+    palette: str = ""
+    camera: str = ""
+    consistency_subject: str = ""
+
+
+class PlanVoice(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    name: str = "zh-CN-XiaoxiaoNeural"
+    rate: float = Field(default=1.0, allow_inf_nan=False)
+
+
+class PlanBgm(BaseModel):
+    """整集一条 BGM 轨。acestep_local 为新增本地作曲，其余三态与现有契约兼容。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    type: Literal["random", "acestep_local", "provider", "custom"] = "random"
+    mood: str = ""
+    prompt: str = Field(default="", max_length=2000)
+    volume: float = Field(default=0.2, allow_inf_nan=False)
+    fade_in: float = Field(default=1.0, ge=0, allow_inf_nan=False)
+    fade_out: float = Field(default=3.0, ge=0, allow_inf_nan=False)
+
+
+class PlanLlm(BaseModel):
+    """方案生成所用编剧引擎记录，可追溯可复现。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    provider: str = "ollama"
+    model: str = ""
+
+
+class SceneMaterialCandidate(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    id: str = Field(min_length=1)
+    label: str = ""
+    url: str = ""
+    duration: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+
+class SceneMaterial(BaseModel):
+    """库存素材绑定：候选 + 选中项 + 入出点。改动入出点后边界健康置 unknown。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    source: str = "pexels"
+    candidates: List[SceneMaterialCandidate] = Field(default_factory=list)
+    selected: Optional[str] = None
+    in_point: float = Field(default=0, ge=0, alias="in", allow_inf_nan=False)
+    out_point: float = Field(default=0, ge=0, alias="out", allow_inf_nan=False)
+
+
+class SceneKeyframe(BaseModel):
+    """首尾帧关键帧。shared_with_prev=true 时本段首帧必须引用上段尾帧同一文件。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    first: Optional[str] = None
+    last: Optional[str] = None
+    first_prompt: str = ""
+    last_prompt: str = ""
+    shared_with_prev: bool = False
+
+
+class SceneCost(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    tier: Literal["free", "paid"] = "free"
+    estimate_cny: float = Field(default=0, ge=0, allow_inf_nan=False)
+    request_key: Optional[str] = None
+
+
+class SubtitleCue(BaseModel):
+    """执行后回填的真实 SRT 区间（秒）。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(ge=0, allow_inf_nan=False)
+    text: str = ""
+
+
+class ScriptScene(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    id: str = Field(min_length=1)
+    order: int = Field(ge=1)
+    locked: bool = False
+    # v1 恒 narrator（旁白驱动）；B6 多音色对白按角色 id 路由 voice_name。
+    speaker: str = "narrator"
+    narration: str = ""
+    est_duration: float = Field(default=0, ge=0, allow_inf_nan=False)
+    measured_duration: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+    visual: str = ""
+    keywords: List[str] = Field(default_factory=list)
+    characters: List[str] = Field(default_factory=list)
+    location: Optional[str] = None
+    relation_to_prev: PlanRelation = "establish"
+    relation_note: str = ""
+    engine: PlanEngine = "stock"
+    material: Optional[SceneMaterial] = None
+    keyframe: SceneKeyframe = Field(default_factory=SceneKeyframe)
+    transition_to_next: PlanTransition = "none"
+    # 生成前为预估 cue 数（int），执行后回填真实 SRT 区间列表。
+    subtitle_cues: Optional[Union[int, List[SubtitleCue]]] = None
+    boundary_health: PlanBoundaryHealth = "unknown"
+    cost: SceneCost = Field(default_factory=SceneCost)
+
+
+class ScriptPlan(BaseModel):
+    """每集一份的分镜脚本方案；series_id/episode_id 均 null 时为单视频任务。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    plan_version: Literal[1] = 1
+    revision: int = Field(default=1, ge=1)
+    status: Literal["draft", "confirmed"] = "draft"
+    series_id: Optional[str] = None
+    episode_id: Optional[str] = None
+    title: str = ""
+    logline: str = ""
+    style: PlanStyle = Field(default_factory=PlanStyle)
+    target_duration: float = Field(default=60, gt=0, allow_inf_nan=False)
+    aspect: Literal["9:16", "16:9"] = "9:16"
+    quality_tier: Literal["draft", "final"] = "draft"
+    voice: PlanVoice = Field(default_factory=PlanVoice)
+    bgm: PlanBgm = Field(default_factory=PlanBgm)
+    llm: PlanLlm = Field(default_factory=PlanLlm)
+    seed: Optional[int] = Field(default=None, ge=0, le=0xFFFFFFFF)
+    scenes: List[ScriptScene] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_scenes(self):
+        seen_ids = set()
+        previous: ScriptScene | None = None
+        for index, scene in enumerate(self.scenes):
+            if scene.id in seen_ids:
+                raise ValueError(f"duplicate scene id: {scene.id}")
+            seen_ids.add(scene.id)
+            # order 必须连续且与列表顺序一致；拖拽调序后由调用方重编号。
+            if scene.order != index + 1:
+                raise ValueError(
+                    f"scene order must be contiguous: expected {index + 1}, "
+                    f"got {scene.order} ({scene.id})"
+                )
+            if scene.keyframe.shared_with_prev:
+                if previous is None:
+                    raise ValueError(
+                        f"first scene cannot share boundary frame: {scene.id}"
+                    )
+                # 共享边界帧约束：本段首帧必须引用上段尾帧的同一文件。
+                if (
+                    not scene.keyframe.first
+                    or scene.keyframe.first != previous.keyframe.last
+                ):
+                    raise ValueError(
+                        f"shared boundary frame mismatch at scene {scene.id}: "
+                        "keyframe.first must reference previous scene's keyframe.last"
+                    )
+            previous = scene
+        return self
+
+    def estimated_total_duration(self) -> float:
+        return round(sum(scene.est_duration for scene in self.scenes), 3)
+
+    def duration_warnings(self) -> List[dict]:
+        """±10% 容差校验：超差返回警告（不阻塞编辑），供 warnings 通路复用。"""
+        total = self.estimated_total_duration()
+        target = self.target_duration
+        if target <= 0:
+            return []
+        deviation = abs(total - target) / target
+        if deviation <= PLAN_DURATION_TOLERANCE:
+            return []
+        return [
+            {
+                "code": "plan_duration_out_of_tolerance",
+                "message": (
+                    f"estimated total {total:.1f}s deviates from target "
+                    f"{target:.1f}s by {deviation:.0%} (tolerance ±10%)"
+                ),
+                "estimated_total": total,
+                "target_duration": target,
+            }
+        ]
+
+
+class SeriesStyleBible(BaseModel):
+    """风格圣经系列级持久化；每集 plan.style 是引用快照。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    tone: str = ""
+    palette: str = ""
+    camera: str = ""
+    era: str = ""
+
+
+class SeriesCharacter(BaseModel):
+    """角色档案三件套：appearance_prompt + reference_images + 固定 seed。"""
+
+    model_config = _PLAN_EXTRA_FORBID
+
+    id: str = Field(min_length=1)
+    name: str = ""
+    role: Literal["protagonist", "support", "extra"] = "support"
+    appearance_prompt: str = ""
+    reference_images: List[str] = Field(default_factory=list)
+    seed: int = Field(default=0, ge=0, le=0xFFFFFFFF)
+    voice_name: str = ""
+    personality: str = ""
+    # v1 恒 null（免训练路线）；LoRA 仅作预留挂载点。
+    lora: Optional[str] = None
+
+
+class SeriesLocation(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    id: str = Field(min_length=1)
+    name: str = ""
+    prompt: str = ""
+    reference_images: List[str] = Field(default_factory=list)
+
+
+class SeriesEpisode(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    id: str = Field(min_length=1)
+    seq: int = Field(ge=1)
+    title: str = ""
+    logline: str = ""
+    hook: str = ""
+    plan_id: Optional[str] = None
+    status: Literal["draft", "confirmed", "rendered"] = "draft"
+
+
+class Series(BaseModel):
+    model_config = _PLAN_EXTRA_FORBID
+
+    series_version: Literal[1] = 1
+    id: str = Field(min_length=1)
+    title: str = ""
+    genre_template: Literal[
+        "urban_revenge", "period_romance", "suspense", "healing", "scifi", "custom"
+    ] = "custom"
+    style_bible: SeriesStyleBible = Field(default_factory=SeriesStyleBible)
+    characters: List[SeriesCharacter] = Field(default_factory=list)
+    locations: List[SeriesLocation] = Field(default_factory=list)
+    episodes: List[SeriesEpisode] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_assets(self):
+        for label, items in (
+            ("character", self.characters),
+            ("location", self.locations),
+            ("episode", self.episodes),
+        ):
+            seen = set()
+            for item in items:
+                if item.id in seen:
+                    raise ValueError(f"duplicate {label} id: {item.id}")
+                seen.add(item.id)
+        for index, episode in enumerate(self.episodes):
+            if episode.seq != index + 1:
+                raise ValueError(
+                    f"episode seq must be contiguous: expected {index + 1}, "
+                    f"got {episode.seq} ({episode.id})"
+                )
+        return self
+
+
+def estimate_scene_duration(narration: str) -> float:
+    """按中文语速经验值估算场景时长（字数 ÷ 4.2），保留一位小数。"""
+    text = (narration or "").strip()
+    if not text:
+        return 0.0
+    return round(len(text) / PLAN_NARRATION_CHARS_PER_SECOND, 1)
+
+
+# VideoParams.script_plan 的前向引用在此解析；TaskVideoRequest 继承同一
+# 字段，API 请求体无需改控制器即可携带方案。
+VideoParams.model_rebuild()
+TaskVideoRequest.model_rebuild()
 
 
 # ---------------------------
@@ -564,7 +893,7 @@ class VideoMaterialRetrieveResponse(BaseResponse):
                         {
                             "name": "example.mp4",
                             "size": 12345678,
-                            "file": "/MoneyPrinterTurbo/resource/videos/example.mp4",
+                            "file": "/ChangoFilm/resource/videos/example.mp4",
                         }
                     ]
                 },
@@ -582,7 +911,7 @@ class VideoMaterialUploadResponse(BaseResponse):
                 "status": 200,
                 "message": "success",
                 "data": {
-                    "file": "/MoneyPrinterTurbo/resource/videos/example.mp4",
+                    "file": "/ChangoFilm/resource/videos/example.mp4",
                 },
             },
         }

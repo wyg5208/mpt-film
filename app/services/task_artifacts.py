@@ -70,6 +70,33 @@ def write_script_data(task_id: str, payload: Mapping[str, Any]) -> None:
         _write_json_atomic(_script_file(task_id), payload)
 
 
+def _plan_file(task_id: str) -> Path:
+    """返回任务分镜方案路径（脚本方案专业模式，B2）。"""
+    return Path(utils.task_dir(task_id)) / "script-plan.json"
+
+
+def write_script_plan(task_id: str, payload: Mapping[str, Any]) -> None:
+    """原子写入任务的 ``script-plan.json``，复用 script.json 的锁与原子写惯例。"""
+    with _script_lock(task_id):
+        _write_json_atomic(_plan_file(task_id), payload)
+
+
+def read_script_plan(task_id: str) -> dict | None:
+    """读取任务分镜方案；不存在或损坏时返回 None（降级不阻断主流程）。"""
+    try:
+        with _plan_file(task_id).open("r", encoding="utf-8") as plan_file:
+            payload = json.load(plan_file)
+        if isinstance(payload, dict):
+            return payload
+        logger.warning(f"task script plan is not a JSON object: {task_id}")
+        return None
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(f"failed to read task script plan {task_id}: {exc}")
+        return None
+
+
 def patch_script_data(task_id: str, **updates: Any) -> bool:
     """
     在保留原有字段的前提下补充任务清单，失败时返回 ``False``。
