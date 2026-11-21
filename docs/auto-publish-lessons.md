@@ -188,18 +188,153 @@
 - [ ] 失败原因直达 UI；进度/阶段/日志可见
 - [ ] 风控纪律写进用户文档：低频、清草稿、冷却、换网
 
+## 2026-11-21 补充：抖音 CSP 依赖 BUG 与小红书风控加固
+
+### 抖音上传卡 0%：patchright 1.58.2 的 CSP 改写 BUG（非风控）
+
+上游 [social-auto-upload#307](https://github.com/dreammis/social-auto-upload/issues/307)：2026-11-05 起抖音上传页返回不含
+`script-src`/`default-src` 的 CSP；patchright 1.58.2 注入 stealth 时会补一条
+`script-src 'self' 'unsafe-eval' 'unsafe-inline' *`，而 `*` 不含 `blob:`，抖音上传组件的
+blob Worker 被拦 → 卡「文件解析中 0%」约 60 秒后失败。
+
+本地修复（与上游官方 commit bb99e5b 同逻辑，首个含修复的 Python 版本是 1.61.2，PR #308 升 1.64.4 尚未合并）：
+改 `.venv/Lib/site-packages/patchright/driver/package/lib/server/chromium/crNetworkManager.js` 的 `_fixCSP`：
+新增 `hasDefaultSrc` 跟踪，仅当原策略含 `default-src` 时才补 `script-src`。
+**注意：补丁在 .venv 内，重装/升级 patchright 后会丢失，需重新应用或直接升级到 ≥1.61.2。**
+验证脚本：`temp/verify_csp_patch.py`（A/B 对照：未补丁 blob Worker 被拦，补丁后正常；stealth 仍生效）。
+
+### 小红书风控警告：指纹层 + 行为层双重加固
+
+背景：xiaohongshu-mcp#674 记录了 2026 年中的封号潮，v2.1.1 落地反检测后测试账号持续正常。
+我们的 XHS 上传器此前每次启动都是全新临时 profile + 机械化节奏，正好命中检测面。
+
+- **指纹层**：`_launch_real_user_context` 移植自抖音侧（每账号持久化 profile、zh-CN、Asia/Shanghai、
+  cookie 注入/回写），视频与图文两条上传路径均改用；登录/cookie 体检仍用轻量临时上下文（避免 profile 锁冲突）。
+- **行为层**：新增 `uploader/xiaohongshu_uploader/humanize.py`——钟形分布随机延迟、逐字符打字（标点停顿/思考停顿）、
+  贝塞尔轨迹点击（元素内随机落点 + 随机按压时长）、发布前预热浏览发现页。任何一步失败自动回退原生行为。
+  环境变量开关：`SAU_XHS_HUMANIZE=0` / `SAU_XHS_WARMUP=0`。
+- **附带修复**：抖音 main.py 缺模块级 `import json`，导致持久化上下文的 cookie 注入一直静默失败（被宽泛 except 吞掉）。
+- **账号级标记无法用技术解除**：被警告账号需冷却 1–2 周（人工养号），再低频恢复自动化。
+- 验证：`temp/smoke_persistent.py`（两平台持久化上下文 + cookie 注入 + webdriver 无泄漏）；
+  XHS 相关 21/21 测试通过（含新增 humanize 专项 11 例）。
+
+### 抖音上传完成后“没有任何后续动作”：会话失效被踢去登录页，表单等待盲等（2026-11-21 深夜实测）
+
+现象：视频上传完成，但封面/AI 声明/发布按钮全都没动。日志显示
+`标题表单还没渲染（解析中=False 上传中=False）` 连续刷到 6 分钟 deadline。
+
+排查（只读 DOM 探针 + 真实视频全周期复现）：
+- 当前发布页 `input[placeholder*=填写作品标题]` 选择器**未漂移**，上传全程及完成后标题框均可见可点；
+  “表单要等上传完才渲染”的旧假设不成立，表单一开始就在。
+- 事故 run 里 `上传中` 文本（含发布按钮旁静态提示文案）在 22:58 从 DOM 消失——整个表单区被替换，
+  随后 23:03 cookie 体检判失效并扫码重登。结论：**会话中途失效/风控把页面踢去登录或验证页**，
+  而等待循环只盯标题输入框、不看 URL，对着登录页盲等 6 分钟。
+
+修复（`uploader/douyin_uploader/main.py`）：
+- `_is_login_or_verify_url`：表单等待与上传完成等待两个循环每轮先查 URL，命中 login/passport/sso/verification/verify/captcha
+  立即报错（不再空等），提示重新扫码后低频重试。
+- `_dump_form_timeout_diagnostics`：任何表单超时/踢出都截图 + 记录 URL + 页面文本摘要到 logs/，下次失败有据可查。
+- `_warmup_creator_home`：上传前先自然浏览创作者首页几秒（随机停留/移动/滚轮），视频与图文两路均接入，异常不阻断。
+- 等待日志补上当前 URL，便于实时面板直接看出是否被踢出。
+- 验证：新增 `tests/test_douyin_form_wait.py` 6/6 通过；双平台持久化冒烟 PASS；
+  真实视频全周期探针确认正常路径标题框全程可点（诊断脚本 `temp/diag_douyin_upload.py`）。
+- 教训：**CN 创作者平台的每个等待循环都必须状态感知（URL/登录/验证）+ 有 deadline + 失败留证**；
+  “表单未渲染”不一定是 DOM 漂移，也可能是页面已被整体替换。
+
+## 2026-11-22 补充：抖音表单折叠死状态自愈、解析等待与发布后核验
+
+### 模式二死状态：上传完成但表单被折叠成“快速填写”入口
+
+苏州视频真发实测（23:44–23:51）：上传完成、AI 封面已生成，但 post/video 页
+（enter_from=publish_page）**只有“快速填写”按钮**（点开是以往视频复用弹框），
+标题输入框不渲染；纯等 6 分钟无效。用户手动点“暂存离开”再重进编辑页后表单立即渲染
+（草稿恢复态 enter_from=draft），运行中的脚本随即完成填写并发布成功。
+同账号同晚的只读探针又见过表单直接渲染的变体 A → 死状态是**服务端下发的 UI 变体**，
+不是选择器漂移，只能状态感知 + 自愈。
+
+修复（`uploader/douyin_uploader/main.py` `_recover_stuck_form`，2026-11-22 用户纠偏后定稿）：
+- 触发：上传完成标记（long-card 内“重新上传”）在 + 标题框 20s 不渲染；最多 2 次。
+- **绝不点击/触发“快速填写”**（用户明确指示：复用弹框没有用；早期版本曾尝试
+  弹框内手动/跳过入口，实测无效且弹框遮罩会拦截后续所有点击，已整段删除）。
+- 唯一救援路径：底部“发布”按钮右侧的**暂存离开**（+确认弹框）→ 直连
+  `post/video?enter_from=draft`（探针实测表单稳定渲染 60s+）；兜底：上传页
+  “你还有上次未发布的视频”横幅→继续编辑。**不走内容管理页**：有草稿时管理页
+  会重定向到上传页，列表里没有草稿，按钮文案是“编辑作品”而非“编辑”，审核状态也没有草稿筛选项。
+- 残留弹框先关（Escape→关闭钮→点遮罩三重兜底），否则暂存离开被 semi-modal-wrap 拦截。
+- 关键节点截图留证 `logs/douyin_form_recover_*.png`；失败不抛异常，回退继续等至 deadline。
+
+### 先填基本信息，再走上传/解析核验（互联网方案对齐）
+
+用户提示 + 开源参考（oil-oil/video-publisher-skill 的“上传中预填 + 草稿身份恢复”
+模式）：不要等上传/解析全部完成才找表单，而是**表单一旦可用就立即填基本信息**；
+表单折叠时先暂存成草稿、从草稿恢复态重进（表单稳定）再填，填完才走上传完成/解析核验。
+本项目流程本就是“进发布页→先填标题/描述/话题→等上传完成→等解析→声明/封面/发布”，
+本轮补齐的是折叠态下的“暂存→草稿重进→立即填”闭环。
+
+### 表单“瞬态折叠”真根因：抗干扰清理盲删了表单容器（run5/run6 事故，探针定罪）
+
+headed 真发 run5/run6：自愈恢复表单成功（截图可见完整表单）后 ~1s 标题输入框消失，
+填写循环空等；headless 时序探针（`temp/probe_draft_timeline.py`）却全程稳定。
+headed 每秒采样探针（`temp/probe_headed_collapse.py`）定罪：新版 UI 的
+`publish-mention-wrapper-*` **包裹整个基础信息表单**（标题 input + 简介
+contenteditable，且不在 semi-portal 内）；`_dismiss_guide_overlays` /
+`_clear_blocking_overlays` / 发布循环三处“抗干扰清理”盲删
+`[class*="mention-wrapper"]` → 表单容器被删 → React 下一轮重渲染折叠成
+快速填写态。dismiss 调用后 1s 内输入框必消失；headless 探针不调 dismiss 故稳定；
+用户手动救援不删 DOM 故有效——三个现象同一根因。
+修复：三处清理均加守卫——含 `input[placeholder*=填写作品标题]` 或
+`[contenteditable=true]` 的 wrapper/portal 一律跳过；残留话题下拉交给
+semi-portal 非模态清理与 Escape/blur。修复后 headed 探针 47/47 采样全程可见、
+0 折叠（dismiss 照常调用）。另保留防御纵深：标题 fill 后回读 input_value
+核验落地，落空则暂存→草稿重进重填（最多 3 轮）。
+教训：**“抗干扰/清浮层”的删除清单必须随平台改版重新验证；类名复用
+（dropdown wrapper → 表单容器）会把抗干扰变成自毁**；删除型清理要带
+“不得含业务控件”守卫；headed/headless 行为差异要用同条件探针定罪，不靠猜。
+
+### 上传完成 ≠ 解析完成：下一步前必须等解析结束
+
+用户实测反馈：“重新上传”标记只代表字节传完，页面仍可能“解析中”；
+原流程传完立即走声明/发布易失败。新增解析等待段：`text=解析中` 存在则每 3s 轮询
+（URL 守卫 + 5 分钟 deadline + 超时留证 + 仿人微动作），解析结束才继续。
+
+### 发布后核验：跳管理页不再是“没有任何后续动作”
+
+原流程把 `wait_for_url(content/manage)` 当成功信号后直接回写 cookie 关浏览器。
+现新增：发布后在作品列表等新作品标题出现（15s，含审核中）并写日志；
+看不到仅警告，不推翻成功判定。
+
+### 其它本轮加固
+
+- 表单等待/上传等待 deadline 统一提至 15 分钟（服务端变体/慢解析不再误杀）；
+  等待轮日志带 long-card 进度文本，并加仿人鼠标移动/滚轮微动作。
+- **解释器坑**：sau 的测试/发布必须用 `opensources/social-auto-upload/.venv` 的解释器
+  （patchright 1.58.2 + CSP 补丁在那里）；宿主主 `.venv` 由 uv lock 管理，
+  `uv sync` 会卸掉不在 lock 里的 patchright/playwright（本轮实测 ModuleNotFoundError 踩坑）。
+- 验证：`tests/test_douyin_form_wait.py` 扩至 15 例全过（快速填写绝不点击守卫 + 三处清理表单容器守卫 +
+  暂存→草稿救援 mock + 残留弹框 Escape + 标题落地核验/重填 + 循环接线 +
+  解析等待/发布后核验源码守卫）；苏州视频已于 23:51 真实发布成功（用户救援协助）。
+  根因修复后 headed 真发 run7 于 2026-11-22 01:05:57 发布成功
+  《一句话，就是一支电影：ChangoVideo》（ChangoVideo自动视频创作 · 视频号.mp4，
+  27.6 MB；标题/描述/5 话题/AI 声明全填，全程无人工干预，用户确认发布成功）。
+- 教训：**把用户手动救援路径当成一等公民自动化**；平台 UI 变体随机下发时，
+  选择器修正无效，状态感知 + 已验证救援路径才是治本。
+
 ## 附录：本地补丁清单（上游更新时需重查）
 
 bundled 检出 `opensources/social-auto-upload` 内的本地修改（外层仓库 gitignore，不随提交）：
 
 | 文件 | 修改 |
 |------|------|
-| `uploader/douyin_uploader/main.py` | 引导浮层清除、draft 页接受、空闲重注入、离页回归、5/10 分钟 deadline、解析感知表单等待（6 分钟）、持久化真实用户身份（视频+图文） |
+| `uploader/douyin_uploader/main.py` | 引导浮层清除、draft 页接受、空闲重注入、离页回归、15 分钟 deadline、解析感知表单等待、持久化真实用户身份（视频+图文）、模块级 `import json` 修复、登录/验证页踢出即时报错+超时截图留证、上传前预热浏览、表单死状态自愈（不点快速填写，暂存离开→草稿态重进，触发阈值 60s→20s）、三处抗干扰清理表单容器守卫（mention-wrapper 含表单控件不删）、标题落地核验+瞬态折叠重填、上传后解析等待、发布后核验、等待轮仿人微动作 |
 | `uploader/tencent_uploader/main.py` | 启动兜底 `channel="chrome"` → `"chromium"` |
-| `uploader/xiaohongshu_uploader/main.py` | 二维码面板状态驱动激活 + src 异步填充容忍 |
+| `uploader/xiaohongshu_uploader/main.py` | 二维码面板状态驱动激活 + src 异步填充容忍、持久化真实用户身份（视频+图文）、拟人行为层接入 |
+| `uploader/xiaohongshu_uploader/humanize.py` | 新增：随机延迟/逐字打字/贝塞尔点击/预热浏览，环境变量开关，失败自动回退 |
+| `.venv/.../patchright/driver/package/lib/server/chromium/crNetworkManager.js` | `_fixCSP` 仅在原策略含 default-src 时补 script-src（抖音 blob Worker 修复；**重装 patchright 后需重新应用**） |
 | `uploader/bilibili_uploader/runtime.py` | 下载重试、分离超时、镜像兜底 + sha256 校验、友好报错 |
-| `tests/test_xiaohongshu_uploader.py` | 话题等待超时断言 2000→4000（对齐既有代码漂移） |
+| `tests/test_xiaohongshu_uploader.py` | 话题等待超时断言 2000→4000（对齐既有代码漂移）；fill_meta 断言对齐拟人层原生路径（关开关保确定性） |
+| `tests/test_xiaohongshu_humanize.py` | 新增：拟人层开关/延迟分布/逐字打字/贝塞尔点击/回退/预热专项测试 |
 | `tests/test_biliup_runtime.py` | 新增：镜像 URL 选择与 digest 门槛测试 |
+| `tests/test_douyin_form_wait.py` | 新增：登录/验证页踢出即时失败、超时留证、预热浏览、死状态自愈（快速填写禁点守卫）、标题落地核验、解析等待、发布后核验、三处清理表单容器守卫专项测试（15 例） |
 
 宿主侧（MoneyPrinterTurbo，随正常提交）：stdout+stderr 双流回调、`social_publish_headed` 配置/快照/UI/14 语言、
 发布队列面板与阶段徽标、失败原因上任务卡。详见 [auto-publish-cn.md](auto-publish-cn.md)。
