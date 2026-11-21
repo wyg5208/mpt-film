@@ -63,3 +63,8 @@ temp-clip-*.mp4
 # agent 验证草稿与升版备份（历史迭代的脚本、日志、截图），不纳入版本控制
 .tmp-byok/
 .tmp-cs-backup-*/
+
+# 本地临时目录（含敏感记录），禁止提交
+.tmp-ui-impl/
+.ui-demo-verify/
+
