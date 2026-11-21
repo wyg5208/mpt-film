@@ -43,6 +43,7 @@ from app.services import (
     review,
     series_store,
     sonilo,
+    source_failover,
     subtitle,
     task_artifacts,
     twelvelabs,
@@ -387,11 +388,49 @@ def _stage_progress_reporter(task_id: str, stage_start: float, stage_end: float)
     return report
 
 
+def _generate_text_with_failover(description: str, call, *args, **kwargs):
+    """主 LLM 调用失败时按服务商配置的备用链重试。
+
+    覆盖脚本、关键词与分镜方案等文本生成入口；切换只影响本次调用
+    （llm.provider_override），不改写 WebUI 当前选中的主 Provider。
+    全链失败时抛出最后一次异常，保留原有失败语义。
+    """
+    chain = source_failover.resolve_llm_chain(
+        config.snapshot_config_with_pending(config.app)
+    ).chain
+    if len(chain) <= 1:
+        return call(*args, **kwargs)
+    last_exc: Exception | None = None
+    for index, provider_id in enumerate(chain):
+        try:
+            with llm.provider_override(provider_id):
+                return call(*args, **kwargs)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            last_exc = exc
+            next_provider = chain[index + 1] if index + 1 < len(chain) else None
+            if next_provider:
+                logger.warning(
+                    f"{description}: llm provider {provider_id} failed ({exc}); "
+                    f"retrying with backup provider {next_provider}"
+                )
+            else:
+                logger.error(
+                    f"{description}: all llm providers in fallback chain failed; "
+                    f"last provider {provider_id} error: {exc}"
+                )
+    assert last_exc is not None
+    raise last_exc
+
+
 def generate_script(task_id, params):
     logger.info("\n\n## generating video script")
     video_script = params.video_script.strip()
     if not video_script:
-        video_script = llm.generate_script(
+        video_script = _generate_text_with_failover(
+            "generate script",
+            llm.generate_script,
             video_subject=params.video_subject,
             language=params.video_language,
             paragraph_number=params.paragraph_number,
@@ -418,7 +457,9 @@ def generate_plan(task_id, params, video_script):
     aspect = params.video_aspect.value if params.video_aspect else "9:16"
     if aspect not in ("9:16", "16:9"):
         aspect = "9:16"
-    return llm.generate_script_plan(
+    return _generate_text_with_failover(
+        "generate script plan",
+        llm.generate_script_plan,
         video_subject=params.video_subject,
         language=params.video_language,
         video_script=utils.remove_pause_tags(video_script),
@@ -437,7 +478,9 @@ def generate_terms(task_id, params, video_script):
         # 开启素材按文案顺序匹配后，关键词本身也必须按脚本叙事顺序生成；
         # 否则后续即使顺序下载和顺序拼接，也只能复用一组全局主题词，
         # 无法改善“后面内容的画面提前出现”的问题。
-        video_terms = llm.generate_terms(
+        video_terms = _generate_text_with_failover(
+            "generate terms",
+            llm.generate_terms,
             video_subject=params.video_subject,
             video_script=utils.remove_pause_tags(video_script),
             amount=8 if params.match_materials_to_script else 5,
@@ -2086,6 +2129,50 @@ def _run_pipeline(
         return _mark_task_failed(
             task_id, "preflight", f"unsupported video source: {params.video_source!r}"
         )
+
+    if stop_at in {"materials", "video"}:
+        # 备用源转移：主源未配置时按能力备用链自动切换，避免生成直接失败。
+        # 解析必须先于逐源预检：后续 jalapeno/codex 等块看到的已是切换后来源。
+        try:
+            codex_ready = bool(codex_oauth.account_status())
+        except (ValueError, OSError):
+            codex_ready = False
+        video_resolution = source_failover.resolve_video_source(
+            config.snapshot_config_with_pending(config.app),
+            preferred=params.video_source,
+            codex_connected=codex_ready,
+        )
+        if not video_resolution.source:
+            return _mark_task_failed(
+                task_id,
+                "preflight",
+                "no usable video source; configured source chain unavailable: "
+                + ", ".join(name for name, ok in video_resolution.attempts if not ok),
+            )
+        if video_resolution.switched:
+            params.video_source = video_resolution.source
+
+    if (
+        stop_at == "video"
+        and not getattr(params, "custom_audio_file", None)
+        and params.voice_name
+        and not voice.is_no_voice(params.voice_name)
+    ):
+        # 配音备用链：主配音未配置凭证时按备用槽切换；在线音色列表的服务
+        # 无法安全自动挑音色，不参与自动切换（见 source_failover）。
+        tts_resolution = source_failover.resolve_tts_server(
+            config.snapshot_config_with_pending(config.ui),
+            language=params.video_language,
+        )
+        if not tts_resolution.server:
+            return _mark_task_failed(
+                task_id,
+                "preflight",
+                "no usable tts server; configured voiceover chain unavailable: "
+                + ", ".join(name for name, ok in tts_resolution.attempts if not ok),
+            )
+        if tts_resolution.switched:
+            params.voice_name = tts_resolution.voice_name
 
     if (
         stop_at in {"materials", "video"}

@@ -189,11 +189,12 @@ class LLMProviderSpec:
         )
 
 
-# 元组顺序就是 WebUI 下拉框顺序。新增普通 OpenAI-compatible Provider 时，
-# 通常只需要在这里增加一项并补充 locale；只有协议不同的 Provider 才需要在
+# 元组顺序就是 WebUI 下拉框顺序：国内厂商 → 本地与订阅客户端 → 国际主流 →
+# 聚合与推广平台（尾部）。新增普通 OpenAI-compatible Provider 时，通常只需要
+# 在对应分组增加一项并补充 locale；只有协议不同的 Provider 才需要在
 # app/services/llm.py 中增加对应 adapter 实现。
 LLM_PROVIDER_REGISTRY = (
-    # 推荐 Provider
+    # ==== 国内厂商：国内用户默认推荐，优先展示 ====
     LLMProviderSpec(
         "moonshot",
         "Kimi / Moonshot AI",
@@ -233,6 +234,7 @@ LLM_PROVIDER_REGISTRY = (
         default_service_endpoint_id="china",
         international_service_endpoint_id="global",
     ),
+
     # Kimi 订阅（Plus 及以上档位的 Kimi Code 权益）采用 OAuth 设备授权：
     # 用户在浏览器里一键确认后，服务层直接携带 Bearer token 调用官方
     # OpenAI 兼容端点，不需要申请按量 API Key。中国站和 Global 使用各自
@@ -269,14 +271,113 @@ LLM_PROVIDER_REGISTRY = (
         default_service_endpoint_id="china",
         international_service_endpoint_id="global",
     ),
-    # 主流模型原厂与云厂商
+
     LLMProviderSpec(
-        "openai",
-        "OpenAI",
-        api_key_url="https://platform.openai.com/api-keys",
-        default_model="gpt-5.5",
-        default_base_url="https://api.openai.com/v1",
+        "deepseek",
+        "DeepSeek",
+        api_key_url="https://platform.deepseek.com/api_keys",
+        default_model="deepseek-v4-pro",
+        default_base_url="https://api.deepseek.com",
     ),
+
+    LLMProviderSpec(
+        "qwen",
+        "Alibaba Cloud Qwen",
+        adapter="qwen",
+        api_key_url="https://dashscope.console.aliyun.com/apiKey",
+        default_model="qwen-max",
+        requires_base_url=False,
+        show_base_url=False,
+    ),
+
+    LLMProviderSpec(
+        "volcengine",
+        "ByteDance VolcEngine Ark",
+        api_key_url=(
+            "https://www.volcengine.com/activity/ai618?utm_campaign=hw&"
+            "utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&"
+            "utm_term=MoneyPrinterTurbo"
+        ),
+        default_model="doubao-seed-2-1-turbo-260628",
+        default_base_url="https://ark.cn-beijing.volces.com/api/v3",
+    ),
+
+    LLMProviderSpec(
+        "minimax",
+        "MiniMax",
+        api_key_url="https://platform.minimax.io/",
+        default_model="MiniMax-M3",
+        default_base_url="https://api.minimax.io/v1",
+    ),
+
+    LLMProviderSpec(
+        "mimo",
+        "Xiaomi MiMo",
+        api_key_url=(
+            "https://platform.xiaomimimo.com/docs/zh-CN/quick-start/first-api-call"
+        ),
+        default_model="mimo-v2.5-pro",
+        default_base_url="https://api.xiaomimimo.com/v1",
+    ),
+
+    # 讯飞星辰 MaaS 的按量付费和 Token Plan 使用不同的 OpenAI 兼容地址，
+    # 两边的 API Key 不能混用。这里默认按量付费，Token Plan 用户在 Base URL
+    # 中改填 maas-token-api 的地址即可。
+    LLMProviderSpec(
+        "iflytek",
+        "iFlytek Spark (Astron MaaS)",
+        api_key_url="https://maas.xfyun.cn/",
+        default_model="spark-x2.5",
+        default_base_url="https://maas-api.cn-huabei-1.xf-yun.com/v2",
+        model_docs_url="https://maas.xfyun.cn/modelSquare",
+    ),
+
+    LLMProviderSpec(
+        "modelscope",
+        "Alibaba ModelScope",
+        adapter="modelscope",
+        api_key_url=("https://modelscope.cn/docs/model-service/API-Inference/intro"),
+        default_model="ZhipuAI/GLM-5.2",
+        default_base_url="https://api-inference.modelscope.cn/v1/",
+    ),
+
+    # ==== 本地与订阅客户端：免费引擎或复用本机已登录账号 ====
+    LLMProviderSpec(
+        "ollama",
+        "Ollama",
+        requires_api_key=False,
+        show_api_key=False,
+    ),
+
+    # llama-server（llama.cpp）暴露 OpenAI-compatible 端点，与 Ollama 同法
+    # 接入：默认端口 8080，API Key 可选（llama-server --api-key 启用时才需要）。
+    # 模型名由 llama-server 忽略，填任意非空值即可；默认值保证开箱可用。
+    LLMProviderSpec(
+        "llamacpp",
+        "llama.cpp (llama-server)",
+        default_model="local-model",
+        default_base_url="http://127.0.0.1:8080/v1",
+        requires_api_key=False,
+    ),
+
+    # Claude 订阅（Pro / Max / Team）不签发 API Key，凭证只能由 Claude Code
+    # 官方客户端使用，因此这个 Provider 不走 HTTP 接口，而是调用本机已登录
+    # 的 claude CLI。模型名留空即沿用 CLI 当前的默认模型。
+    LLMProviderSpec(
+        "claude_code",
+        "Claude Code (Claude subscription)",
+        adapter="claude_code",
+        requires_api_key=False,
+        show_api_key=False,
+        requires_base_url=False,
+        show_base_url=False,
+        requires_model_name=False,
+        extra_fields=(
+            LLMProviderField("cli_path", "Claude CLI Path"),
+            LLMProviderField("timeout", "Timeout (seconds)", default_value="300"),
+        ),
+    ),
+
     LLMProviderSpec(
         "openai_codex",
         "OpenAI - Codex",
@@ -289,6 +390,7 @@ LLM_PROVIDER_REGISTRY = (
             LLMProviderField("timeout", "Timeout (seconds)", default_value="300"),
         ),
     ),
+
     LLMProviderSpec(
         "openai_chatgpt",
         "OpenAI - ChatGPT (Native OAuth)",
@@ -301,6 +403,16 @@ LLM_PROVIDER_REGISTRY = (
             LLMProviderField("timeout", "Timeout (seconds)", default_value="300"),
         ),
     ),
+
+    # ==== 国际主流原厂 ====
+    LLMProviderSpec(
+        "openai",
+        "OpenAI",
+        api_key_url="https://platform.openai.com/api-keys",
+        default_model="gpt-5.5",
+        default_base_url="https://api.openai.com/v1",
+    ),
+
     LLMProviderSpec(
         "anthropic",
         "Anthropic Claude",
@@ -308,6 +420,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="claude-sonnet-5",
         default_base_url="https://api.anthropic.com/v1/",
     ),
+
     LLMProviderSpec(
         "gemini",
         "Google Gemini",
@@ -318,30 +431,7 @@ LLM_PROVIDER_REGISTRY = (
         show_base_url=False,
         deprecated_models=("gemini-pro", "gemini-1.0-pro"),
     ),
-    LLMProviderSpec(
-        "muse_spark",
-        "Muse Spark",
-        api_key_url="https://dev.meta.ai/docs/authentication",
-        default_model="muse-spark-1.3",
-        default_base_url="https://api.meta.ai/v1",
-        model_docs_url="https://dev.meta.ai/docs/models",
-    ),
-    LLMProviderSpec(
-        "deepseek",
-        "DeepSeek",
-        api_key_url="https://platform.deepseek.com/api_keys",
-        default_model="deepseek-v4-pro",
-        default_base_url="https://api.deepseek.com",
-    ),
-    LLMProviderSpec(
-        "qwen",
-        "Alibaba Cloud Qwen",
-        adapter="qwen",
-        api_key_url="https://dashscope.console.aliyun.com/apiKey",
-        default_model="qwen-max",
-        requires_base_url=False,
-        show_base_url=False,
-    ),
+
     LLMProviderSpec(
         "azure",
         "Microsoft Azure OpenAI",
@@ -352,17 +442,7 @@ LLM_PROVIDER_REGISTRY = (
         ),
         default_model="gpt-35-turbo",
     ),
-    LLMProviderSpec(
-        "volcengine",
-        "ByteDance VolcEngine Ark",
-        api_key_url=(
-            "https://www.volcengine.com/activity/ai618?utm_campaign=hw&"
-            "utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&"
-            "utm_term=MoneyPrinterTurbo"
-        ),
-        default_model="doubao-seed-2-1-turbo-260628",
-        default_base_url="https://ark.cn-beijing.volces.com/api/v3",
-    ),
+
     LLMProviderSpec(
         "grok",
         "xAI Grok",
@@ -370,67 +450,15 @@ LLM_PROVIDER_REGISTRY = (
         default_model="grok-4.3",
         default_base_url="https://api.x.ai/v1",
     ),
+
     LLMProviderSpec(
-        "minimax",
-        "MiniMax",
-        api_key_url="https://platform.minimax.io/",
-        default_model="MiniMax-M3",
-        default_base_url="https://api.minimax.io/v1",
+        "groq",
+        "Groq",
+        api_key_url="https://console.groq.com/keys",
+        default_model="openai/gpt-oss-120b",
+        default_base_url="https://api.groq.com/openai/v1",
     ),
-    LLMProviderSpec(
-        "mimo",
-        "Xiaomi MiMo",
-        api_key_url=(
-            "https://platform.xiaomimimo.com/docs/zh-CN/quick-start/first-api-call"
-        ),
-        default_model="mimo-v2.5-pro",
-        default_base_url="https://api.xiaomimimo.com/v1",
-    ),
-    # 讯飞星辰 MaaS 的按量付费和 Token Plan 使用不同的 OpenAI 兼容地址，
-    # 两边的 API Key 不能混用。这里默认按量付费，Token Plan 用户在 Base URL
-    # 中改填 maas-token-api 的地址即可。
-    LLMProviderSpec(
-        "iflytek",
-        "iFlytek Spark (Astron MaaS)",
-        api_key_url="https://maas.xfyun.cn/",
-        default_model="spark-x2.5",
-        default_base_url="https://maas-api.cn-huabei-1.xf-yun.com/v2",
-        model_docs_url="https://maas.xfyun.cn/modelSquare",
-    ),
-    # 聚合与统一接入平台
-    LLMProviderSpec(
-        "jalapeno",
-        "Jalapeno Cloud",
-        api_key_url="https://www.jalapeno-cloud.ai/MoneyPrinterTurbo",
-        default_model="DeepSeek-V4.1-Flash",
-        default_base_url="https://api.jalapeno-cloud.ai/v1",
-        model_docs_url="https://www.jalapeno-cloud.ai/models",
-    ),
-    LLMProviderSpec(
-        "infistar",
-        "Infistar",
-        api_key_url="https://infistar.cc/keys",
-        default_model="gpt-6-luna",
-        default_base_url="https://infistar.cc/v1",
-        model_docs_url="https://infistar.cc/pricing",
-    ),
-    LLMProviderSpec(
-        "shengsuanyun",
-        "Shengsuan Cloud",
-        api_key_url="https://www.shengsuanyun.com/?from=CH_XUQ4OTSK",
-        default_model="deepseek/deepseek-v4-flash",
-        default_base_url="https://router.shengsuanyun.com/api/v1",
-    ),
-    # APIMart 同时提供 `/api/v1` 业务接口和 `/v1` OpenAI 兼容接口。
-    # 当前 LLM 服务层依赖 OpenAI SDK 直接读取 choices，因此必须使用不带
-    # code/data 外层包装的 `/v1` 入口，不能照搬异步业务接口的地址。
-    LLMProviderSpec(
-        "apimart",
-        "APIMart",
-        api_key_url="https://go.apimart.ai/gh-moneyprinterturbo",
-        default_model="gpt-5.6-terra",
-        default_base_url="https://api.apimart.ai/v1",
-    ),
+
     LLMProviderSpec(
         "cloudflare",
         "Cloudflare AI Gateway",
@@ -449,14 +477,81 @@ LLM_PROVIDER_REGISTRY = (
             ),
         ),
     ),
+
     LLMProviderSpec(
-        "modelscope",
-        "Alibaba ModelScope",
-        adapter="modelscope",
-        api_key_url=("https://modelscope.cn/docs/model-service/API-Inference/intro"),
-        default_model="ZhipuAI/GLM-5.2",
-        default_base_url="https://api-inference.modelscope.cn/v1/",
+        "litellm",
+        "LiteLLM",
+        adapter="litellm",
+        default_model="openai/gpt-4o-mini",
+        requires_api_key=False,
+        requires_base_url=False,
+        show_api_key=False,
+        show_base_url=False,
     ),
+
+    LLMProviderSpec(
+        "oneapi",
+        "OneAPI",
+        api_key_url="https://github.com/songquanpeng/one-api",
+    ),
+
+    LLMProviderSpec(
+        "pollinations",
+        "Pollinations AI",
+        api_key_url="https://enter.pollinations.ai/",
+        default_model="openai-fast",
+        default_base_url="https://gen.pollinations.ai/v1",
+        deprecated_models=("default",),
+        deprecated_base_urls=("https://text.pollinations.ai/openai",),
+    ),
+
+    # ==== 聚合与推广平台：按量计费中转服务，集中放在列表尾部 ====
+    LLMProviderSpec(
+        "muse_spark",
+        "Muse Spark",
+        api_key_url="https://dev.meta.ai/docs/authentication",
+        default_model="muse-spark-1.3",
+        default_base_url="https://api.meta.ai/v1",
+        model_docs_url="https://dev.meta.ai/docs/models",
+    ),
+
+    LLMProviderSpec(
+        "jalapeno",
+        "Jalapeno Cloud",
+        api_key_url="https://www.jalapeno-cloud.ai/MoneyPrinterTurbo",
+        default_model="DeepSeek-V4.1-Flash",
+        default_base_url="https://api.jalapeno-cloud.ai/v1",
+        model_docs_url="https://www.jalapeno-cloud.ai/models",
+    ),
+
+    LLMProviderSpec(
+        "infistar",
+        "Infistar",
+        api_key_url="https://infistar.cc/keys",
+        default_model="gpt-6-luna",
+        default_base_url="https://infistar.cc/v1",
+        model_docs_url="https://infistar.cc/pricing",
+    ),
+
+    LLMProviderSpec(
+        "shengsuanyun",
+        "Shengsuan Cloud",
+        api_key_url="https://www.shengsuanyun.com/?from=CH_XUQ4OTSK",
+        default_model="deepseek/deepseek-v4-flash",
+        default_base_url="https://router.shengsuanyun.com/api/v1",
+    ),
+
+    # APIMart 同时提供 `/api/v1` 业务接口和 `/v1` OpenAI 兼容接口。
+    # 当前 LLM 服务层依赖 OpenAI SDK 直接读取 choices，因此必须使用不带
+    # code/data 外层包装的 `/v1` 入口，不能照搬异步业务接口的地址。
+    LLMProviderSpec(
+        "apimart",
+        "APIMart",
+        api_key_url="https://go.apimart.ai/gh-moneyprinterturbo",
+        default_model="gpt-5.6-terra",
+        default_base_url="https://api.apimart.ai/v1",
+    ),
+
     LLMProviderSpec(
         "aihubmix",
         "AIHubMix",
@@ -464,6 +559,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="gpt-5.4-mini",
         default_base_url="https://aihubmix.com/v1",
     ),
+
     LLMProviderSpec(
         "aimlapi",
         "AIML API",
@@ -471,6 +567,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="openai/gpt-5-5",
         default_base_url="https://api.aimlapi.com/v1",
     ),
+
     LLMProviderSpec(
         "evolink",
         "EvoLink",
@@ -478,6 +575,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="gpt-5.5",
         default_base_url="https://direct.evolink.ai/v1",
     ),
+
     LLMProviderSpec(
         "openrouter",
         "OpenRouter",
@@ -485,6 +583,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="minimax/minimax-m3:free",
         default_base_url="https://openrouter.ai/api/v1",
     ),
+
     LLMProviderSpec(
         "api_route",
         "API Route",
@@ -493,6 +592,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://www.api-route.com/v1",
         model_docs_url="https://www.api-route.com/pricing",
     ),
+
     # Fluxion 的 OpenAI 分组使用 /v1 接口，复用现有 Chat Completions 适配器。
     # 分组决定可用模型和地址，因此这里只提供默认值，保留用户覆盖配置的能力；
     # Anthropic/Gemini 原生分组不能直接使用这个入口，避免协议不匹配。
@@ -507,6 +607,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://fluxionai.space/v1",
         model_docs_url="https://fluxionai.space/model-plaza",
     ),
+
     LLMProviderSpec(
         "cheaperinference",
         "Cheaper Inference",
@@ -515,6 +616,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.cheaperinference.com/v1",
         model_docs_url="https://cheaperinference.com/#models",
     ),
+
     LLMProviderSpec(
         "requesty",
         "Requesty",
@@ -523,6 +625,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://router.requesty.ai/v1",
         model_docs_url="https://www.requesty.ai/models",
     ),
+
     LLMProviderSpec(
         "futureinfra",
         "FutureInfra",
@@ -531,6 +634,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://futureinfra.ai/v1/ai",
         model_docs_url="https://futureinfra.ai/ai/",
     ),
+
     LLMProviderSpec(
         "yapi",
         "Y-API",
@@ -539,6 +643,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.y-api.bestvirtualgoods.com/v1",
         model_docs_url="https://y-api.bestvirtualgoods.com/models",
     ),
+
     LLMProviderSpec(
         "opper",
         "Opper",
@@ -547,6 +652,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.opper.ai/v3/compat",
         model_docs_url="https://opper.ai/models",
     ),
+
     LLMProviderSpec(
         "onomeo",
         "onomeo",
@@ -555,6 +661,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://onomeo.com/v1",
         model_docs_url="https://onomeo.com/models",
     ),
+
     LLMProviderSpec(
         "empiriolabs",
         "EmpirioLabs AI",
@@ -563,6 +670,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.empiriolabs.ai/v1",
         model_docs_url="https://docs.empiriolabs.ai/models-pricing",
     ),
+
     LLMProviderSpec(
         "runcrate",
         "Runcrate",
@@ -571,6 +679,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.runcrate.ai/v1",
         model_docs_url="https://www.runcrate.ai/inference/pricing?utm_source=MoneyPrinterTurbo&utm_medium=directory&utm_campaign=gpu_pricing",
     ),
+
     LLMProviderSpec(
         "cloudgpu",
         "CloudGPU",
@@ -579,6 +688,7 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://cloudgpu.app/v1",
         model_docs_url="https://cloudgpu.app/v1/models",
     ),
+
     LLMProviderSpec(
         "cheapaimodel",
         "cheapaimodel",
@@ -587,74 +697,8 @@ LLM_PROVIDER_REGISTRY = (
         default_base_url="https://api.cheapaimodel.ai/v1",
         model_docs_url="https://cheapaimodel.ai/models",
     ),
-    # 本地部署与通用网关
-    LLMProviderSpec(
-        "ollama",
-        "Ollama",
-        requires_api_key=False,
-        show_api_key=False,
-    ),
-    # llama-server（llama.cpp）暴露 OpenAI-compatible 端点，与 Ollama 同法
-    # 接入：默认端口 8080，API Key 可选（llama-server --api-key 启用时才需要）。
-    # 模型名由 llama-server 忽略，填任意非空值即可；默认值保证开箱可用。
-    LLMProviderSpec(
-        "llamacpp",
-        "llama.cpp (llama-server)",
-        default_model="local-model",
-        default_base_url="http://127.0.0.1:8080/v1",
-        requires_api_key=False,
-    ),
-    # Claude 订阅（Pro / Max / Team）不签发 API Key，凭证只能由 Claude Code
-    # 官方客户端使用，因此这个 Provider 不走 HTTP 接口，而是调用本机已登录
-    # 的 claude CLI。模型名留空即沿用 CLI 当前的默认模型。
-    LLMProviderSpec(
-        "claude_code",
-        "Claude Code (Claude subscription)",
-        adapter="claude_code",
-        requires_api_key=False,
-        show_api_key=False,
-        requires_base_url=False,
-        show_base_url=False,
-        requires_model_name=False,
-        extra_fields=(
-            LLMProviderField("cli_path", "Claude CLI Path"),
-            LLMProviderField("timeout", "Timeout (seconds)", default_value="300"),
-        ),
-    ),
-    LLMProviderSpec(
-        "oneapi",
-        "OneAPI",
-        api_key_url="https://github.com/songquanpeng/one-api",
-    ),
-    LLMProviderSpec(
-        "litellm",
-        "LiteLLM",
-        adapter="litellm",
-        default_model="openai/gpt-4o-mini",
-        requires_api_key=False,
-        requires_base_url=False,
-        show_api_key=False,
-        show_base_url=False,
-    ),
-    # 其它推理与公共服务
-    LLMProviderSpec(
-        "groq",
-        "Groq",
-        api_key_url="https://console.groq.com/keys",
-        default_model="openai/gpt-oss-120b",
-        default_base_url="https://api.groq.com/openai/v1",
-    ),
-    LLMProviderSpec(
-        "pollinations",
-        "Pollinations AI",
-        api_key_url="https://enter.pollinations.ai/",
-        default_model="openai-fast",
-        default_base_url="https://gen.pollinations.ai/v1",
-        deprecated_models=("default",),
-        deprecated_base_urls=("https://text.pollinations.ai/openai",),
-    ),
-)
 
+)
 LLM_PROVIDERS = {provider.provider_id: provider for provider in LLM_PROVIDER_REGISTRY}
 
 if len(LLM_PROVIDERS) != len(LLM_PROVIDER_REGISTRY):

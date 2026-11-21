@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import math
@@ -313,6 +314,31 @@ def _extract_qwen_generation_text(response) -> str:
     return _normalize_text_response(text, "qwen")
 
 
+# 备用链转移（服务商配置的备用 Provider）：任务层在主 Provider 失败时临时
+# 切换重试。栈式覆盖只影响 _generate_response 的 Provider 解析，不写回
+# config.toml，也不会改变 WebUI 当前选中的主 Provider。
+_PROVIDER_OVERRIDE_STACK: list[str] = []
+
+
+def _active_provider_override() -> str:
+    """返回当前生效的临时 Provider 覆盖；无覆盖时空串。"""
+    return _PROVIDER_OVERRIDE_STACK[-1] if _PROVIDER_OVERRIDE_STACK else ""
+
+
+@contextlib.contextmanager
+def provider_override(provider_id: str):
+    """临时覆盖 LLM Provider 解析；与 config.toml 中的主 Provider 解耦。"""
+    normalized = (provider_id or "").strip().lower()
+    if normalized:
+        _PROVIDER_OVERRIDE_STACK.append(normalized)
+        try:
+            yield
+        finally:
+            _PROVIDER_OVERRIDE_STACK.pop()
+    else:
+        yield
+
+
 def _generate_response(
     prompt: str,
     app_config=None,
@@ -327,7 +353,7 @@ def _generate_response(
         # 的配置快照，确保模型请求重试期间不会因为后台任务结束并应用新配置，
         # 而切换到另一个 Provider、Base URL 或模型。
         runtime_app_config = app_config if app_config is not None else config.app
-        llm_provider = str(
+        llm_provider = _active_provider_override() or str(
             runtime_app_config.get("llm_provider", DEFAULT_LLM_PROVIDER_ID)
         ).lower()
         provider = get_llm_provider(llm_provider)
