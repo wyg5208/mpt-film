@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChangoFilm · 霓虹快门 Shutter C · 品牌定稿</title>
+<link rel="icon" type="image/png" href="brand/changofilm-mark-32.png">
+<style>
+  :root{
+    --bg:#0D0714; --bg2:#140B1F; --surface:#1B1029; --surface2:#241636;
+    --line:#3A2452; --line-soft:#2A1A3C;
+    --ink:#F7F2FA; --muted:#B49CC6; --faint:#7C6690;
+    --mag:#EC4899; --mag-deep:#C026D3; --vio:#8B5CF6; --pale:#F5D0FE; --deep:#1B0B2E;
+    --cyan:#22D3EE;
+    --ok:#34D399; --warn:#FBBF24; --danger:#FB7185; --info:#60A5FA;
+    --nav-h:58px; --ctl-h:62px; --radius:18px;
+    --font:"Inter","Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);line-height:1.65;overflow-x:hidden;
+    scrollbar-color:var(--mag-deep) var(--bg2)}
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-track{background:var(--bg2)}
+  ::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--mag),var(--vio));border-radius:6px;border:2px solid var(--bg2)}
+  ::-webkit-scrollbar-thumb:hover{background:var(--pale)}
+  ::selection{background:rgba(236,72,153,.4)}
+
+  .aurora{position:fixed;inset:0;z-index:-2;pointer-events:none;overflow:hidden}
+  .aurora::before,.aurora::after{content:"";position:absolute;width:72vmax;height:72vmax;border-radius:50%;filter:blur(95px);opacity:.17}
+  .aurora::before{background:radial-gradient(circle,var(--mag),transparent 60%);top:-32vmax;right:-20vmax;animation:dr1 27s ease-in-out infinite alternate}
+  .aurora::after{background:radial-gradient(circle,var(--vio),transparent 60%);bottom:-36vmax;left:-22vmax;animation:dr2 33s ease-in-out infinite alternate}
+  @keyframes dr1{to{transform:translate(-9vmax,8vmax) scale(1.1)}}
+  @keyframes dr2{to{transform:translate(8vmax,-7vmax) scale(1.07)}}
+  .grain{position:fixed;inset:0;z-index:55;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.9'/%3E%3C/svg%3E")}
+
+  nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);z-index:40;display:flex;align-items:center;gap:14px;padding:0 24px;
+    background:rgba(13,7,20,.85);backdrop-filter:blur(14px);border-bottom:1px solid var(--line-soft)}
+  .nav-brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px;white-space:nowrap}
+  .nav-brand svg{width:27px;height:27px}
+  .nav-brand .film{background:linear-gradient(90deg,var(--mag),var(--vio));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .final-chip{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--deep);background:linear-gradient(90deg,var(--pale),var(--mag));padding:3px 9px;border-radius:12px}
+  .nav-links{display:flex;gap:3px;margin-left:auto;overflow-x:auto;scrollbar-width:none}
+  .nav-links::-webkit-scrollbar{display:none}
+  .nav-links a{color:var(--muted);text-decoration:none;font-size:13px;padding:6px 11px;border-radius:9px;white-space:nowrap;transition:.2s}
+  .nav-links a:hover{color:var(--ink);background:var(--surface)}
+  .nav-links a.active{color:var(--pale);background:rgba(236,72,153,.18)}
+
+  .deck{position:fixed;top:var(--nav-h);left:0;right:0;z-index:39;display:flex;align-items:center;gap:17px;flex-wrap:wrap;padding:9px 24px;
+    background:rgba(20,11,31,.9);backdrop-filter:blur(14px);border-bottom:1px solid var(--line-soft)}
+  .deck .grp{display:flex;align-items:center;gap:7px}
+  .deck label{font-size:12px;color:var(--muted);white-space:nowrap}
+  .deck select{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px;font-family:var(--font);cursor:pointer}
+  .deck select:focus{outline:2px solid rgba(236,72,153,.55)}
+  .switch{position:relative;width:36px;height:20px;flex:none;cursor:pointer}
+  .switch input{opacity:0;width:0;height:0;position:absolute}
+  .switch i{position:absolute;inset:0;background:var(--surface2);border:1px solid var(--line);border-radius:20px;transition:.2s}
+  .switch i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:.2s}
+  .switch input:checked + i{background:rgba(236,72,153,.3);border-color:var(--mag-deep)}
+  .switch input:checked + i::after{transform:translateX(16px);background:var(--mag)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:104px;height:4px;border-radius:4px;background:var(--line);cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--mag);border:2px solid var(--bg);box-shadow:0 0 9px rgba(236,72,153,.7)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--mag);border:2px solid var(--bg)}
+  .deck .val{font-size:12px;color:var(--pale);min-width:42px;font-variant-numeric:tabular-nums}
+  .btn{display:inline-flex;align-items:center;gap:7px;border:none;cursor:pointer;font-family:var(--font);font-size:13px;font-weight:700;padding:9px 16px;border-radius:10px;transition:.18s;text-decoration:none}
+  .btn-mag{background:linear-gradient(120deg,var(--mag),var(--vio));color:#fff}
+  .btn-mag:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(236,72,153,.4)}
+  .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn-ghost:hover{border-color:var(--mag-deep);color:var(--pale)}
+  .btn-sm{padding:7px 12px;font-size:12px}
+
+  header{padding:calc(var(--nav-h) + var(--ctl-h) + 52px) 24px 40px;max-width:1200px;margin:0 auto}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:28px;align-items:stretch}
+  .stage{position:relative;border:1px solid var(--line);border-radius:var(--radius);min-height:460px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px 22px;overflow:hidden;transition:background .35s}
+  .stage::after{content:attr(data-tag);position:absolute;top:13px;left:16px;font-size:10px;letter-spacing:2.2px;color:var(--faint);text-transform:uppercase}
+  .markbox{position:relative;width:var(--mark-size,240px);height:var(--mark-size,240px);flex:none;transition:width .2s,height .2s}
+  .markbox svg.mark{width:100%;height:100%;display:block;filter:drop-shadow(0 0 calc(var(--glow,45)*.32px) rgba(236,72,153,.45)) drop-shadow(0 10px 26px rgba(0,0,0,.42))}
+  .markbox svg.guides{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;transition:.25s}
+  .stage.grid-on .markbox svg.guides{opacity:.65}
+  .blade{transform-box:view-box;transform-origin:50px 50px;transform:rotate(var(--r));animation:enter .8s cubic-bezier(.2,.8,.3,1) backwards;animation-delay:calc(var(--i)*90ms)}
+  .motion-on .blade{animation:enter .8s cubic-bezier(.2,.8,.3,1) backwards,fire 3.8s cubic-bezier(.55,.06,.25,1) infinite;animation-delay:calc(var(--i)*90ms),calc(1.2s + var(--i)*80ms)}
+  @keyframes enter{from{opacity:0;transform:rotate(calc(var(--r) - 45deg)) scale(.55)}to{opacity:1;transform:rotate(var(--r)) scale(1)}}
+  @keyframes fire{0%,52%,100%{transform:rotate(var(--r))}60%{transform:rotate(calc(var(--r) + 9deg))}68%{transform:rotate(calc(var(--r) - 2.5deg))}76%{transform:rotate(calc(var(--r) + 1deg))}}
+  .core{transform-box:view-box;transform-origin:69px 50px}
+  .motion-on .core{animation:corePulse 3.8s cubic-bezier(.55,.06,.25,1) infinite;animation-delay:1.2s}
+  @keyframes corePulse{0%,52%,100%{transform:scale(1)}60%{transform:scale(1.15)}68%{transform:scale(.95)}76%{transform:scale(1.03)}}
+  .favrow{display:flex;align-items:flex-end;gap:16px}
+  .favrow .fav{display:flex;flex-direction:column;align-items:center;gap:5px}
+  .favrow .fav small{font-size:10px;color:var(--faint)}
+  .favrow .cell{display:flex;align-items:center;justify-content:center;border:1px dashed var(--line);border-radius:6px;padding:4px}
+  .lockupbox{width:min(100%,330px)}
+  .lockupbox svg{width:100%;height:auto;display:block}
+  .hero-info{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius);padding:28px;display:flex;flex-direction:column;gap:15px}
+  .chosen{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;font-size:11.5px;font-weight:800;letter-spacing:1.5px;color:var(--pale);border:1px solid var(--mag-deep);background:rgba(236,72,153,.14);padding:5px 12px;border-radius:20px}
+  .chosen i{width:7px;height:7px;border-radius:50%;background:var(--mag);box-shadow:0 0 10px var(--mag);animation:blink 2.2s infinite}
+  @keyframes blink{50%{opacity:.35}}
+  h1{font-size:clamp(30px,4vw,44px);font-weight:800;line-height:1.15}
+  h1 .en{display:block;font-size:13px;letter-spacing:4px;color:var(--muted);font-weight:600;margin-top:6px;text-transform:uppercase}
+  .hero-info p.desc{color:#D9CCE4;font-size:14.5px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12.5px;color:var(--muted)}
+  .kv b{color:var(--ink);font-weight:600}
+  .tags{display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:11.5px;color:var(--muted);border:1px solid var(--line);padding:3px 10px;border-radius:16px}
+  .hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:6px}
+
+  main{max-width:1200px;margin:0 auto;padding:0 24px 30px}
+  section{scroll-margin-top:calc(var(--nav-h) + var(--ctl-h) + 16px);margin-bottom:66px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px;flex-wrap:wrap}
+  .sec-head .no{font-size:13px;font-weight:800;color:var(--mag);letter-spacing:2px}
+  .sec-head h2{font-size:25px;font-weight:800}
+  .sec-sub{color:var(--muted);font-size:13.5px;margin-bottom:22px;max-width:760px}
+  .panel{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius);padding:24px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+
+  .spec{display:flex;flex-direction:column;gap:10px}
+  .spec-row{display:grid;grid-template-columns:96px 1fr auto;gap:12px;align-items:center;background:var(--bg2);border:1px solid var(--line-soft);border-radius:11px;padding:10px 12px}
+  .spec-row .k{font-size:12px;color:var(--muted)}
+  .spec-row code{font-family:var(--mono);font-size:11.5px;color:var(--pale);word-break:break-all}
+  .copybtn{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:7px;font-size:11px;padding:4px 9px;cursor:pointer;font-family:var(--font);transition:.15s;white-space:nowrap}
+  .copybtn:hover{color:var(--pale);border-color:var(--mag-deep)}
+  .geo-stage{min-height:380px}
+
+  .gradbar{height:64px;border-radius:14px;background:linear-gradient(100deg,var(--mag),var(--vio));position:relative;margin-bottom:8px;box-shadow:0 10px 30px rgba(236,72,153,.25)}
+  .gradbar span{position:absolute;bottom:-24px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .gradbar span.l{left:4px}.gradbar span.r{right:4px}
+  .sw-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:40px}
+  .sw-card{background:var(--bg2);border:1px solid var(--line-soft);border-radius:13px;padding:14px;cursor:pointer;transition:.18s}
+  .sw-card:hover{transform:translateY(-3px);border-color:var(--mag-deep)}
+  .sw-card i{display:block;height:44px;border-radius:9px;margin-bottom:10px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+  .sw-card .nm{font-size:13px;font-weight:700}
+  .sw-card code{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .sw-card small{display:block;font-size:11px;color:var(--faint);margin-top:3px}
+  .ratio{display:flex;height:26px;border-radius:9px;overflow:hidden;margin:26px 0 8px;border:1px solid var(--line-soft)}
+  .ratio div{display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden}
+  .ratio-leg{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+  .sem{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  .sem .s{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);border:1px solid var(--line-soft);border-radius:9px;padding:6px 11px;cursor:pointer;background:var(--bg2)}
+  .sem .s:hover{color:var(--ink)}
+  .sem .s i{width:14px;height:14px;border-radius:4px}
+
+  .app-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .app-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;align-items:center;transition:.2s}
+  .app-card:hover{border-color:var(--line);transform:translateY(-3px)}
+  .app-card .cap{font-size:12px;color:var(--muted);text-align:center}
+  .tiles{display:flex;align-items:flex-end;gap:14px}
+  .tile{display:flex;align-items:center;justify-content:center;background:linear-gradient(150deg,var(--surface2),var(--deep));border:1px solid var(--line);box-shadow:0 8px 22px rgba(0,0,0,.45)}
+  .tile img{width:70%;height:70%}
+  .mask-circle{width:96px;height:96px;border-radius:50%;overflow:hidden;border:1px solid var(--line);box-shadow:0 8px 22px rgba(0,0,0,.45)}
+  .mask-circle img{width:100%;height:100%}
+  .chips{display:flex;gap:12px}
+  .chip{width:44px;height:44px;border-radius:11px;display:flex;align-items:center;justify-content:center}
+  .chip img{width:26px;height:26px}
+  .chip-l{background:#F3EBF6}.chip-d{background:#0D0714;border:1px solid var(--line)}
+  .lk-paper{background:#F3EBF6;border-radius:12px;padding:14px 18px;width:100%}
+  .lk-deep{background:var(--deep);border:1px solid var(--line);border-radius:12px;padding:14px 18px;width:100%}
+  .lk-paper img,.lk-deep img{width:100%;display:block}
+  .frame{position:relative;width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;border:1px solid var(--line);
+    background:radial-gradient(circle at 70% 20%,rgba(236,72,153,.35),transparent 55%),radial-gradient(circle at 20% 85%,rgba(139,92,246,.4),transparent 50%),linear-gradient(120deg,#2A1240,#0D0714 55%,#3B1030)}
+  .frame .ttl{position:absolute;top:14px;left:16px;font-size:12px;color:var(--pale);letter-spacing:1px}
+  .frame .ttl small{display:block;color:var(--muted);font-size:10px;letter-spacing:2px}
+  .frame .wm{position:absolute;right:12px;bottom:10px;display:flex;align-items:center;gap:7px;opacity:.8}
+  .frame .wm img{width:30px;height:30px}
+  .frame .wm span{font-size:10px;letter-spacing:2px;color:var(--pale)}
+  .tabmock{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px 12px 8px 8px;overflow:hidden}
+  .tabmock .bar{display:flex;gap:6px;padding:8px 10px 0;background:var(--surface2)}
+  .tabmock .tab{display:flex;align-items:center;gap:7px;background:var(--bg2);border-radius:9px 9px 0 0;padding:7px 14px;font-size:11.5px;color:var(--ink)}
+  .tabmock .tab img{width:15px;height:15px}
+  .tabmock .tab.ghost{background:transparent;color:var(--faint)}
+  .tabmock .addr{margin:8px 10px 10px;background:var(--surface);border-radius:8px;padding:5px 12px;font-size:10.5px;color:var(--faint);font-family:var(--mono)}
+
+  .rule-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+  .rule{background:var(--surface);border:1px solid var(--line-soft);border-radius:14px;padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:10px}
+  .rule .box{position:relative;width:100%;aspect-ratio:1;border-radius:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg2);border:1px solid var(--line-soft)}
+  .rule .box svg{width:72%;height:72%}
+  .rule.dont .box::after{content:"";position:absolute;left:-12%;right:-12%;top:50%;height:3px;background:var(--danger);transform:rotate(-24deg);box-shadow:0 0 12px rgba(251,113,133,.7)}
+  .rule .mark-x{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#2A0710;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center}
+  .rule.do .mark-x{background:var(--ok);color:#06281C}
+  .rule small{font-size:11.5px;color:var(--muted);text-align:center}
+  .rule.busy .box{background:repeating-conic-gradient(from 20deg,#EC4899 0 25deg,#22D3EE 25deg 50deg,#FBBF24 50deg 75deg,#8B5CF6 75deg 100deg)}
+
+  .asset-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  .asset-head .note{font-size:12px;color:var(--faint)}
+  .assets{display:flex;flex-direction:column;gap:9px}
+  .asset-row{display:grid;grid-template-columns:minmax(210px,1.2fr) 64px 110px minmax(160px,1.4fr) 84px auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:11px 16px;transition:.15s}
+  .asset-row:hover{border-color:var(--line);background:var(--surface2)}
+  .asset-row .fn{font-family:var(--mono);font-size:12px;color:var(--ink);word-break:break-all}
+  .asset-row .fn small{display:block;font-family:var(--font);color:var(--muted);font-size:11.5px}
+  .fmt{font-size:10px;font-weight:800;letter-spacing:1px;text-align:center;padding:3px 0;border-radius:7px}
+  .fmt-SVG{background:rgba(236,72,153,.18);color:var(--mag)}
+  .fmt-PNG{background:rgba(139,92,246,.2);color:var(--vio)}
+  .fmt-ICO{background:rgba(96,165,250,.18);color:var(--info)}
+  .fmt-ICNS{background:rgba(251,191,36,.16);color:var(--warn)}
+  .asset-row .dims{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+  .asset-row .use{font-size:11.5px;color:var(--muted)}
+  .asset-row .sz{font-size:11px;color:var(--faint);text-align:right;font-variant-numeric:tabular-nums}
+
+  footer{border-top:1px solid var(--line-soft);padding:32px 24px 46px;text-align:center;color:var(--faint);font-size:12.5px}
+  footer b{color:var(--muted)}
+  footer code{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  #toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,90px);z-index:60;background:var(--surface2);border:1px solid var(--mag-deep);color:var(--ink);padding:11px 20px;border-radius:12px;font-size:13.5px;box-shadow:0 12px 34px rgba(0,0,0,.55);transition:transform .3s cubic-bezier(.2,.9,.3,1.2),visibility .3s;pointer-events:none;max-width:88vw;visibility:hidden}
+  #toast.show{transform:translate(-50%,0);visibility:visible}
+  #toast .tk{color:var(--mag);font-weight:800;margin-right:6px}
+  .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+
+  @media (max-width:980px){
+    .hero-grid,.two{grid-template-columns:1fr}
+    .app-grid{grid-template-columns:repeat(2,1fr)}
+    .rule-grid{grid-template-columns:repeat(3,1fr)}
+    .sw-grid{grid-template-columns:repeat(2,1fr)}
+    .asset-row{grid-template-columns:1fr 64px auto;grid-auto-rows:auto}
+    .asset-row .dims,.asset-row .use{grid-column:1/-1}
+    .asset-row .sz{display:none}
+  }
+  @media (max-width:640px){
+    nav{padding:0 12px;gap:8px}
+    .nav-brand .suffix{display:none}
+    .deck{gap:11px;padding:8px 12px}
+    header,main{padding-left:12px;padding-right:12px}
+    .app-grid{grid-template-columns:1fr}
+    .rule-grid{grid-template-columns:repeat(2,1fr)}
+    .stage{min-height:360px}
+  }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<nav>
+  <div class="nav-brand"><span id="navMark"></span><span>Chango<span class="film">Film</span></span><span class="final-chip">定稿 FINAL</span></div>
+  <div class="nav-links" id="navLinks">
+    <a href="#mark">标记</a><a href="#geometry">构造</a><a href="#color">色彩</a><a href="#apps">应用</a><a href="#rules">规范</a><a href="#assets">资产</a>
+    <a href="index.html" style="color:var(--faint)">← 提案页</a>
+  </div>
+</nav>
+
+<div class="deck">
+  <div class="grp"><label>背景</label>
+    <select id="ctlBg"><option value="deep">深空</option><option value="light">纸面</option><option value="brand">品牌场</option><option value="black">纯黑</option></select>
+  </div>
+  <div class="grp"><label>网格</label><label class="switch"><input type="checkbox" id="ctlGrid"><i></i></label></div>
+  <div class="grp"><label>单色</label><label class="switch"><input type="checkbox" id="ctlMono"><i></i></label></div>
+  <div class="grp"><label>字标</label><label class="switch"><input type="checkbox" id="ctlLockup"><i></i></label></div>
+  <div class="grp"><label>快门动效</label><label class="switch"><input type="checkbox" id="ctlMotion" checked><i></i></label></div>
+  <div class="grp"><label>光晕</label><input type="range" id="ctlGlow" min="0" max="100" value="45"><span class="val" id="glowVal">45</span></div>
+  <div class="grp"><label>尺寸</label><input type="range" id="ctlSize" min="120" max="340" value="240"><span class="val" id="sizeVal">240px</span></div>
+  <div class="grp"><label>PNG</label>
+    <select id="ctlExport"><option value="256">256</option><option value="512" selected>512</option><option value="1024">1024</option></select>
+  </div>
+  <div class="grp" style="margin-left:auto">
+    <button class="btn btn-ghost btn-sm" id="ctlReset">重置</button>
+    <button class="btn btn-ghost btn-sm" id="dlSvg">↓ SVG</button>
+    <button class="btn btn-ghost btn-sm" id="dlPng">↓ PNG</button>
+    <button class="btn btn-mag btn-sm" id="cpSvg">复制 SVG</button>
+  </div>
+</div>
+
+<header>
+  <div class="hero-grid">
+    <div class="stage motion-on" id="heroStage" data-tag="Final Mark · Shutter C">
+      <div class="markbox" id="heroBox"></div>
+      <div class="lockupbox" id="heroLockup" hidden></div>
+      <div class="favrow" id="heroFav"></div>
+    </div>
+    <div class="hero-info">
+      <span class="chosen"><i></i>已选定 · FINAL · 2026-11-21</span>
+      <h1>霓虹快门<span class="en">Shutter C · ChangoFilm Trademark</span></h1>
+      <p class="desc">五片光圈叶片旋合成 C，第六片的缺席恰好留出家族开口，播放三角悬浮于光圈之心。品红→电紫的霓虹渐变随叶片旋转形成风车光晕——面向 AI 生成影像与系列短剧创作的前沿气质。自五套候选中选定，作为 ChangoFilm 的唯一主商标。</p>
+      <div class="kv">
+        <span>识别基因</span><b>光圈叶片 C + 播放三角</b>
+        <span>家族血缘</span><b>ChangoVideo「A1」C 环开口同构</b>
+        <span>主色脉</span><b>#EC4899 → #8B5CF6 · 三角 #F5D0FE</b>
+        <span>动效签名</span><b>快门开合 · 叶片错峰 flex + 三角脉冲</b>
+      </div>
+      <div class="tags"><span class="tag">光圈结构</span><span class="tag">霓虹渐变</span><span class="tag">AI 影像</span><span class="tag">系列短剧</span></div>
+      <div class="hero-actions">
+        <a class="btn btn-mag" href="#assets">定稿资产清单 ↓</a>
+        <a class="btn btn-ghost" href="#geometry">查看构造规范</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="geometry" class="reveal">
+  <div class="sec-head"><span class="no">SEC.01</span><h2>构造与几何</h2></div>
+  <p class="sec-sub">所有衍生文件必须复现以下几何常量。叶片为弧形四边形，绕中心 (50,50) 以 60° 步进旋转；第六片（-30°~30°）缺席形成家族 C 口。点击任意值即可复制。</p>
+  <div class="two">
+    <div class="stage geo-stage grid-on" id="geoStage" data-tag="Construction · 1:1"><div class="markbox" id="geoBox" style="--mark-size:270px"></div></div>
+    <div class="panel spec" id="specRows"></div>
+  </div>
+</section>
+
+<section id="color" class="reveal">
+  <div class="sec-head"><span class="no">SEC.02</span><h2>色彩系统</h2></div>
+  <p class="sec-sub">品红承载最大面积的情绪场，电紫负责深度与过渡，淡粉只留给光圈之心。深空底与墨白是冷暖两端的中性色；家族青仅用于与 ChangoVideo 同框时的血缘呼应。</p>
+  <div class="panel">
+    <div class="gradbar"><span class="l">#EC4899 · 0%</span><span class="r">#8B5CF6 · 100%</span></div>
+    <div class="sw-grid" id="swGrid"></div>
+    <div class="ratio" id="ratioBar"></div>
+    <div class="ratio-leg" id="ratioLeg"></div>
+    <div class="sem" id="semRow"></div>
+  </div>
+</section>
+
+<section id="apps" class="reveal">
+  <div class="sec-head"><span class="no">SEC.03</span><h2>应用预览</h2></div>
+  <p class="sec-sub">以下预览直接引用 brand/ 目录中的定稿资产文件——图标磁贴、PWA 自适应裁切、浅深芯片、横版字标、片头水印与浏览器标签，全部为真实交付物而非示意图。</p>
+  <div class="app-grid">
+    <div class="app-card"><div class="tiles">
+      <div class="tile" style="width:84px;height:84px;border-radius:22px"><img src="brand/changofilm-mark-192.png" alt="应用图标 84px"></div>
+      <div class="tile" style="width:52px;height:52px;border-radius:14px"><img src="brand/changofilm-mark-48.png" alt="应用图标 52px"></div>
+      <div class="tile" style="width:34px;height:34px;border-radius:9px"><img src="brand/changofilm-mark-32.png" alt="应用图标 34px"></div>
+    </div><div class="cap">应用磁贴 · 84 / 52 / 34px</div></div>
+    <div class="app-card"><div class="mask-circle"><img src="brand/changofilm-maskable-512.png" alt="Maskable 圆形裁切"></div><div class="cap">PWA maskable · Android 圆形裁切安全区</div></div>
+    <div class="app-card"><div class="chips">
+      <div class="chip chip-l"><img src="brand/changofilm-mono-light.svg" alt="浅底单色"></div>
+      <div class="chip chip-d"><img src="brand/changofilm-mark-48.png" alt="深底彩色"></div>
+    </div><div class="cap">浅底墨版 / 深底彩色 · 26px 芯片</div></div>
+    <div class="app-card"><div class="lk-deep"><img src="brand/changofilm-lockup-dark.svg" alt="横版字标 深底"></div><div class="cap">横版字标 · 深底（渐变 Film）</div></div>
+    <div class="app-card"><div class="lk-paper"><img src="brand/changofilm-lockup-light.svg" alt="横版字标 浅底"></div><div class="cap">横版字标 · 纸面（品红 Film）</div></div>
+    <div class="app-card"><div class="tabmock">
+      <div class="bar"><div class="tab"><img src="brand/changofilm-mark-16.png" alt="favicon">ChangoFilm Studio</div><div class="tab ghost">新标签页</div></div>
+      <div class="addr">https://studio.changofilm.app</div>
+    </div><div class="cap">浏览器标签 · 16px favicon 实测</div></div>
+    <div class="app-card" style="grid-column:1/-1"><div class="frame">
+      <div class="ttl">《霓虹都市》 第 1 集<small>CHANGOFILM ORIGINAL SERIES</small></div>
+      <div class="wm"><img src="brand/changofilm-mono-dark.svg" alt="片头水印"><span>CHANGOFILM 出品</span></div>
+    </div><div class="cap">片头水印 · 反白单色 30px · 右下角安全位</div></div>
+  </div>
+</section>
+
+<section id="rules" class="reveal">
+  <div class="sec-head"><span class="no">SEC.04</span><h2>使用规范</h2></div>
+  <p class="sec-sub">商标的唯一性来自克制。以下四种改动一律禁止；唯一附加要求是保留 ≥10% 的安全边距。</p>
+  <div class="rule-grid" id="ruleGrid"></div>
+</section>
+
+<section id="assets" class="reveal">
+  <div class="sec-head"><span class="no">SEC.05</span><h2>定稿资产清单</h2></div>
+  <div class="asset-head">
+    <button class="btn btn-mag btn-sm" id="dlAll">逐个下载全部资产</button>
+    <span class="note">标准色静态交付物 · 顶部控制栏的导出则跟随当前预览状态（单色 / 尺寸）</span>
+  </div>
+  <div class="assets" id="assetRows"></div>
+</section>
+</main>
+
+<footer>
+  <p><b>ChangoFilm · 霓虹快门 Shutter C</b> · 品牌定稿 2026-11-21 · 与 ChangoVideo「A1」同族</p>
+  <p style="margin-top:6px">资产再生成：<code>node docs/changofilm-logo/build-brand.mjs</code> · 视觉复验：<code>node docs/changofilm-logo/verify-final.mjs</code></p>
+</footer>
+
+<div id="toast"><span class="tk">✓</span><span id="toastMsg"></span></div>
+
+<script src="brand/manifest.js"></script>
+<script>
+"use strict";
+const state = { bg:"deep", grid:false, mono:false, lockup:false, motion:true, glow:45, size:240, exportSize:512 };
+let _uid = 0; const uid = () => "f" + (_uid++);
+const BLADE = "M50 10 A40 40 0 0 1 84.64 30 L62 42 A16 16 0 0 0 50 34 Z";
+const ROTS = [0,120,180,240,300];
+const TRI = "M62 42 L62 58 L76 50 Z";
+const MAG="#EC4899", VIO="#8B5CF6", PALE="#F5D0FE";
+const $ = s => document.querySelector(s);
+
+function inner(o, animated){
+  const p = uid();
+  const f = o.mono ? o.mono : `url(#${p}g)`;
+  const defs = o.mono ? "" : `<linearGradient id="${p}g" gradientUnits="userSpaceOnUse" x1="50" y1="10" x2="84" y2="42"><stop offset="0" stop-color="${MAG}"/><stop offset="1" stop-color="${VIO}"/></linearGradient>`;
+  const blades = ROTS.map((r,i)=> animated
+    ? `<g class="blade" style="--r:${r}deg;--i:${i}"><path d="${BLADE}" fill="${f}"/></g>`
+    : `<path d="${BLADE}" transform="rotate(${r} 50 50)" fill="${f}"/>`).join("");
+  return `<defs>${defs}</defs>${blades}<path class="core" d="${TRI}" fill="${o.mono||PALE}"/>`;
+}
+const svgOf = (o, animated, cls="mark") => `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="ChangoFilm 霓虹快门">${inner(o,animated)}</svg>`;
+function opts(){
+  if(!state.mono) return {};
+  const light = state.bg==="light";
+  const knock = {deep:"#0D0714",light:"#F3EBF6",brand:"#160925",black:"#000000"}[state.bg];
+  return { mono: light ? "#201030" : "#F7F2FA", knock };
+}
+const standalone = size => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${size}" height="${size}">${inner(opts(),false)}</svg>`;
+const GUIDES = `<svg class="guides" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="#EC4899" stroke-width=".5" stroke-dasharray="2 2"><rect x="1" y="1" width="98" height="98"/><circle cx="50" cy="50" r="40"/><circle cx="50" cy="50" r="16"/><line x1="50" y1="0" x2="50" y2="100"/><line x1="0" y1="50" x2="100" y2="50"/><line x1="50" y1="50" x2="100" y2="20"/><line x1="50" y1="50" x2="100" y2="80"/><circle cx="50" cy="50" r="2"/></g></svg>`;
+function stageBg(){
+  if(state.bg==="light") return "radial-gradient(circle at 50% 36%, #FFFFFF, #F3EBF6 78%)";
+  if(state.bg==="brand") return "radial-gradient(circle at 26% 16%, rgba(236,72,153,.3), transparent 58%), radial-gradient(circle at 80% 90%, rgba(139,92,246,.28), transparent 55%), #160925";
+  if(state.bg==="black") return "#000";
+  return "radial-gradient(circle at 50% 36%, #241636, #0D0714 74%)";
+}
+function lockupSVG(o){
+  const ink = state.bg==="light" ? "#201030" : "#F7F2FA";
+  const acc = o.mono ? o.mono : MAG;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 100"><g transform="translate(4 4) scale(0.92)">${inner(o,false)}</g><text x="112" y="64" font-family="Inter,'Segoe UI','Microsoft YaHei',sans-serif" font-size="37" font-weight="600" fill="${ink}">Chango<tspan font-weight="800" fill="${acc}">Film</tspan></text></svg>`;
+}
+function renderHero(){
+  const o = opts(), st = $("#heroStage");
+  st.style.background = stageBg();
+  st.classList.toggle("grid-on", state.grid);
+  st.classList.toggle("motion-on", state.motion);
+  st.style.setProperty("--glow", state.glow);
+  st.style.setProperty("--mark-size", state.size+"px");
+  $("#heroBox").innerHTML = svgOf(o, state.motion) + GUIDES;
+  const lk = $("#heroLockup"); lk.hidden = !state.lockup;
+  if(state.lockup) lk.innerHTML = lockupSVG(o);
+  $("#heroFav").innerHTML = [16,32,48].map(s=>`<div class="fav"><div class="cell">${svgOf(o,false).replace('class="mark"',`class="mark" style="width:${s}px;height:${s}px"`)}</div><small>${s}px</small></div>`).join("");
+}
+function renderStatic(){
+  $("#navMark").innerHTML = svgOf({},false);
+  $("#geoBox").innerHTML = svgOf({},false) + GUIDES;
+  $("#geoStage").style.background = stageBg();
+}
+/* spec / color / rules / assets */
+const SPECS = [
+  ["viewBox","0 0 100 100"],
+  ["叶片路径",BLADE],
+  ["旋转序列","0° / 120° / 180° / 240° / 300°（第六片缺席成 C 口）"],
+  ["叶片渐变","#EC4899 → #8B5CF6 · userSpace (50,10)→(84,42)"],
+  ["播放三角",TRI+" · #F5D0FE"],
+  ["安全边距","≥ 10 units（viewBox 的 10%）"],
+  ["最小尺寸","16 px（favicon 实测可读）"],
+];
+$("#specRows").innerHTML = SPECS.map(([k,v],i)=>`<div class="spec-row"><span class="k">${k}</span><code>${v}</code><button class="copybtn" data-spec="${i}">复制</button></div>`).join("");
+const SWATCHES = [
+  ["主品红",MAG,"情绪主色 · 最大面积"],["电紫",VIO,"渐变终点 · 深度"],["光圈淡粉",PALE,"仅限三角与高光"],
+  ["深空底","#1B0B2E","背景 / 磁贴底"],["墨白","#F7F2FA","深底文字 / 反白单色"],["家族青","#22D3EE","仅与 ChangoVideo 同框"],
+];
+$("#swGrid").innerHTML = SWATCHES.map(([n,c,u])=>`<div class="sw-card" data-hex="${c}"><i style="background:${c}"></i><div class="nm">${n}</div><code>${c}</code><small>${u}</small></div>`).join("");
+const RATIO = [["深空底 55%","#1B0B2E",55],["品红 22%",MAG,22],["电紫 13%",VIO,13],["淡粉 6%",PALE,6],["墨白 4%","#F7F2FA",4]];
+$("#ratioBar").innerHTML = RATIO.map(([n,c,w])=>`<div style="width:${w}%;background:${c};color:${c===PALE||c==="#F7F2FA"?"#201030":"#fff"}">${w>=10?n:""}</div>`).join("");
+$("#ratioLeg").innerHTML = RATIO.map(([n,c])=>`<span><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${c};margin-right:5px"></i>${n}</span>`).join("");
+const SEM = [["success","#34D399"],["warning","#FBBF24"],["danger","#FB7185"],["info","#60A5FA"]];
+$("#semRow").innerHTML = SEM.map(([n,c])=>`<button class="s" data-hex="${c}"><i style="background:${c}"></i>${n} <code style="font-family:var(--mono);font-size:11px">${c}</code></button>`).join("");
+function ruleBox(svgInner, vb="0 0 100 100"){ return `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${svgInner}</svg>`; }
+const RULES = [
+  ["dont","禁止拉伸变形", ruleBox(`<g transform="translate(50 50) scale(1.28 .72) translate(-50 -50)">${inner({},false)}</g>`)],
+  ["dont","禁止擅自改色", ruleBox(inner({mono:"#22C55E"},false))],
+  ["dont","禁止旋转倾斜", ruleBox(`<g transform="rotate(32 50 50)">${inner({},false)}</g>`)],
+  ["dont","禁止杂乱底色", ruleBox(inner({},false)), "busy"],
+  ["do","保留 ≥10% 安全边距", ruleBox(`<rect x="-10" y="-10" width="120" height="120" fill="none" stroke="#34D399" stroke-width="1.4" stroke-dasharray="4 3"/>${inner({},false)}`, "-14 -14 128 128")],
+];
+$("#ruleGrid").innerHTML = RULES.map(([kind,cap,svg,extra])=>`<div class="rule ${kind} ${extra||""}"><div class="box">${svg}<span class="mark-x">${kind==="dont"?"✕":"✓"}</span></div><small>${cap}</small></div>`).join("");
+const MANIFEST = window.BRAND_MANIFEST || [];
+const fmtSize = b => b>1024*1024 ? (b/1048576).toFixed(1)+" MB" : b>1024 ? (b/1024).toFixed(1)+" KB" : b+" B";
+$("#assetRows").innerHTML = MANIFEST.map(f=>`<div class="asset-row">
+  <div class="fn">${f.file}<small>${f.label}</small></div>
+  <span class="fmt fmt-${f.fmt}">${f.fmt}</span>
+  <span class="dims">${f.dims}</span>
+  <span class="use">${f.use}</span>
+  <span class="sz">${fmtSize(f.bytes)}</span>
+  <a class="btn btn-ghost btn-sm" href="brand/${f.file}" download="${f.file}">↓ 下载</a>
+</div>`).join("") || `<div class="panel">资产尚未生成：请先运行 node docs/changofilm-logo/build-brand.mjs</div>`;
+
+/* export / copy / toast */
+function toast(msg){ $("#toastMsg").textContent=msg; const t=$("#toast"); t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),2400); }
+function saveBlob(blob,name){ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
+function dlSVG(){ saveBlob(new Blob([standalone(1024)],{type:"image/svg+xml"}),"changofilm-shutter-c-current.svg"); toast("已导出当前状态 SVG（1024 viewBox 源）"); }
+function dlPNG(){
+  const size=state.exportSize, img=new Image();
+  img.onload=()=>{ const cv=document.createElement("canvas"); cv.width=cv.height=size; cv.getContext("2d").drawImage(img,0,0,size,size);
+    cv.toBlob(b=>{ if(b){ saveBlob(b,`changofilm-shutter-c-${size}.png`); toast(`已导出当前状态 PNG ${size}px · 透明背景`);} else toast("PNG 导出失败，请改用 SVG"); },"image/png"); };
+  img.onerror=()=>toast("PNG 导出失败，请改用 SVG");
+  img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(standalone(size));
+}
+async function copyText(txt,msg){
+  try{ await navigator.clipboard.writeText(txt); toast(msg); }
+  catch(e){ const ta=document.createElement("textarea"); ta.value=txt; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); toast(msg); }catch(err){ toast("复制失败，请使用下载"); } ta.remove(); }
+}
+$("#dlSvg").addEventListener("click",dlSVG);
+$("#dlPng").addEventListener("click",dlPNG);
+$("#cpSvg").addEventListener("click",()=>copyText(standalone(1024),"当前状态 SVG 源码已复制"));
+$("#dlAll").addEventListener("click",()=>{ MANIFEST.forEach((f,i)=>setTimeout(()=>{ const a=document.createElement("a"); a.href="brand/"+f.file; a.download=f.file; document.body.appendChild(a); a.click(); a.remove(); },i*280)); toast(`正在逐个下载 ${MANIFEST.length} 个定稿资产…`); });
+document.addEventListener("click",e=>{
+  const sp=e.target.closest("[data-spec]"); if(sp){ copyText(SPECS[+sp.dataset.spec][1], `已复制：${SPECS[+sp.dataset.spec][0]}`); return; }
+  const hx=e.target.closest("[data-hex]"); if(hx){ copyText(hx.dataset.hex, `色值 ${hx.dataset.hex} 已复制`); }
+});
+/* controls */
+$("#ctlBg").addEventListener("change",e=>{ state.bg=e.target.value; renderHero(); renderStatic(); });
+$("#ctlGrid").addEventListener("change",e=>{ state.grid=e.target.checked; renderHero(); });
+$("#ctlMono").addEventListener("change",e=>{ state.mono=e.target.checked; renderHero(); });
+$("#ctlLockup").addEventListener("change",e=>{ state.lockup=e.target.checked; renderHero(); });
+$("#ctlMotion").addEventListener("change",e=>{ state.motion=e.target.checked; renderHero(); });
+$("#ctlGlow").addEventListener("input",e=>{ state.glow=+e.target.value; $("#glowVal").textContent=state.glow; $("#heroStage").style.setProperty("--glow",state.glow); });
+$("#ctlSize").addEventListener("input",e=>{ state.size=+e.target.value; $("#sizeVal").textContent=state.size+"px"; $("#heroStage").style.setProperty("--mark-size",state.size+"px"); });
+$("#ctlExport").addEventListener("change",e=>{ state.exportSize=+e.target.value; });
+$("#ctlReset").addEventListener("click",()=>{
+  Object.assign(state,{bg:"deep",grid:false,mono:false,lockup:false,motion:true,glow:45,size:240,exportSize:512});
+  $("#ctlBg").value="deep"; $("#ctlGrid").checked=false; $("#ctlMono").checked=false; $("#ctlLockup").checked=false; $("#ctlMotion").checked=true;
+  $("#ctlGlow").value=45; $("#glowVal").textContent="45"; $("#ctlSize").value=240; $("#sizeVal").textContent="240px"; $("#ctlExport").value="512";
+  renderHero(); renderStatic(); toast("预览控制已重置");
+});
+/* deck height sync + reveal + nav active */
+const deckEl=document.querySelector(".deck");
+new ResizeObserver(()=>document.documentElement.style.setProperty("--ctl-h",deckEl.offsetHeight+"px")).observe(deckEl);
+const io=new IntersectionObserver(es=>es.forEach(x=>{ if(x.isIntersecting){ x.target.classList.add("in"); io.unobserve(x.target);} }),{threshold:.1});
+document.querySelectorAll(".reveal").forEach(el=>io.observe(el));
+const navA=[...document.querySelectorAll("#navLinks a")].filter(a=>a.getAttribute("href").startsWith("#"));
+const secIO=new IntersectionObserver(es=>es.forEach(x=>{ if(x.isIntersecting) navA.forEach(a=>a.classList.toggle("active",a.getAttribute("href")==="#"+x.target.id)); }),{rootMargin:"-35% 0px -55% 0px"});
+["mark","geometry","color","apps","rules","assets"].forEach(id=>{ const el=id==="mark"?document.querySelector("header"):document.getElementById(id); if(el) secIO.observe(el); });
+renderHero(); renderStatic();
+</script>
+</body>
+</html>

@@ -1,0 +1,449 @@
+/* ==========================================================================
+   ChangoFilm 品牌主题结构层 —— 定稿商标「霓虹快门 Shutter C」
+   在 styles.css 之后注入；颜色变量由 brand_theme.variables_css() 提供：
+   --cf-accent / --cf-accent-2 / --cf-accent-pale / --cf-accent-deep
+   --cf-bg / --cf-bg2 / --cf-surface / --cf-surface2 / --cf-line / --cf-line-soft
+   --cf-ink / --cf-muted / --cf-glow / --cf-radius / --cf-play / --cf-pad-top
+   --cf-gap / --cf-field-bg，并覆写 --st-primary-color / --st-link-color，
+   让站内既有基于 Streamlit 主题变量的规则自动跟随品牌强调色。
+   ========================================================================== */
+
+/* ---------- 背景场与基础文本 ---------- */
+[data-testid="stAppViewContainer"] {
+    background: var(--cf-field-bg) !important;
+}
+
+[data-testid="stAppViewContainer"] [data-testid="stMain"] {
+    background: transparent !important;
+}
+
+[data-testid="stCaptionContainer"] {
+    color: var(--cf-muted);
+}
+
+a,
+[data-testid="stMarkdownContainer"] a {
+    color: var(--cf-link);
+}
+
+::selection {
+    background: color-mix(in srgb, var(--cf-accent) 40%, transparent);
+    color: var(--cf-ink);
+}
+
+:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--cf-accent) 70%, transparent) !important;
+    outline-offset: 2px;
+}
+
+/* ---------- 品牌滚动条：轨道深空、滑块强调渐变 ---------- */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--cf-accent) 55%, var(--cf-bg2)) var(--cf-bg2);
+}
+
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+    background: var(--cf-bg2);
+}
+
+*::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    border: 2px solid var(--cf-bg2);
+    background: linear-gradient(180deg, var(--cf-accent), var(--cf-accent-2));
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, var(--cf-accent-pale), var(--cf-accent));
+}
+
+*::-webkit-scrollbar-corner {
+    background: var(--cf-bg2);
+}
+
+/* 三列壳的左右栏滚动条沿用品牌语言（覆盖 styles.css 的中性写法）。 */
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar {
+    width: 10px;
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar-thumb,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    border: 2px solid var(--cf-bg2);
+    background: linear-gradient(180deg, var(--cf-accent), var(--cf-accent-2));
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar-thumb:hover,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, var(--cf-accent-pale), var(--cf-accent));
+}
+
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1)::-webkit-scrollbar-track,
+div[class*="st-key-app_shell_"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3)::-webkit-scrollbar-track {
+    background: var(--cf-bg2);
+}
+
+/* ---------- 按钮：主操作渐变 + 光晕，次级借强调描边 ---------- */
+button[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(135deg, var(--cf-accent), var(--cf-accent-2)) !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--cf-radius) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 calc(var(--cf-glow) * 0.28px)
+        color-mix(in srgb, var(--cf-accent) 55%, transparent);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+button[data-testid="stBaseButton-primary"]:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 4px calc(8px + var(--cf-glow) * 0.3px)
+        color-mix(in srgb, var(--cf-accent) 60%, transparent);
+}
+
+button[data-testid="stBaseButton-primary"]:active {
+    transform: translateY(0);
+}
+
+button[data-testid="stBaseButton-primary"]:disabled {
+    background: color-mix(in srgb, var(--cf-accent) 30%, var(--cf-surface)) !important;
+    box-shadow: none;
+    filter: none;
+    transform: none;
+}
+
+button[data-testid="stBaseButton-secondary"] {
+    border-radius: var(--cf-radius) !important;
+    border-color: color-mix(in srgb, var(--cf-accent) 38%, var(--cf-line)) !important;
+    background: color-mix(in srgb, var(--cf-surface) 80%, transparent) !important;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+button[data-testid="stBaseButton-secondary"]:hover {
+    border-color: color-mix(in srgb, var(--cf-accent) 70%, transparent) !important;
+    background: color-mix(in srgb, var(--cf-accent) 10%, var(--cf-surface)) !important;
+}
+
+button[data-testid="stBaseButton-tertiary"] {
+    border-radius: var(--cf-radius) !important;
+}
+
+div[class*="st-key-nav_sidebar_"] button[kind="tertiary"]:hover {
+    background: color-mix(in srgb, var(--cf-accent) 12%, transparent) !important;
+}
+
+/* 导航按钮圆角也跟随主题圆角（覆盖 styles.css 的固定 8px）。 */
+div[class*="st-key-nav_sidebar_"] button {
+    border-radius: var(--cf-radius) !important;
+}
+
+/* ---------- 输入控件表面与聚焦环 ---------- */
+[data-baseweb="input"],
+[data-baseweb="select"] > div,
+[data-testid="stTextArea"] textarea,
+[data-baseweb="textarea"] {
+    background-color: var(--cf-surface) !important;
+    border-color: var(--cf-line) !important;
+    border-radius: var(--cf-radius) !important;
+}
+
+[data-baseweb="input"]:focus-within,
+[data-baseweb="select"] > div:focus-within,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: color-mix(in srgb, var(--cf-accent) 65%, transparent) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cf-accent) 22%, transparent) !important;
+}
+
+[data-baseweb="popover"] [data-baseweb="menu"],
+[data-baseweb="popover"] ul[role="listbox"] {
+    background-color: var(--cf-surface2) !important;
+    border: 1px solid var(--cf-line) !important;
+    border-radius: var(--cf-radius) !important;
+}
+
+[data-baseweb="menu"] li[aria-selected="true"],
+ul[role="listbox"] li[aria-selected="true"] {
+    background-color: color-mix(in srgb, var(--cf-accent) 18%, transparent) !important;
+}
+
+/* Streamlit 1.66 下拉为 react-aria 结构：div[role=listbox] > div[role=option]。 */
+[role="listbox"] {
+    background-color: var(--cf-surface2) !important;
+    border: 1px solid var(--cf-line) !important;
+    border-radius: var(--cf-radius) !important;
+}
+
+[role="listbox"] [role="option"][aria-selected="true"] {
+    background-color: color-mix(in srgb, var(--cf-accent) 18%, transparent) !important;
+}
+
+[role="listbox"] [role="option"][data-focused="true"] {
+    background-color: color-mix(in srgb, var(--cf-accent) 12%, transparent) !important;
+}
+
+/* 滑杆拇指与开关选中态跟随强调色（Streamlit 主题变量已覆写，这里补光晕）。
+   1.66 的滑块拇指是 react-aria 绝对定位 div，内藏 input[type=range]。 */
+[data-testid="stSlider"] div[data-rac][style*="position: absolute"] {
+    filter: drop-shadow(0 0 calc(var(--cf-glow) * 0.12px)
+        color-mix(in srgb, var(--cf-accent) 60%, transparent));
+}
+
+div[data-testid="stToggle"] input:checked + div,
+div[data-testid="stCheckbox"] input:checked + div {
+    background-color: var(--cf-accent) !important;
+}
+
+div[data-testid="stRadio"] [aria-checked="true"] > div:first-child {
+    border-color: var(--cf-accent) !important;
+    background-color: color-mix(in srgb, var(--cf-accent) 25%, transparent) !important;
+}
+
+/* ---------- 卡片 / 弹层 / 折叠面板表面 ---------- */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background: color-mix(in srgb, var(--cf-surface) 88%, transparent) !important;
+    border-color: var(--cf-line) !important;
+    border-radius: var(--cf-radius) !important;
+}
+
+[data-testid="stExpander"] {
+    background: color-mix(in srgb, var(--cf-surface) 88%, transparent) !important;
+    border-color: var(--cf-line) !important;
+    border-radius: var(--cf-radius) !important;
+}
+
+[data-testid="stExpander"] summary:hover {
+    color: var(--cf-accent-pale) !important;
+}
+
+[data-testid="stDialog"] > div {
+    background: var(--cf-bg2) !important;
+    border: 1px solid var(--cf-line) !important;
+    border-radius: calc(var(--cf-radius) + 4px) !important;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55),
+        0 0 calc(var(--cf-glow) * 0.5px) color-mix(in srgb, var(--cf-accent) 25%, transparent);
+}
+
+[data-testid="stPopover"] > div,
+[data-baseweb="popover"] > div {
+    background: var(--cf-surface2) !important;
+    border-color: var(--cf-line) !important;
+}
+
+[data-testid="stTooltipContent"] {
+    background: var(--cf-surface2) !important;
+    border: 1px solid var(--cf-line) !important;
+}
+
+/* 设置对话框 TAB：选中态浅紫文字 + 强调指示条。 */
+[data-testid="stDialog"] div[role="tab"][aria-selected="true"] {
+    color: var(--cf-accent-pale) !important;
+}
+
+[data-testid="stDialog"] .react-aria-SelectionIndicator {
+    background: linear-gradient(90deg, var(--cf-accent), var(--cf-accent-2)) !important;
+}
+
+/* ---------- 进度条 / 代码块 / 表格 ---------- */
+[data-testid="stProgressBar"] > div > div {
+    background: linear-gradient(90deg, var(--cf-accent), var(--cf-accent-2)) !important;
+}
+
+[data-testid="stCodeBlock"],
+pre {
+    background: var(--cf-bg2) !important;
+    border: 1px solid var(--cf-line-soft);
+    border-radius: var(--cf-radius) !important;
+}
+
+[data-testid="stTable"] table,
+[data-testid="stDataFrame"] {
+    border-color: var(--cf-line) !important;
+}
+
+/* ---------- 站内结构：操作栏 / 预设卡片 / 移动浮层 ---------- */
+div[class*="st-key-action_bar"] {
+    background: color-mix(in srgb, var(--cf-surface) 92%, transparent) !important;
+    border-color: color-mix(in srgb, var(--cf-accent) 35%, var(--cf-line)) !important;
+    border-radius: var(--cf-radius) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45),
+        0 0 calc(var(--cf-glow) * 0.3px) color-mix(in srgb, var(--cf-accent) 22%, transparent);
+}
+
+[class*="st-key-preset_row_"] {
+    border-radius: var(--cf-radius);
+}
+
+[class*="st-key-preset_row_"]:hover {
+    border-color: color-mix(in srgb, var(--cf-accent) 55%, transparent) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4),
+        0 0 calc(var(--cf-glow) * 0.2px) color-mix(in srgb, var(--cf-accent) 25%, transparent);
+}
+
+/* 移动导航抽屉 / 日志浮层 / 底部 tab 栏统一品牌深色表面。 */
+div[class*="st-key-app_shell_n232"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(1) {
+    background: var(--cf-bg2) !important;
+    border-right-color: color-mix(in srgb, var(--cf-accent) 25%, var(--cf-line)) !important;
+}
+
+div[class*="st-key-app_shell_"][class*="_l380"][class*="_m1"]
+    > div[data-testid="stLayoutWrapper"]
+    > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"]:nth-child(3) {
+    background: var(--cf-bg2) !important;
+    border-top-color: color-mix(in srgb, var(--cf-accent) 25%, var(--cf-line)) !important;
+}
+
+div[class*="st-key-mobile_tab_bar"] {
+    background: var(--cf-bg2) !important;
+    border-top-color: color-mix(in srgb, var(--cf-accent) 25%, var(--cf-line)) !important;
+}
+
+/* ---------- 顶栏品牌标题：快门标识 + 渐变字 ---------- */
+.changofilm-brand__mark {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    flex: 0 0 auto;
+    line-height: 0;
+}
+
+.changofilm-brand__mark svg {
+    width: 2.6rem;
+    height: 2.6rem;
+}
+
+.changofilm-brand__name {
+    background: linear-gradient(100deg, var(--cf-ink) 30%, var(--cf-accent-pale) 62%, var(--cf-accent) 95%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+.changofilm-brand__version {
+    color: var(--cf-muted) !important;
+}
+
+@media (max-width: 1100px) {
+    .changofilm-brand__mark svg {
+        width: 2.1rem;
+        height: 2.1rem;
+    }
+}
+
+@media (max-width: 700px) {
+    .changofilm-brand__mark svg {
+        width: 1.7rem;
+        height: 1.7rem;
+    }
+}
+
+/* ---------- 标识光晕呼吸：强度随 --cf-glow，动效随 --cf-play ---------- */
+@keyframes cfGlow {
+    0%, 100% {
+        filter: drop-shadow(0 0 calc(var(--cf-glow) * 0.08px)
+            color-mix(in srgb, var(--cf-accent) 55%, transparent));
+    }
+    50% {
+        filter: drop-shadow(0 0 calc(var(--cf-glow) * 0.2px)
+            color-mix(in srgb, var(--cf-accent-2) 70%, transparent));
+    }
+}
+
+.cf-mark,
+.cf-nav-lockup svg {
+    animation: cfGlow 3.8s ease-in-out infinite;
+    animation-play-state: var(--cf-play);
+}
+
+/* ---------- 左导航品牌区与常驻主题控制区 ---------- */
+.cf-nav-lockup {
+    border-bottom: 1px solid var(--cf-line-soft);
+    padding: 0.15rem 0.25rem 0.6rem;
+    margin-bottom: 0.4rem;
+    line-height: 0;
+}
+
+.cf-nav-lockup svg {
+    width: 100%;
+    height: auto;
+}
+
+.cf-nav-mark {
+    display: flex;
+    justify-content: center;
+    padding: 0.1rem 0 0.45rem;
+    border-bottom: 1px solid var(--cf-line-soft);
+    margin-bottom: 0.4rem;
+    line-height: 0;
+}
+
+.cf-nav-mark svg {
+    width: 30px;
+    height: 30px;
+}
+
+.cf-theme-title {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--cf-line-soft);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    background: linear-gradient(90deg, var(--cf-accent), var(--cf-accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+/* ---------- 密度：舒适 / 紧凑 ---------- */
+div[data-testid="stMainBlockContainer"] {
+    padding-top: var(--cf-pad-top) !important;
+}
+
+div[data-testid="stVerticalBlock"] {
+    gap: var(--cf-gap) !important;
+}
+
+/* ---------- 无障碍：尊重系统减弱动效 ---------- */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChangoFilm · 品牌标识五方案提案</title>
+<style>
+  :root{
+    --bg:#0A0D14; --bg2:#0F1420; --surface:#141B2A; --surface2:#1A2336;
+    --line:#243049; --line-soft:#1C2536;
+    --ink:#F2F5FA; --muted:#8B96AB; --faint:#5C6880;
+    --amber:#F5B841; --amber-deep:#D99A1B; --teal:#2DD4BF; --cyan:#22D3EE;
+    --violet:#A78BFA; --magenta:#F472B6; --red:#F87171; --indigo:#818CF8;
+    --ok:#34D399; --warn:#FBBF24; --danger:#F87171; --info:#60A5FA;
+    --nav-h:60px; --ctl-h:64px;
+    --radius:18px;
+    --font:"Inter","Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font);
+    line-height:1.6; overflow-x:hidden;
+    scrollbar-color:var(--amber-deep) var(--bg2);
+  }
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-track{background:var(--bg2)}
+  ::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--amber-deep),#8A5A0B);border-radius:6px;border:2px solid var(--bg2)}
+  ::-webkit-scrollbar-thumb:hover{background:var(--amber)}
+  ::selection{background:rgba(245,184,65,.35)}
+
+  /* ---------- atmosphere ---------- */
+  .aurora{position:fixed;inset:0;z-index:-2;pointer-events:none;overflow:hidden}
+  .aurora::before,.aurora::after{content:"";position:absolute;width:70vmax;height:70vmax;border-radius:50%;filter:blur(90px);opacity:.16}
+  .aurora::before{background:radial-gradient(circle,#F5B841,transparent 60%);top:-30vmax;left:-18vmax;animation:drift1 26s ease-in-out infinite alternate}
+  .aurora::after{background:radial-gradient(circle,#0D9488,transparent 60%);bottom:-34vmax;right:-20vmax;animation:drift2 32s ease-in-out infinite alternate}
+  @keyframes drift1{to{transform:translate(9vmax,7vmax) scale(1.12)}}
+  @keyframes drift2{to{transform:translate(-8vmax,-6vmax) scale(1.08)}}
+  .grain{position:fixed;inset:0;z-index:50;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.9'/%3E%3C/svg%3E")}
+
+  /* ---------- nav ---------- */
+  nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);z-index:40;
+    display:flex;align-items:center;gap:18px;padding:0 26px;
+    background:rgba(10,13,20,.82);backdrop-filter:blur(14px);border-bottom:1px solid var(--line-soft)}
+  .nav-brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.4px;font-size:16px;white-space:nowrap}
+  .nav-brand svg{width:28px;height:28px}
+  .nav-brand .film{color:var(--amber)}
+  .nav-links{display:flex;gap:4px;margin-left:auto;overflow-x:auto;scrollbar-width:none}
+  .nav-links::-webkit-scrollbar{display:none}
+  .nav-links a{color:var(--muted);text-decoration:none;font-size:13px;padding:7px 12px;border-radius:9px;white-space:nowrap;transition:.2s}
+  .nav-links a:hover{color:var(--ink);background:var(--surface)}
+  .nav-links a.active{color:var(--amber);background:rgba(245,184,65,.12)}
+
+  /* ---------- control deck ---------- */
+  .deck{position:fixed;top:var(--nav-h);left:0;right:0;z-index:39;
+    display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:10px 26px;
+    background:rgba(15,20,32,.88);backdrop-filter:blur(14px);border-bottom:1px solid var(--line-soft)}
+  .deck .grp{display:flex;align-items:center;gap:8px}
+  .deck label{font-size:12px;color:var(--muted);white-space:nowrap}
+  .deck select{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px;font-family:var(--font);cursor:pointer}
+  .deck select:focus{outline:2px solid rgba(245,184,65,.5)}
+  .switch{position:relative;width:36px;height:20px;flex:none;cursor:pointer}
+  .switch input{opacity:0;width:0;height:0;position:absolute}
+  .switch i{position:absolute;inset:0;background:var(--surface2);border:1px solid var(--line);border-radius:20px;transition:.2s}
+  .switch i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:.2s}
+  .switch input:checked + i{background:rgba(245,184,65,.25);border-color:var(--amber-deep)}
+  .switch input:checked + i::after{transform:translateX(16px);background:var(--amber)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:120px;height:4px;border-radius:4px;background:var(--line);cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--amber);border:2px solid #0A0D14;box-shadow:0 0 8px rgba(245,184,65,.6)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--amber);border:2px solid #0A0D14}
+  .deck .val{font-size:12px;color:var(--amber);min-width:44px;font-variant-numeric:tabular-nums}
+  .btn{display:inline-flex;align-items:center;gap:7px;border:none;cursor:pointer;font-family:var(--font);
+    font-size:13px;font-weight:700;padding:9px 16px;border-radius:10px;transition:.18s;text-decoration:none}
+  .btn-amber{background:linear-gradient(135deg,var(--amber),var(--amber-deep));color:#1A1204}
+  .btn-amber:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(245,184,65,.35)}
+  .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn-ghost:hover{border-color:var(--amber-deep);color:var(--amber)}
+  .btn-sm{padding:7px 12px;font-size:12px}
+
+  /* ---------- hero ---------- */
+  header{padding:calc(var(--nav-h) + var(--ctl-h) + 64px) 26px 56px;max-width:1180px;margin:0 auto;text-align:center;position:relative}
+  .perf{height:12px;max-width:520px;margin:0 auto 30px;opacity:.55;border-radius:3px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 12px,transparent 12px 26px)}
+  .eyebrow{font-size:12px;letter-spacing:3.5px;color:var(--amber);font-weight:700;text-transform:uppercase}
+  h1{font-size:clamp(34px,5.4vw,58px);font-weight:800;line-height:1.15;margin:14px 0 10px;letter-spacing:.5px}
+  h1 .grad{background:linear-gradient(100deg,var(--amber) 10%,var(--magenta) 55%,var(--cyan) 95%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-sub{color:var(--muted);font-size:16px;max-width:640px;margin:0 auto}
+  .lineage{display:flex;align-items:center;justify-content:center;gap:14px;margin:36px auto 8px;flex-wrap:wrap}
+  .lineage .node{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .lineage .node small{font-size:11px;color:var(--faint);letter-spacing:1px}
+  .lineage .arrow{color:var(--faint);font-size:20px;padding-bottom:18px}
+  .lineage .minis{display:flex;gap:10px}
+  .lineage .minis .node svg{transition:transform .25s}
+  .lineage .minis .node:hover svg{transform:translateY(-4px) scale(1.08)}
+  .hero-cta{display:flex;gap:14px;justify-content:center;margin-top:32px;flex-wrap:wrap}
+
+  /* ---------- candidate cards ---------- */
+  main{max-width:1180px;margin:0 auto;padding:0 26px 40px}
+  section.cand{scroll-margin-top:calc(var(--nav-h) + var(--ctl-h) + 18px);margin-bottom:74px}
+  .cand-head{display:flex;align-items:baseline;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+  .cand-num{font-size:44px;font-weight:800;color:transparent;-webkit-text-stroke:1.5px var(--faint);line-height:1;font-variant-numeric:tabular-nums}
+  .cand-head h2{font-size:26px;font-weight:800}
+  .cand-head .en{color:var(--muted);font-size:14px;letter-spacing:1.5px;text-transform:uppercase}
+  .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;letter-spacing:1px}
+  .badge-pick{background:rgba(245,184,65,.16);color:var(--amber);border:1px solid rgba(245,184,65,.4)}
+  .badge-kin{background:rgba(45,212,191,.14);color:var(--teal);border:1px solid rgba(45,212,191,.4)}
+  .cand-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:26px;align-items:stretch}
+  .stage{position:relative;border:1px solid var(--line);border-radius:var(--radius);min-height:430px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:34px 24px;overflow:hidden;transition:background .35s}
+  .stage::after{content:attr(data-tag);position:absolute;top:14px;left:16px;font-size:10px;letter-spacing:2px;color:var(--faint);text-transform:uppercase}
+  .markbox{position:relative;width:var(--mark-size,220px);height:var(--mark-size,220px);transition:width .2s,height .2s;flex:none}
+  .markbox svg.mark{width:100%;height:100%;display:block;filter:drop-shadow(0 10px 28px rgba(0,0,0,.35))}
+  .markbox svg.guides{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;transition:.25s}
+  .stage.grid-on .markbox svg.guides{opacity:.6}
+  .favrow{display:flex;align-items:flex-end;gap:18px}
+  .favrow .fav{display:flex;flex-direction:column;align-items:center;gap:5px}
+  .favrow .fav small{font-size:10px;color:var(--faint)}
+  .favrow .fav .cell{display:flex;align-items:center;justify-content:center;border:1px dashed var(--line);border-radius:6px;padding:4px}
+  .lockupbox{width:min(100%,340px)}
+  .lockupbox svg{width:100%;height:auto;display:block}
+  .info{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius);padding:26px 26px 22px;display:flex;flex-direction:column;gap:16px}
+  .info p.desc{color:#C4CDDC;font-size:14.5px}
+  .tags{display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:11.5px;color:var(--muted);border:1px solid var(--line);padding:3px 10px;border-radius:16px}
+  .swatches{display:flex;gap:10px;flex-wrap:wrap}
+  .swatch{display:flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--line-soft);border-radius:9px;padding:5px 10px 5px 6px;cursor:pointer;transition:.18s;font-size:12px;color:var(--muted)}
+  .swatch:hover{border-color:var(--amber-deep);color:var(--ink)}
+  .swatch i{width:20px;height:20px;border-radius:6px;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+  .swatch code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px}
+  .info .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:8px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12.5px;color:var(--muted)}
+  .kv b{color:var(--ink);font-weight:600}
+
+  /* ---------- comparison ---------- */
+  section#compare{scroll-margin-top:calc(var(--nav-h) + var(--ctl-h) + 18px);margin-bottom:70px}
+  #compare h2{font-size:26px;font-weight:800;margin-bottom:6px}
+  #compare .sub{color:var(--muted);font-size:14px;margin-bottom:24px}
+  .comp-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+  .comp-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;padding:20px 14px;display:flex;flex-direction:column;align-items:center;gap:12px;transition:.22s}
+  .comp-card:hover{transform:translateY(-4px);border-color:var(--line);box-shadow:0 14px 34px rgba(0,0,0,.4)}
+  .app-tile{width:84px;height:84px;border-radius:22px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(150deg,var(--surface2),#0C101B);border:1px solid var(--line);box-shadow:0 8px 20px rgba(0,0,0,.45)}
+  .app-tile svg{width:58px;height:58px}
+  .comp-card .nm{font-size:13.5px;font-weight:700}
+  .comp-card .tiny{display:flex;align-items:center;gap:8px}
+  .comp-card .tiny .chip{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center}
+  .comp-card .tiny .chip svg{width:22px;height:22px}
+  .chip-l{background:#F2EEE4}.chip-d{background:#0B0F19;border:1px solid var(--line)}
+  .comp-card small{font-size:11px;color:var(--faint)}
+
+  footer{border-top:1px solid var(--line-soft);padding:34px 26px 46px;text-align:center;color:var(--faint);font-size:12.5px}
+  footer .perf{margin-bottom:22px;max-width:300px}
+  footer b{color:var(--muted)}
+
+  /* ---------- toast ---------- */
+  #toast{position:fixed;bottom:26px;left:50%;transform:translate(-50%,80px);z-index:60;
+    background:var(--surface2);border:1px solid var(--amber-deep);color:var(--ink);
+    padding:11px 20px;border-radius:12px;font-size:13.5px;box-shadow:0 12px 34px rgba(0,0,0,.5);
+    transition:transform .3s cubic-bezier(.2,.9,.3,1.2),visibility .3s;pointer-events:none;max-width:88vw;visibility:hidden}
+  #toast.show{transform:translate(-50%,0);visibility:visible}
+  #toast .tk{color:var(--amber);font-weight:700;margin-right:6px}
+
+  /* ---------- reveal ---------- */
+  .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+
+  @media (max-width:960px){
+    .cand-grid{grid-template-columns:1fr}
+    .comp-grid{grid-template-columns:repeat(3,1fr)}
+    .stage{min-height:360px}
+  }
+  @media (max-width:640px){
+    nav{padding:0 14px;gap:10px}
+    .nav-brand .suffix{display:none}
+    .nav-links a{padding:6px 8px;font-size:12px}
+    .deck{gap:12px;padding:8px 14px}
+    header,main{padding-left:14px;padding-right:14px}
+    .comp-grid{grid-template-columns:repeat(2,1fr)}
+    .cand-num{font-size:34px}
+  }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+<div class="grain"></div>
+
+<nav>
+  <div class="nav-brand"><span id="navMark"></span><span>Chango<span class="film">Film</span></span><span class="suffix" style="color:var(--faint);font-weight:500;font-size:12px">标识提案</span></div>
+  <div class="nav-links" id="navLinks">
+    <a href="#c1">01 金环</a><a href="#c2">02 场记</a><a href="#c3">03 快门</a><a href="#c4">04 放映</a><a href="#c5">05 丝带</a><a href="#compare">对比</a>
+  </div>
+</nav>
+
+<div class="deck">
+  <div class="grp"><label>预览背景</label>
+    <select id="ctlBg"><option value="dark">深色影厅</option><option value="light">浅色纸面</option><option value="brand">品牌氛围</option></select>
+  </div>
+  <div class="grp"><label>构造网格</label><label class="switch"><input type="checkbox" id="ctlGrid"><i></i></label></div>
+  <div class="grp"><label>单色模式</label><label class="switch"><input type="checkbox" id="ctlMono"><i></i></label></div>
+  <div class="grp"><label>组合字标</label><label class="switch"><input type="checkbox" id="ctlLockup"><i></i></label></div>
+  <div class="grp"><label>预览尺寸</label><input type="range" id="ctlSize" min="110" max="320" value="220"><span class="val" id="sizeVal">220px</span></div>
+  <div class="grp"><label>PNG 导出</label>
+    <select id="ctlExport"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option></select>
+  </div>
+  <div class="grp" style="margin-left:auto">
+    <button class="btn btn-ghost btn-sm" id="ctlReset">重置</button>
+    <button class="btn btn-amber btn-sm" id="ctlAll">全部下载 SVG</button>
+  </div>
+</div>
+
+<header>
+  <div class="perf"></div>
+  <div class="eyebrow">Brand Proposal · 五套候选 · 2026.11</div>
+  <h1>为 <span class="grad">ChangoFilm</span> 造一枚印记</h1>
+  <p class="hero-sub">ChangoVideo 的兄弟项目 · 专业系列短剧创作平台。五套候选沿同一条家族血脉出发——胶片、开机、快门、放映与首映——各自给出不同的性格答案。所有图形均为矢量 SVG，可实时切换背景 / 单色 / 网格校验，并一键导出当前状态。</p>
+  <div class="lineage">
+    <div class="node"><span id="heroA1"></span><small>CHANGOVIDEO · A1</small></div>
+    <div class="arrow">→</div>
+    <div class="minis" id="heroMinis"></div>
+  </div>
+  <div class="hero-cta">
+    <a class="btn btn-amber" href="#c1">浏览五套方案 ↓</a>
+    <a class="btn btn-ghost" href="#compare">直接看对比</a>
+    <a class="btn btn-ghost" href="final.html">已选定：03 霓虹快门 · 定稿页 →</a>
+  </div>
+</header>
+
+<main id="cards"></main>
+
+<section id="compare" class="reveal" style="max-width:1180px;margin:0 auto 70px;padding:0 26px">
+  <h2>并排对比 · 应用预览</h2>
+  <p class="sub">同一尺寸下的辨识度检验：应用图标（84px 圆角磁贴）、浅 / 深底小尺寸芯片。缩小到 22px 仍可读的轮廓，才是合格的商标。</p>
+  <div class="comp-grid" id="compGrid"></div>
+</section>
+
+<footer>
+  <div class="perf"></div>
+  <p><b>ChangoFilm</b> 品牌标识候选提案 · 与 ChangoVideo「A1」胶片 C 环同族设计 · 全部图形为原创矢量，导出即所得</p>
+  <p style="margin-top:6px">矢量源可在浏览器中无损缩放 · PNG 导出透明背景 · 点击色卡复制色值</p>
+</footer>
+
+<div id="toast"><span class="tk">✓</span><span id="toastMsg"></span></div>
+
+<script>
+"use strict";
+/* ================= state ================= */
+const state = { bg:"dark", grid:false, mono:false, lockup:false, size:220, exportSize:512 };
+let _uid = 0;
+const uid = () => "u" + (_uid++);
+const rad = d => d * Math.PI / 180;
+const px = (a, r) => (50 + r * Math.cos(rad(a))).toFixed(2);
+const py = (a, r) => (50 + r * Math.sin(rad(a))).toFixed(2);
+const WEDGE = "M50 50 L100 10 L100 90 Z";
+
+function vgrad(p, c0, c1, y0=0, y1=100){
+  return `<linearGradient id="${p}" gradientUnits="userSpaceOnUse" x1="50" y1="${y0}" x2="50" y2="${y1}"><stop offset="0" stop-color="${c0}"/><stop offset="1" stop-color="${c1}"/></linearGradient>`;
+}
+/* o = {mono, knock} — mono 模式下主体用单色，细节用挖空色 */
+const fillOf = (o, url) => o.mono ? o.mono : url;
+
+/* ================= mark generators ================= */
+/* C1 胶片金环：C 环 + 齿孔 + 开口处胶片画框与播放三角 */
+function genC1(o){
+  const p = uid(), g = p+"g", m = p+"m";
+  const f = fillOf(o, `url(#${g})`);
+  let holes = "";
+  [55,117.5,180,242.5,305].forEach(a=>{
+    holes += `<rect x="-2.7" y="-2.1" width="5.4" height="4.2" rx="1.1" fill="#000" transform="translate(${px(a,33)} ${py(a,33)}) rotate(${a+90})"/>`;
+  });
+  return `<defs>${vgrad(g,"#FCD34D","#F59E0B",8,92)}
+    <mask id="${m}"><rect width="100" height="100" fill="#fff"/><path d="${WEDGE}" fill="#000"/>${holes}</mask></defs>
+    <circle cx="50" cy="50" r="33" fill="none" stroke="${f}" stroke-width="15" mask="url(#${m})"/>
+    <rect x="57" y="38" width="22" height="24" rx="3.5" fill="none" stroke="${f}" stroke-width="3.2"/>
+    <path d="M64 44 L64 56 L75 50 Z" fill="${f}"/>`;
+}
+/* C2 场记靛板：C 环开口化作场记板 */
+function genC2(o){
+  const p = uid(), g = p+"g", ga = p+"a", m = p+"m", c = p+"c";
+  const f = fillOf(o, `url(#${g})`);
+  const fa = fillOf(o, `url(#${ga})`);
+  const stripe = o.mono ? o.knock : "#F8FAFC";
+  const board = o.mono ? o.mono : "#312E81";
+  const bline = o.mono ? o.knock : "#A5B4FC";
+  return `<defs>${vgrad(g,"#818CF8","#4F46E5",8,92)}${vgrad(ga,"#FDE68A","#F59E0B",30,62)}
+    <mask id="${m}"><rect width="100" height="100" fill="#fff"/><path d="${WEDGE}" fill="#000"/></mask>
+    <clipPath id="${c}"><rect x="0" y="-10" width="28" height="10" rx="2"/></clipPath></defs>
+    <circle cx="50" cy="50" r="33" fill="none" stroke="${f}" stroke-width="15" mask="url(#${m})"/>
+    <g transform="translate(56 47)">
+      <g transform="rotate(-16)">
+        <rect x="0" y="-10" width="28" height="10" rx="2" fill="${fa}"/>
+        <g clip-path="url(#${c})" fill="${stripe}">
+          <polygon points="6,-10 12,-10 8,0 2,0"/><polygon points="15,-10 21,-10 17,0 11,0"/><polygon points="24,-10 30,-10 26,0 20,0"/>
+        </g>
+      </g>
+      <rect x="0" y="2" width="28" height="14" rx="2.5" fill="${board}"/>
+      <rect x="4.5" y="6.5" width="15" height="2" rx="1" fill="${bline}" opacity=".85"/>
+      <rect x="4.5" y="10.5" width="10" height="2" rx="1" fill="${bline}" opacity=".55"/>
+      <circle cx="1.5" cy="1" r="2.3" fill="${stripe}"/>
+    </g>`;
+}
+/* C3 霓虹快门：五片光圈叶片旋合成 C，缺口保留播放三角 */
+function genC3(o){
+  const p = uid(), g = p+"g";
+  const f = fillOf(o, `url(#${g})`);
+  const tri = o.mono ? o.mono : "#F5D0FE";
+  const blade = "M50 10 A40 40 0 0 1 84.64 30 L62 42 A16 16 0 0 0 50 34 Z";
+  let blades = "";
+  [0,120,180,240,300].forEach(r=>{ blades += `<path d="${blade}" transform="rotate(${r} 50 50)" fill="${f}"/>`; });
+  return `<defs><linearGradient id="${g}" gradientUnits="userSpaceOnUse" x1="50" y1="10" x2="84" y2="42">
+    <stop offset="0" stop-color="#EC4899"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient></defs>
+    ${blades}<path d="M62 42 L62 58 L76 50 Z" fill="${tri}"/>`;
+}
+/* C4 放映暖光：青绿胶片盘 C 环向右投出琥珀光束（家族色脉） */
+function genC4(o){
+  const p = uid(), g = p+"g", gb = p+"b", m = p+"m";
+  const f = fillOf(o, `url(#${g})`);
+  const beam = o.mono ? o.mono : `url(#${gb})`;
+  let holes = `<circle cx="50" cy="50" r="6" fill="#000"/>`;
+  [90,210,300].forEach(a=>{ holes += `<circle cx="${px(a,21)}" cy="${py(a,21)}" r="7.5" fill="#000"/>`; });
+  const core = o.mono ? "" : `<polygon points="58,46 97,36 97,64 58,54" fill="#FEF3C7" opacity=".5"/>`;
+  return `<defs>${vgrad(g,"#22D3EE","#0D9488",10,90)}
+    <linearGradient id="${gb}" gradientUnits="userSpaceOnUse" x1="58" y1="50" x2="97" y2="50">
+      <stop offset="0" stop-color="#FDE68A" stop-opacity=".95"/><stop offset="1" stop-color="#F59E0B" stop-opacity=".4"/></linearGradient>
+    <mask id="${m}"><circle cx="50" cy="50" r="40" fill="#fff"/><path d="${WEDGE}" fill="#000"/>${holes}</mask></defs>
+    <polygon points="58,43 97,24 97,76 58,57" fill="${beam}" ${o.mono?'opacity=".45"':""}/>${core}
+    <circle cx="50" cy="50" r="40" fill="${f}" mask="url(#${m})"/>`;
+}
+/* C5 首映丝带：电影丝带折出 F monogram，金色齿孔 */
+function genC5(o){
+  const p = uid(), g = p+"g", gh = p+"h";
+  const f = fillOf(o, `url(#${g})`);
+  const fh = fillOf(o, `url(#${gh})`);
+  const dot = o.mono ? o.knock : "#FDE68A";
+  const shade = o.mono ? "" : `<polygon points="44,31 51,31 44,38" fill="#000" opacity=".2"/><polygon points="44,56 51,56 44,63" fill="#000" opacity=".2"/>`;
+  return `<defs>${vgrad(g,"#F87171","#DB2777",18,82)}
+    <linearGradient id="${gh}" gradientUnits="userSpaceOnUse" x1="30" y1="24" x2="74" y2="24">
+      <stop offset="0" stop-color="#EF4444"/><stop offset="1" stop-color="#EC4899"/></linearGradient></defs>
+    <path d="M30 18 H44 V82 L30 76 Z" fill="${f}"/>
+    <path d="M30 18 H74 L67 24.5 L74 31 H30 Z" fill="${fh}"/>
+    <path d="M30 44 H62 L55.5 50 L62 56 H30 Z" fill="${fh}"/>
+    ${shade}
+    <g fill="${dot}"><circle cx="37" cy="37.5" r="2.2"/><circle cx="37" cy="63" r="2.2"/><circle cx="37" cy="71" r="2.2"/><circle cx="52" cy="24.5" r="2.2"/><circle cx="60" cy="24.5" r="2.2"/></g>`;
+}
+/* 家族参照：ChangoVideo A1 */
+function genA1(){
+  const p = uid(), g = p+"g", m = p+"m";
+  return `<defs>${vgrad(g,"#2DD4BF","#0D9488",8,92)}
+    <mask id="${m}"><rect width="100" height="100" fill="#fff"/><path d="${WEDGE}" fill="#000"/></mask></defs>
+    <circle cx="50" cy="50" r="33" fill="none" stroke="url(#${g})" stroke-width="15" mask="url(#${m})"/>
+    <path d="M60 39 L60 61 L79 50 Z" fill="url(#${g})"/>`;
+}
+
+/* ================= catalogue ================= */
+const MARKS = [
+  { id:"c1", num:"01", name:"胶片金环", en:"Film-Reel C", gen:genC1, colors:["#FCD34D","#F59E0B"],
+    badge:["badge-pick","评审推荐"],
+    desc:"最直接的家族延续：保留 A1 的 C 环骨架与右侧开口，环身凿出五枚胶片齿孔，开口处嵌入一格胶片画框与播放三角。金色渐变呼应系列短剧的「成片价值」与剧场首映质感，齿孔让「剧集电影感」与「单条视频」的差异一眼可辨。",
+    tags:["家族延续","胶片语义","首映金色","小尺寸清晰"],
+    kv:[["识别基因","C 环 + 齿孔 + 画框三角"],["气质","贵重 · 成片 · 专业"],["推荐场景","主商标 / 应用图标 / 片头水印"]] },
+  { id:"c2", num:"02", name:"场记靛板", en:"Clapper C", gen:genC2, colors:["#818CF8","#4F46E5","#FDE68A"],
+    badge:null,
+    desc:"C 环的开口化作一块场记板：斜置的拍板条纹宣告「开机」，板身两条场记线暗示逐集填写的剧集场记信息。靛蓝专业冷静，琥珀条纹点亮行动感——把短剧平台「从脚本到开机、从第 1 集到第 N 集」的连载制作性格压进一枚符号。",
+    tags:["制作流程","开机仪式感","靛蓝专业"],
+    kv:[["识别基因","C 环 + 场记拍板"],["气质","行动 · 连载 · 工具"],["推荐场景","剧集制作工具定位 / 创作者社区"]] },
+  { id:"c3", num:"03", name:"霓虹快门", en:"Shutter C", gen:genC3, colors:["#EC4899","#8B5CF6","#F5D0FE"],
+    badge:["badge-pick","已选定 ✓"],
+    desc:"五片光圈叶片旋合成 C，第六片的缺席恰好留出家族开口，播放三角悬浮于光圈之心。品红→紫的霓虹渐变随叶片旋转形成风车光晕，面向 AI 生成影像与创意前沿的气质，是五款中最「未来」的一款。",
+    tags:["光圈结构","霓虹渐变","AI 影像"],
+    kv:[["识别基因","光圈叶片 C + 三角"],["气质","前沿 · 创意 · 霓虹"],["推荐场景","AI 创作线 / 年轻化子品牌"]] },
+  { id:"c4", num:"04", name:"放映暖光", en:"Projector C", gen:genC4, colors:["#22D3EE","#0D9488","#FDE68A"],
+    badge:["badge-kin","血缘最强"],
+    desc:"胶片盘直接承袭 ChangoVideo 的青绿色脉：盘身三枚卷片孔 + 中心轴孔，右侧开口投出一束琥珀放映光。它讲的故事是「从单条视频到系列剧集」的升级——同一台机器，换上电影胶片，打出连映的光。",
+    tags:["家族色脉","放映光束","升级叙事"],
+    kv:[["识别基因","青绿胶片盘 + 琥珀光束"],["气质","传承 · 连映 · 温度"],["推荐场景","强调兄弟品牌联动时的首选"]] },
+  { id:"c5", num:"05", name:"首映丝带", en:"Ribbon F", gen:genC5, colors:["#EF4444","#EC4899","#FDE68A"],
+    badge:null,
+    desc:"唯一跳出 C 环的方案：一条电影丝带折出 F（Film）monogram，燕尾折角与金色齿孔保留胶片的触感，折面阴影给出丝带的厚度。红→品红的红毯色系差异化最强，适合 ChangoFilm 作为独立短剧厂牌被单独记住。",
+    tags:["F monogram","红毯色系","独立品牌"],
+    kv:[["识别基因","丝带 F + 金色齿孔"],["气质","首映 · 热烈 · 独立"],["推荐场景","独立短剧厂牌 / 发行与展映线"]] },
+];
+
+/* ================= rendering ================= */
+const $ = s => document.querySelector(s);
+function opts(){
+  if(!state.mono) return {};
+  const light = state.bg === "light";
+  return { mono: light ? "#16202E" : "#F5F7FB", knock: light ? "#F2EEE4" : (state.bg==="brand" ? "#0C101B" : "#0B0F19") };
+}
+function markSVG(mark, o, cls="mark"){
+  return `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="ChangoFilm ${mark.name}">${mark.gen(o)}</svg>`;
+}
+function standalone(mark, size){
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${size}" height="${size}">${mark.gen(opts())}</svg>`;
+}
+const GUIDES = `<svg class="guides" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="#F5B841" stroke-width=".5" stroke-dasharray="2 2">
+    <rect x="1" y="1" width="98" height="98"/><circle cx="50" cy="50" r="40.5"/><circle cx="50" cy="50" r="33"/><circle cx="50" cy="50" r="25.5"/>
+    <line x1="50" y1="0" x2="50" y2="100"/><line x1="0" y1="50" x2="100" y2="50"/>
+    <line x1="50" y1="50" x2="100" y2="10"/><line x1="50" y1="50" x2="100" y2="90"/>
+  </g></svg>`;
+function stageBg(mark){
+  if(state.bg === "light") return "radial-gradient(circle at 50% 38%, #FFFFFF, #EDE8DD 78%)";
+  if(state.bg === "brand") return `radial-gradient(circle at 28% 18%, ${mark.colors[0]}33, transparent 58%), radial-gradient(circle at 82% 92%, ${mark.colors[1]}2b, transparent 55%), #0C101B`;
+  return "radial-gradient(circle at 50% 38%, #182136, #0B0F19 72%)";
+}
+function lockupSVG(mark, o){
+  const ink = state.bg === "light" ? "#16202E" : "#F5F7FB";
+  const acc = o.mono ? o.mono : mark.colors[mark.colors.length-1] === "#FDE68A" ? mark.colors[0] : mark.colors[1];
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 100" role="img" aria-label="ChangoFilm ${mark.name} 组合字标">
+    <g transform="translate(4 4) scale(0.92)">${mark.gen(o)}</g>
+    <text x="112" y="64" font-family="Inter,'Segoe UI','Microsoft YaHei',sans-serif" font-size="37" font-weight="600" fill="${ink}">Chango<tspan font-weight="800" fill="${acc}">Film</tspan></text>
+  </svg>`;
+}
+function favCell(mark, o, s){
+  return `<div class="fav"><div class="cell">${markSVG(mark,o).replace('class="mark"',`class="mark" width="${s}" height="${s}" style="width:${s}px;height:${s}px"`)}</div><small>${s}px</small></div>`;
+}
+function buildCards(){
+  $("#cards").innerHTML = MARKS.map(m=>`
+  <section class="cand reveal" id="${m.id}">
+    <div class="cand-head">
+      <span class="cand-num">${m.num}</span>
+      <h2>${m.name}</h2><span class="en">${m.en}</span>
+      ${m.badge?`<span class="badge ${m.badge[0]}">${m.badge[1]}</span>`:""}
+    </div>
+    <div class="cand-grid">
+      <div class="stage" data-tag="Preview · ${m.en}" data-stage="${m.id}">
+        <div class="markbox" data-box="${m.id}"></div>
+        <div class="lockupbox" data-lockup="${m.id}" hidden></div>
+        <div class="favrow" data-fav="${m.id}"></div>
+      </div>
+      <div class="info">
+        <p class="desc">${m.desc}</p>
+        <div class="tags">${m.tags.map(t=>`<span class="tag">${t}</span>`).join("")}</div>
+        <div class="kv">${m.kv.map(([k,v])=>`<span>${k}</span><b>${v}</b>`).join("")}</div>
+        <div class="swatches">${m.colors.map(c=>`<button class="swatch" data-hex="${c}" title="点击复制 ${c}"><i style="background:${c}"></i><code>${c}</code></button>`).join("")}</div>
+        <div class="actions">
+          <button class="btn btn-amber btn-sm" data-dl-svg="${m.id}">↓ 下载 SVG</button>
+          <button class="btn btn-ghost btn-sm" data-dl-png="${m.id}">↓ 下载 PNG</button>
+          <button class="btn btn-ghost btn-sm" data-copy="${m.id}">复制 SVG</button>
+          ${m.id==="c3"?`<a class="btn btn-amber btn-sm" href="final.html">定稿页 →</a>`:""}
+        </div>
+      </div>
+    </div>
+  </section>`).join("");
+}
+function renderAll(){
+  const o = opts();
+  document.querySelectorAll(".stage").forEach(st=>{
+    const m = MARKS.find(x=>x.id===st.dataset.stage);
+    st.style.background = stageBg(m);
+    st.classList.toggle("grid-on", state.grid);
+    st.style.setProperty("--mark-size", state.size+"px");
+    st.querySelector("[data-box]").innerHTML = markSVG(m,o)+GUIDES;
+    const lk = st.querySelector("[data-lockup]");
+    lk.hidden = !state.lockup;
+    if(state.lockup) lk.innerHTML = lockupSVG(m,o);
+    st.querySelector("[data-fav]").innerHTML = [16,32,48].map(s=>favCell(m,o,s)).join("");
+  });
+  $("#heroMinis").innerHTML = MARKS.map(m=>`<div class="node"><a href="#${m.id}" aria-label="跳转到方案 ${m.name}">${markSVG(m,o).replace('class="mark"','class="mark" width="46" height="46" style="width:46px;height:46px"')}</a><small>${m.num}</small></div>`).join("");
+  $("#heroA1").innerHTML = `<svg viewBox="0 0 100 100" width="52" height="52" style="width:52px;height:52px" xmlns="http://www.w3.org/2000/svg">${genA1()}</svg>`;
+  $("#navMark").innerHTML = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">${genC1({})}</svg>`;
+  $("#compGrid").innerHTML = MARKS.map(m=>`
+    <div class="comp-card">
+      <div class="app-tile">${markSVG(m,o)}</div>
+      <div class="nm">${m.num} ${m.name}</div>
+      <div class="tiny">
+        <div class="chip chip-l">${markSVG(m,{mono:"#16202E",knock:"#F2EEE4"})}</div>
+        <div class="chip chip-d">${markSVG(m,o)}</div>
+      </div>
+      <small>${m.en}</small>
+    </div>`).join("");
+}
+
+/* ================= export / copy ================= */
+function toast(msg){
+  $("#toastMsg").textContent = msg;
+  const t = $("#toast"); t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove("show"), 2400);
+}
+function saveBlob(blob, name){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+function dlSVG(m){
+  saveBlob(new Blob([standalone(m,1024)],{type:"image/svg+xml"}), `changofilm-${m.id}-${m.en.toLowerCase().replace(/\s+/g,"-")}.svg`);
+  toast(`已导出 ${m.name} · SVG（当前预览状态）`);
+}
+function dlPNG(m){
+  const size = state.exportSize;
+  const img = new Image();
+  img.onload = ()=>{
+    const cv = document.createElement("canvas"); cv.width = cv.height = size;
+    cv.getContext("2d").drawImage(img,0,0,size,size);
+    cv.toBlob(b=>{ if(b){ saveBlob(b,`changofilm-${m.id}-${size}.png`); toast(`已导出 ${m.name} · PNG ${size}px（透明背景）`);} else toast("PNG 导出失败，请改用 SVG"); },"image/png");
+  };
+  img.onerror = ()=>toast("PNG 导出失败，请改用 SVG");
+  img.src = "data:image/svg+xml;charset=utf-8,"+encodeURIComponent(standalone(m,size));
+}
+async function copyText(txt, okMsg){
+  try{ await navigator.clipboard.writeText(txt); toast(okMsg); }
+  catch(e){
+    const ta = document.createElement("textarea"); ta.value = txt; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); toast(okMsg); }catch(err){ toast("复制失败，请使用下载"); }
+    ta.remove();
+  }
+}
+
+/* ================= wiring ================= */
+buildCards();
+renderAll();
+$("#ctlBg").addEventListener("change", e=>{ state.bg = e.target.value; renderAll(); });
+$("#ctlGrid").addEventListener("change", e=>{ state.grid = e.target.checked; renderAll(); });
+$("#ctlMono").addEventListener("change", e=>{ state.mono = e.target.checked; renderAll(); });
+$("#ctlLockup").addEventListener("change", e=>{ state.lockup = e.target.checked; renderAll(); });
+$("#ctlSize").addEventListener("input", e=>{ state.size = +e.target.value; $("#sizeVal").textContent = state.size+"px";
+  document.querySelectorAll(".stage").forEach(st=>st.style.setProperty("--mark-size", state.size+"px")); });
+$("#ctlExport").addEventListener("change", e=>{ state.exportSize = +e.target.value; });
+$("#ctlReset").addEventListener("click", ()=>{
+  Object.assign(state,{bg:"dark",grid:false,mono:false,lockup:false,size:220,exportSize:512});
+  $("#ctlBg").value="dark"; $("#ctlGrid").checked=false; $("#ctlMono").checked=false; $("#ctlLockup").checked=false;
+  $("#ctlSize").value=220; $("#sizeVal").textContent="220px"; $("#ctlExport").value="512";
+  renderAll(); toast("预览控制已重置");
+});
+$("#ctlAll").addEventListener("click", ()=>{
+  MARKS.forEach((m,i)=>setTimeout(()=>dlSVG(m), i*350));
+  toast("正在导出全部 5 套 SVG…");
+});
+document.addEventListener("click", e=>{
+  const sw = e.target.closest(".swatch");
+  if(sw){ copyText(sw.dataset.hex, `色值 ${sw.dataset.hex} 已复制`); return; }
+  const ds = e.target.closest("[data-dl-svg]"); if(ds){ dlSVG(MARKS.find(m=>m.id===ds.dataset.dlSvg)); return; }
+  const dp = e.target.closest("[data-dl-png]"); if(dp){ dlPNG(MARKS.find(m=>m.id===dp.dataset.dlPng)); return; }
+  const cp = e.target.closest("[data-copy]");
+  if(cp){ const m = MARKS.find(x=>x.id===cp.dataset.copy); copyText(standalone(m,1024), `${m.name} SVG 源码已复制`); }
+});
+
+/* keep fixed-deck offset in sync when controls wrap (mobile) */
+const deckEl = document.querySelector(".deck");
+new ResizeObserver(()=>document.documentElement.style.setProperty("--ctl-h", deckEl.offsetHeight+"px")).observe(deckEl);
+
+/* reveal + nav active */
+const io = new IntersectionObserver(es=>es.forEach(x=>{ if(x.isIntersecting){ x.target.classList.add("in"); io.unobserve(x.target);} }),{threshold:.12});
+document.querySelectorAll(".reveal").forEach(el=>io.observe(el));
+const navA = [...document.querySelectorAll("#navLinks a")];
+const secIO = new IntersectionObserver(es=>{
+  es.forEach(x=>{ if(x.isIntersecting){
+    navA.forEach(a=>a.classList.toggle("active", a.getAttribute("href")==="#"+x.target.id));
+  }});
+},{rootMargin:"-35% 0px -55% 0px"});
+[...MARKS.map(m=>m.id),"compare"].forEach(id=>{ const el=document.getElementById(id); if(el) secIO.observe(el); });
+</script>
+</body>
+</html>
