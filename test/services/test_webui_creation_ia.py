@@ -260,23 +260,27 @@ def test_route_entry_seeds_tab_selection_and_keeps_memory(isolated_app):
     assert app.session_state["pro_tabs"] == ZH["Series Library"]
 
 
-def test_image_provider_group_rendered_exactly_once_per_run(isolated_app):
+def test_material_primary_select_renders_only_in_material_body(isolated_app):
+    # 创作面板已参数化：图片能力的第一优先下拉只存在于素材来源体
+    # （一级页 / 设置弹窗素材 TAB），快速成片页不再渲染任何来源选择器。
     app = isolated_app
-    prefix = "settings_material_provider_ai_image_select"
+    prefix = "material_primary_ai_image_select"
 
     def count():
         return sum(1 for b in app.selectbox if str(b.key).startswith(prefix))
 
     app.run()
     assert not app.exception
-    assert count() == 1  # 快速成片页的图片 TAB
+    assert count() == 0  # 快速成片页的图片 TAB 只保留参数
+    # 能力 TAB 惰性渲染：显式定位到图片能力分组再统计。
+    app.session_state["settings_material_group"] = "ai_image"
     app.session_state["active_page"] = "material"
     app.run()
     assert not app.exception
-    assert count() == 1  # 素材来源页本体，图片 TAB 让位
+    assert count() == 1  # 素材来源页能力 TAB 本体
     app.session_state["active_page"] = "quick"
     app.session_state["settings_dialog_open"] = True
     app.session_state["settings_active_tab"] = "material"
     app.run()
     assert not app.exception
-    assert count() == 1  # 设置弹窗素材 TAB 本体，图片 TAB 让位
+    assert count() == 1  # 设置弹窗素材 TAB 本体

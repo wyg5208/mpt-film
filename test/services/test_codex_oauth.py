@@ -232,6 +232,8 @@ def test_webui_device_code_flow_in_spanish():
         app = AppTest.from_file(Path(__file__).resolve().parents[2] / "webui/Main.py", default_timeout=60)
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        # Codex 登录控件集中在文本生成 TAB（惰性渲染，需先选中）。
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
         assert not start.called

@@ -36,6 +36,20 @@ class TestTaskService(unittest.TestCase):
         self.addCleanup(history_patcher.stop)
         tm._cross_post_run_meta.clear()
         self.addCleanup(tm._cross_post_run_meta.clear)
+        # 备用源链解析读取真实 config.toml；流水线单测把所有服务都模拟掉，
+        # 这里统一给出可解析的主源，让后续预检门禁与流水线按原语义触达。
+        chain_patcher = patch.object(
+            tm.source_failover,
+            "resolve_video_source",
+            return_value=tm.source_failover.VideoSourceResolution(
+                source="pexels",
+                primary="pexels",
+                switched=False,
+                attempts=(("pexels", True),),
+            ),
+        )
+        chain_patcher.start()
+        self.addCleanup(chain_patcher.stop)
 
     def tearDown(self):
         with tm._cross_post_registry_lock:

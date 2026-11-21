@@ -429,7 +429,9 @@ def test_task_preflight_rejects_missing_key_before_script_generation():
         result = task_service.start("muapi-preflight", params, stop_at="materials")
 
     assert result["failed_stage"] == "preflight"
-    assert "MuAPI video generation requires a MuAPI API key" in result["error"]
+    # 未配置的提供商在备用源链解析处即失败，错误列出整条缺失链。
+    assert "no usable video source" in result["error"]
+    assert "muapi" in result["error"]
     generate_script.assert_not_called()
 
 

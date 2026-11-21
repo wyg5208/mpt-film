@@ -51,25 +51,33 @@ def test_infistar_video_models_specs_and_billing_confirmation(language):
         assert app.selectbox(key=f"video_clip_duration_select_{language}").value == 5
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "video"
-        app.session_state["settings_material_providers"] = {"ai_video": "infistar"}
+        app.run()
+        assert not app.exception
+        # 素材来源页改为能力 TAB：AI 视频组下拉同步主源键，且不再渲染任何
+        # Key/端点输入（全部集中到服务商配置页）。
+        assert values["infistar_api_key"] == "fake-llm-key"
+        messages = json.loads((WEBUI.parent / "i18n" / f"{language}.json").read_text(encoding="utf-8"))["Translation"]
+        english = json.loads((WEBUI.parent / "i18n" / "en.json").read_text(encoding="utf-8"))["Translation"]
+        primary = app.selectbox(key=f"material_primary_ai_video_select_{language}")
+        assert primary.options == [messages.get(key, english.get(key, key)) for key in (
+            "Metaso MiniMax H3", "OFox AI Video", "Shengsuan Cloud AI Video",
+            "Volcano Engine Seedance", "Infistar AI Video", "Jalapeno Cloud AI Video",
+            "WaveSpeed AI Video", "MuAPI AI Video",
+        )]
+        assert primary.value == "infistar"
+        assert not any(item.key in {
+            "volcengine_seedance_base_url_input", "wavespeed_api_keys_input",
+            "infistar_video_api_key_input",
+        } for item in app.text_input)
+
+        # 凭证集中在服务商配置页视频生成 TAB。
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Video Tab"
         app.run()
         assert not app.exception
         assert (
             app.text_input(key="infistar_video_api_key_input").value == "fake-video-key"
         )
-        assert values["infistar_api_key"] == "fake-llm-key"
-        messages = json.loads((WEBUI.parent / "i18n" / f"{language}.json").read_text(encoding="utf-8"))["Translation"]
-        english = json.loads((WEBUI.parent / "i18n" / "en.json").read_text(encoding="utf-8"))["Translation"]
-        providers = app.selectbox(key=f"settings_material_provider_ai_video_select_{language}")
-        assert providers.options == [messages.get(key, english.get(key, key)) for key in (
-            "Metaso MiniMax H3", "OFox AI Video", "Shengsuan Cloud AI Video",
-            "Volcano Engine Seedance", "Infistar AI Video", "Jalapeno Cloud AI Video",
-            "WaveSpeed AI Video", "MuAPI AI Video",
-        )]
-        assert providers.value == "infistar"
-        assert not any(item.key in {
-            "volcengine_seedance_base_url_input", "wavespeed_api_keys_input"
-        } for item in app.text_input)
 
 
 @pytest.mark.parametrize("llm_provider", ["infistar", "openai"])
@@ -89,8 +97,8 @@ def test_video_credentials_are_editable_with_any_llm(llm_provider):
         app = AppTest.from_file(str(WEBUI), default_timeout=60)
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
-        app.session_state["settings_dialog_target_tab"] = "video"
-        app.session_state["settings_material_providers"] = {"ai_video": "infistar"}
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Video Tab"
         app.run()
         assert not app.exception
         app.text_input(key="infistar_video_api_key_input").set_value(
@@ -105,7 +113,7 @@ def test_video_credentials_are_editable_with_any_llm(llm_provider):
         assert values["infistar_api_key"] == "old-llm-key"
         assert values["infistar_base_url"] == "https://llm.example/v1"
         if llm_provider == "infistar":
-            app.session_state["settings_dialog_target_tab"] = "llm"
+            app.session_state["service_provider_target_tab"] = "Provider Text Tab"
             app.run()
             assert not app.exception
             app.text_input(key="infistar_api_key_input").set_value("new-llm-key").run()

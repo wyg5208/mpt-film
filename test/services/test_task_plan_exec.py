@@ -67,6 +67,20 @@ class PlanExecTestCase(unittest.TestCase):
         state_patcher = patch.object(tm.sm, "state", self.state)
         state_patcher.start()
         self.addCleanup(state_patcher.stop)
+        # 备用源链解析读取真实 config.toml；执行链测试只关注方案门禁与
+        # 分阶段产物，这里统一给出可解析的主源，避免预检在源链处提前失败。
+        chain_patcher = patch.object(
+            tm.source_failover,
+            "resolve_video_source",
+            return_value=tm.source_failover.VideoSourceResolution(
+                source="pexels",
+                primary="pexels",
+                switched=False,
+                attempts=(("pexels", True),),
+            ),
+        )
+        chain_patcher.start()
+        self.addCleanup(chain_patcher.stop)
 
 
 class TestPlanPreflightGates(PlanExecTestCase):

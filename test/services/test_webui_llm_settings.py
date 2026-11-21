@@ -61,6 +61,8 @@ def test_fluxionai_settings_defaults_and_connection_button():
         app.session_state["ui_language"] = "zh"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        # 服务商页为懒加载 TAB：文本生成面板需显式定位。
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
         assert _widget_by_key(app.selectbox, "llm_provider_select").value == "fluxionai"
@@ -111,6 +113,7 @@ def test_infistar_settings_defaults_and_custom_configuration():
         app.session_state["ui_language"] = "zh"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
         assert _widget_by_key(app.selectbox, "llm_provider_select").value == "infistar"
@@ -168,6 +171,7 @@ def test_kimi_platform_selection_keeps_endpoint_configuration_consistent():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
 
         assert [str(item.value) for item in app.exception] == []
@@ -252,7 +256,7 @@ def test_configure_llm_link_opens_settings_on_llm_tab():
 
         assert [str(item.value) for item in app.exception] == []
         assert app.session_state["settings_dialog_open"] is True
-        assert app.session_state["settings_dialog_tabs_en"] == "LLM Settings"
+        assert app.session_state["settings_dialog_tabs_en"] == "Service Providers"
         # 业务目标只用于一次定向打开。渲染后立即消费，避免普通“设置”入口
         # 在之后被历史目标强制切回大模型标签页。
         assert "settings_dialog_target_tab" not in app.session_state
@@ -273,7 +277,7 @@ def test_material_settings_target_uses_localized_tab_state_and_is_consumed():
 
 
 def test_ai_video_settings_prioritize_sponsors_and_own_shengsuan_key():
-    """视频 Provider 应按约定的赞助商顺序展示，胜算云密钥只在设置中管理。"""
+    """胜算云密钥只在服务商配置页管理，素材能力 TAB 不渲染任何 Key 输入。"""
     app_config = dict(
         config.app,
         llm_provider="openai",
@@ -292,18 +296,17 @@ def test_ai_video_settings_prioritize_sponsors_and_own_shengsuan_key():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "video"
-        app.session_state["settings_material_providers"] = {"ai_video": "loomloom"}
         app.run()
+        assert not app.exception
+        # 素材来源页能力 TAB 已不含任何 Key 输入。
+        assert all(
+            item.key != "loomloom_api_token_input" for item in app.text_input
+        )
 
-        messages = json.loads((ROOT_DIR / "webui/i18n" / "en.json").read_text(encoding="utf-8"))["Translation"]
-        english = json.loads((ROOT_DIR / "webui/i18n" / "en.json").read_text(encoding="utf-8"))["Translation"]
-        providers = app.selectbox(key="settings_material_provider_ai_video_select_en")
-        assert providers.options == [messages.get(key, english.get(key, key)) for key in (
-            "Metaso MiniMax H3", "OFox AI Video", "Shengsuan Cloud AI Video",
-            "Volcano Engine Seedance", "Infistar AI Video", "Jalapeno Cloud AI Video",
-            "WaveSpeed AI Video", "MuAPI AI Video",
-        )]
-        assert providers.value == "loomloom"
+        # 凭证集中在服务商配置页视频生成 TAB。
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Video Tab"
+        app.run()
 
         settings_token = _widget_by_key(
             app.text_input,
@@ -348,6 +351,7 @@ def test_kimi_code_device_authorization_network_error_is_recoverable():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
 
@@ -394,6 +398,7 @@ def test_kimi_code_poll_network_error_retries_then_offers_restart():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
 
@@ -452,6 +457,7 @@ def test_kimi_code_pending_then_success_completes_flow():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
 
@@ -506,6 +512,7 @@ def test_kimi_login_opens_selected_region_and_waits_until_clicked():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         app.run()
         assert issue.call_count == 1
@@ -565,6 +572,7 @@ def test_kimi_poll_slow_down_and_cancel_do_not_busy_loop():
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         _click_kimi_login_link(app)
         _make_kimi_poll_due(app)

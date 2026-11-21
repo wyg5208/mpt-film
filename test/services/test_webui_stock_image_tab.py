@@ -106,10 +106,15 @@ def test_stock_select_syncs_video_source_and_shared_keys(isolated_app):
         # 当前来源不是库存图片时，下拉默认展示 Pexels 图片但不改写来源。
         assert stock.value == "pexels_image"
         assert config.app["video_source"] == "local"
-        # 共用 Key 表单默认按 Pexels 渲染在图片 TAB 内。
-        assert any(
-            str(t.key) == "pexels_api_keys_input" for t in app.text_input
+        # Key 表单已集中到服务商配置页：图片 TAB 只保留提示，不再渲染任何
+        # 库存 Key 输入。
+        assert not any(
+            str(t.key) in {"pexels_api_keys_input", "pixabay_api_keys_input"}
+            for t in app.text_input
         )
+        assert ZH["Stock Image Keys Elsewhere Hint"] in [
+            str(item.value) for item in app.caption
+        ]
 
         stock.select("pixabay_image").run()
         assert not app.exception
@@ -117,12 +122,10 @@ def test_stock_select_syncs_video_source_and_shared_keys(isolated_app):
         assert config.app["video_source"] == "pixabay_image"
         assert app.session_state["video_source_select_zh"] == "pixabay_image"
         assert _select(app, "stock_image_source_select").value == "pixabay_image"
-        # Key 表单跟随选择切换到 Pixabay，且与库存视频共用同一控件键。
-        assert any(
-            str(t.key) == "pixabay_api_keys_input" for t in app.text_input
-        )
+        # Key 表单仍在服务商配置页：切换来源后图片 TAB 同样没有 Key 输入。
         assert not any(
-            str(t.key) == "pexels_api_keys_input" for t in app.text_input
+            str(t.key) in {"pexels_api_keys_input", "pixabay_api_keys_input"}
+            for t in app.text_input
         )
         # 库存图片源下图像动效必须挂载。
         assert _has_select(app, "image_motion_select")
@@ -146,7 +149,8 @@ def test_stock_motion_gate_follows_effective_source(isolated_app):
         assert _has_select(app, "image_motion_select")
 
 
-def test_stock_shared_keys_render_exactly_once_and_yield(isolated_app):
+def test_stock_shared_keys_render_only_on_provider_stock_tab(isolated_app):
+    """共用 Key 表单只存在于服务商配置页素材搜索 TAB，任何素材入口都让位。"""
     app = isolated_app
 
     def count():
@@ -159,17 +163,25 @@ def test_stock_shared_keys_render_exactly_once_and_yield(isolated_app):
     ):
         app.run()
         assert not app.exception
-        assert count() == 1  # 快速成片页的图片 TAB
+        assert count() == 0  # 快速成片页的图片 TAB 只保留参数与提示
         app.session_state["active_page"] = "material"
         app.run()
         assert not app.exception
-        assert count() == 1  # 素材来源页本体，图片 TAB 让位
+        assert count() == 0  # 素材来源页能力 TAB 同样不含 Key 输入
         app.session_state["active_page"] = "quick"
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_active_tab"] = "material"
         app.run()
         assert not app.exception
-        assert count() == 1  # 设置弹窗素材 TAB 本体，图片 TAB 让位
+        assert count() == 0  # 设置弹窗素材 TAB 本体也让位
+
+        # 唯一的 Key 表单在服务商配置页素材搜索 TAB 中；弹窗中途换 TAB
+        # 必须走定向目标键（settings_active_tab 只在首次挂载生效）。
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Stock Search Tab"
+        app.run()
+        assert not app.exception
+        assert count() == 1
 
 
 def test_stock_select_labels_follow_language_switch(isolated_app):

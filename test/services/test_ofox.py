@@ -882,7 +882,9 @@ class TestOFoxMaterialIntegration(unittest.TestCase):
             result = task_service.start("ofox-preflight", params, stop_at="materials")
 
         self.assertEqual(result["failed_stage"], "preflight")
-        self.assertIn("OFox API key", result["error"])
+        # 未配置的提供商在备用源链解析处即失败，错误列出整条缺失链。
+        self.assertIn("no usable video source", result["error"])
+        self.assertIn("ofox", result["error"])
         generate_script.assert_not_called()
 
     def test_task_records_ofox_material_error_and_remote_task_id(self):

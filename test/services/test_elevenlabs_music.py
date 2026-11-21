@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -101,9 +102,18 @@ class TestElevenLabsMusicService(unittest.TestCase):
                 session.trust_env = False
 
                 def post(*args, **kwargs):
-                    response = session.post(*args, **kwargs)
-                    received.append(response)
-                    return response
+                    # 全量门禁高负载下，本机安全软件可能瞬断环回连接（10053）。
+                    # 有界重试拿到上游 500 响应，保持被测的取证降级路径不变。
+                    for attempt in range(3):
+                        try:
+                            response = session.post(*args, **kwargs)
+                        except requests.exceptions.ConnectionError:
+                            if attempt == 2:
+                                raise
+                            time.sleep(0.2)
+                        else:
+                            received.append(response)
+                            return response
 
                 with tempfile.TemporaryDirectory() as temp_dir:
                     video_path = Path(temp_dir) / "proxy.mp4"

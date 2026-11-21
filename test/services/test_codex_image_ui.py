@@ -102,8 +102,9 @@ def test_settings_migrate_missing_image_timeout_and_keep_single_account_control(
     ):
         app = AppTest.from_file(str(ROOT / "webui/Main.py"), default_timeout=60)
         app.session_state["settings_dialog_open"] = True
-        app.session_state["settings_dialog_target_tab"] = "image"
-        app.session_state["settings_material_providers"] = {"ai_image": "codex_image"}
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        # codex_image 凭证已集中到服务商配置页图片生成 TAB。
+        app.session_state["service_provider_target_tab"] = "Provider Image Tab"
         app.run()
         assert not app.exception
         assert app.text_input(key="codex_image_timeout_input").value == "300"
@@ -113,7 +114,8 @@ def test_settings_migrate_missing_image_timeout_and_keep_single_account_control(
 
 
 @pytest.mark.parametrize(
-    "first_tab,second_tab", [("llm", "image"), ("image", "llm")]
+    "first_tab,second_tab",
+    [("Provider Text Tab", "Provider Image Tab"), ("Provider Image Tab", "Provider Text Tab")],
 )
 def test_real_settings_reuse_pending_login_when_switching_tabs(first_tab, second_tab):
     settings = dict(
@@ -138,13 +140,15 @@ def test_real_settings_reuse_pending_login_when_switching_tabs(first_tab, second
     ):
         app = AppTest.from_file(str(ROOT / "webui/Main.py"), default_timeout=60)
         app.session_state["settings_dialog_open"] = True
-        app.session_state["settings_dialog_target_tab"] = first_tab
-        app.session_state["settings_material_providers"] = {"ai_image": "codex_image"}
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        # 文本生成 TAB（codex 订阅登录）与图片生成 TAB（codex_image）共用
+        # 同一份待确认登录流；懒加载 TAB 通过目标键直达。
+        app.session_state["service_provider_target_tab"] = first_tab
         app.run()
         app.button(key="codex_login").click().run()
         assert not app.exception
         assert any(item.value == "SHARED-CODE" for item in app.code)
-        app.session_state["settings_dialog_target_tab"] = second_tab
+        app.session_state["service_provider_target_tab"] = second_tab
         app.run()
         assert not app.exception
         assert any(item.value == "SHARED-CODE" for item in app.code)

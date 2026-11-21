@@ -103,6 +103,8 @@ def test_connection_error_is_localized_without_changing_provider_diagnostics():
         app = AppTest.from_file(str(ROOT / "webui/Main.py"), default_timeout=60)
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        # 连接测试按钮集中在文本生成 TAB（惰性渲染，需先选中）。
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         app.button(key="test_llm_connection_button").click().run()
         assert not app.exception

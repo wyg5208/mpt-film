@@ -27,7 +27,8 @@ def test_defaults_campaign_links_and_shared_key_are_visible(language):
         app.session_state["ui_language"] = language
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
-        app.session_state["settings_material_providers"] = {"ai_video": "jalapeno"}
+        # LLM 表单懒加载：服务商页默认打开总览，需定位到文本生成 TAB。
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
         assert (
@@ -36,7 +37,7 @@ def test_defaults_campaign_links_and_shared_key_are_visible(language):
         )
         tips = "\n".join(item.value for item in app.info)
         assert provider.CAMPAIGN_URL in tips and provider.MODELS_URL in tips
-        app.session_state["settings_dialog_target_tab"] = "video"
+        app.session_state["service_provider_target_tab"] = "Provider Video Tab"
         app.run()
         assert not app.exception
         assert (
@@ -84,8 +85,8 @@ def test_video_key_override_and_endpoint_are_independent_of_llm(llm_provider):
         app = AppTest.from_file(str(WEBUI), default_timeout=60)
         app.session_state["ui_language"] = "en"
         app.session_state["settings_dialog_open"] = True
-        app.session_state["settings_dialog_target_tab"] = "video"
-        app.session_state["settings_material_providers"] = {"ai_video": "jalapeno"}
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Video Tab"
         app.run()
         assert not app.exception
         app.checkbox(key="jalapeno_confirm_charge").check().run()

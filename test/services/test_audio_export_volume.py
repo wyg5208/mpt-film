@@ -61,6 +61,14 @@ def test_full_video_keeps_unscaled_narration_for_its_existing_mixer(tmp_path):
           patch.object(tm.voice, 'tts', side_effect=_write_narration),
           patch.object(tm, 'generate_subtitle', return_value=''),
           patch.object(tm, 'get_video_materials', return_value=['material.mp4']),
+          patch.object(
+              tm.source_failover,
+              'resolve_video_source',
+              return_value=tm.source_failover.VideoSourceResolution(
+                  source='pexels', primary='pexels', switched=False,
+                  attempts=(('pexels', True),),
+              ),
+          ),
           patch.object(tm, 'generate_final_videos', side_effect=render),
           patch.object(tm.upload_post.upload_post_service, 'is_configured', return_value=False)):
         result = tm.start('video-volume', params)

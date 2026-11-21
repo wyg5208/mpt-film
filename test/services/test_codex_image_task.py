@@ -76,6 +76,8 @@ def test_api_captures_context_before_any_consuming_service():
         video_subject="Pyramids", video_source="codex_image", subtitle_enabled=False
     )
     with (
+        # 链解析按 codex 连接状态判定 codex_image 就绪；这里模拟已连接。
+        patch.object(task.codex_oauth, "account_status", return_value=True),
         patch.object(
             codex_image,
             "capture_context",

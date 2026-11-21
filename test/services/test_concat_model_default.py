@@ -76,6 +76,16 @@ def test_nullable_api_mode_reaches_native_renderer_and_completes(tmp_path):
         patch.object(tm, "generate_subtitle", return_value=""),
         patch.object(tm, "get_video_materials", return_value=["source.mp4"]),
         patch.object(
+            tm.source_failover,
+            "resolve_video_source",
+            return_value=tm.source_failover.VideoSourceResolution(
+                source="pexels",
+                primary="pexels",
+                switched=False,
+                attempts=(("pexels", True),),
+            ),
+        ),
+        patch.object(
             tm.upload_post.upload_post_service, "is_configured", return_value=False
         ),
         patch.object(video, "AudioFileClip", return_value=audio),

@@ -159,6 +159,8 @@ def test_real_settings_select_and_refresh_preserve_saved_model():
         app = AppTest.from_file(Path(__file__).resolve().parents[2] / "webui/Main.py", default_timeout=60)
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        # Codex 模型控件集中在文本生成 TAB（惰性渲染，需先选中）。
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
         assert (
@@ -196,6 +198,8 @@ def test_ui_outage_preserves_manual_model_then_recovers():
         app = AppTest.from_file(Path(__file__).resolve().parents[2] / "webui/Main.py", default_timeout=60)
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "llm"
+        # Codex 模型控件集中在文本生成 TAB（惰性渲染，需先选中）。
+        app.session_state["service_provider_target_tab"] = "Provider Text Tab"
         app.run()
         assert not app.exception
         assert (

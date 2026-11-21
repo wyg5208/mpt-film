@@ -35,6 +35,7 @@ def test_ofox_settings_order_and_saved_values(language):
     # 使用虚构配置并禁止保存，打开设置不得覆盖本机凭据或改写既有 OFox 选择。
     values = {
         "llm_provider": "openai",
+        "video_source": "ofox",
         "ofox_api_key": "review-only-fake-key",
         "ofox_text_to_video_model": "custom-model",
         "ofox_base_url": "https://example.invalid/v1",
@@ -50,27 +51,34 @@ def test_ofox_settings_order_and_saved_values(language):
         app.run()
         app.session_state["settings_dialog_open"] = True
         app.session_state["settings_dialog_target_tab"] = "video"
-        app.session_state["settings_material_providers"] = {"ai_video": "ofox"}
         app.run()
         assert not app.exception
         messages = json.loads((WEBUI.parent / "i18n" / f"{language}.json").read_text(encoding="utf-8"))["Translation"]
         english = json.loads((WEBUI.parent / "i18n" / "en.json").read_text(encoding="utf-8"))["Translation"]
-        providers = app.selectbox(key=f"settings_material_provider_ai_video_select_{language}")
-        assert providers.options == [messages.get(key, english.get(key, key)) for key in (
+        # 素材来源页能力 TAB：AI 视频组第一优先下拉展示全部来源并同步主源键。
+        primary = app.selectbox(key=f"material_primary_ai_video_select_{language}")
+        assert primary.options == [messages.get(key, english.get(key, key)) for key in (
             "Metaso MiniMax H3", "OFox AI Video", "Shengsuan Cloud AI Video",
             "Volcano Engine Seedance", "Infistar AI Video", "Jalapeno Cloud AI Video",
             "WaveSpeed AI Video", "MuAPI AI Video",
         )]
-        assert providers.value == "ofox"
+        assert primary.value == "ofox"
+        # 能力 TAB 不含任何 Key/参数输入（全部集中到服务商配置页）。
         assert not any(item.key in {
-            "metaso_minimax_api_key_input", "loomloom_api_token_input"
+            "metaso_minimax_api_key_input", "loomloom_api_token_input",
+            "ofox_api_key_input",
         } for item in app.text_input)
+
+        # OFox 凭证表单在服务商配置页视频生成 TAB。
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Video Tab"
+        app.run()
+        assert not app.exception
         api_key_input = next(item for item in app.text_input if item.key == "ofox_api_key_input")
         assert "https://ofox.ai/?utm_source=github&utm_medium=sponsorship&utm_content=moneyprinterturbo" in api_key_input.label
         assert any(item.value == "**OfoxAI**" for item in app.markdown)
         # 每种语言均实际渲染，仅品牌名保留推广链接，官方上游说明使用普通文字。
-        messages = json.loads((WEBUI.parent / "i18n" / f"{language}.json").read_text(encoding="utf-8"))
-        help_text = messages["Translation"]["OFox AI Video Help"]
+        help_text = messages["OFox AI Video Help"]
         assert "http" not in help_text
         assert any(
             "[OfoxAI](https://ofox.ai/?utm_source=github&utm_medium=sponsorship&utm_content=moneyprinterturbo)" in item.value

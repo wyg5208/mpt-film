@@ -79,5 +79,11 @@ def test_catalan_builtin_voices_and_settings_dialog(catalan_app):
     assert any("Joana" in option for item in app.selectbox for option in item.options)
     next(item for item in app.button if item.key == "open_settings_dialog_button").click().run()
     assert not app.exception
-    assert any(tab.label == "Model de llenguatge" for tab in app.tabs)
+    assert any(tab.label == "Proveïdors de serveis" for tab in app.tabs)
     assert any(tab.label == "Orígens del material" for tab in app.tabs)
+    # 服务商配置体是能力 TAB：惰性渲染下先选中文本 TAB 再校验内层标签。
+    app.session_state["settings_dialog_target_tab"] = "llm"
+    app.run()
+    assert not app.exception
+    assert any(tab.label == "Resum" for tab in app.tabs)
+    assert any(tab.label == "Generació de text" for tab in app.tabs)

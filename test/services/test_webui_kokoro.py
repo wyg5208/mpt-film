@@ -66,6 +66,10 @@ def test_first_open_offline_preserves_saved_voice(monkeypatch, ui):
 def test_endpoint_or_credential_change_invalidates_cache(monkeypatch, ui, input_key, value):
     get = Mock(return_value=["kokoro:zf_xiaobei"])
     monkeypatch.setattr(voice, "get_kokoro_voices", get)
+    # Kokoro 端点/凭证输入集中在服务商配置页配音 TAB（惰性渲染，需先选中）。
+    ui.session_state["settings_dialog_open"] = True
+    ui.session_state["settings_dialog_target_tab"] = "llm"
+    ui.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
     ui.run()
     next(item for item in ui.text_input if item.key == input_key).set_value(value).run()
     assert get.call_count == 2
@@ -79,6 +83,10 @@ def test_manual_voices_and_clearing_them(monkeypatch, ui):
         "voices": [{"id": "zf_xiaobei"}, {"id": "af_heart"}],
     }))
     monkeypatch.setattr(voice.requests, "get", get)
+    # 手填音色输入集中在服务商配置页配音 TAB（惰性渲染，需先选中）。
+    ui.session_state["settings_dialog_open"] = True
+    ui.session_state["settings_dialog_target_tab"] = "llm"
+    ui.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
     ui.run()
     get.assert_not_called()
     next(item for item in ui.text_input if item.key == "kokoro_voices_input").set_value("").run()

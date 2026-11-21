@@ -44,7 +44,13 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
 
     def _widget_by_key(self, elements, key_prefix):
         """通过稳定业务 key 查找控件，展示标签翻译后仍能命中同一控件。"""
-        widget = next(
+        widget = self._find_by_key(elements, key_prefix)
+        self.assertIsNotNone(widget, f"widget not found: {key_prefix}")
+        return widget
+
+    def _find_by_key(self, elements, key_prefix):
+        """同 _widget_by_key，但找不到时返回 None，用于断言控件不存在。"""
+        return next(
             (
                 item
                 for item in elements
@@ -53,8 +59,14 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(widget, f"widget not found: {key_prefix}")
-        return widget
+
+    def _open_provider_music_tab(self, app):
+        """打开设置弹窗并定位服务商配置页音乐 TAB（Key 集中后的入口）。"""
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Music Tab"
+        app.run()
+        return app
 
     def _open_custom_bgm_panel(self, locale):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
@@ -345,8 +357,8 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
                 )
                 self.assertEqual(len(app.get("audio")), 0)
 
-    def test_sonilo_source_shows_masked_prefilled_key_and_optional_prompt(self):
-        """选择 Sonilo 后应回填本机 Key，且保持密码显示模式。"""
+    def test_sonilo_music_prompt_stays_in_bgm_panel_and_key_moves_to_providers(self):
+        """BGM 面板只保留提示词参数；Key 输入集中到服务商配置页音乐 TAB。"""
         for locale in TEST_LOCALES:
             with self.subTest(locale=locale):
                 test_config = dict(config.app, sonilo_api_key="saved-test-key")
@@ -356,11 +368,24 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
                 ):
                     app = self._open_sonilo_bgm_panel(locale)
 
-                api_key_input = self._widget_by_key(
-                    app.text_input, "sonilo_api_key_input"
-                )
                 prompt_input = self._widget_by_key(
                     app.text_input, "sonilo_bgm_prompt_input"
+                )
+                self.assertEqual(prompt_input.value, "")
+                # Key 已迁出 BGM 面板：面板内不再有任何 Sonilo Key 输入。
+                self.assertIsNone(
+                    self._find_by_key(app.text_input, "sonilo_api_key_input")
+                )
+                self.assertEqual([str(item.value) for item in app.exception], [])
+
+                # 已保存 Key 在服务商配置页音乐 TAB 中回填并保持密码模式。
+                with (
+                    patch.object(config, "app", test_config),
+                    patch.object(config, "save_config"),
+                ):
+                    self._open_provider_music_tab(app)
+                api_key_input = self._widget_by_key(
+                    app.text_input, "sonilo_api_key_input"
                 )
                 self.assertEqual(api_key_input.value, "saved-test-key")
                 self.assertEqual(
@@ -374,7 +399,6 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
                     api_key_input.proto.type, api_key_input.proto.PASSWORD
                 )
                 self.assertFalse(getattr(api_key_input.proto, "help", ""))
-                self.assertEqual(prompt_input.value, "")
                 self.assertEqual([str(item.value) for item in app.exception], [])
 
     def test_sonilo_connection_button_reports_success(self):
@@ -416,8 +440,10 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
         self.assertNotIn(required_warning, [item.value for item in app.warning])
         self.assertEqual([str(item.value) for item in app.exception], [])
 
-    def test_elevenlabs_source_reuses_masked_tts_key_and_shows_prompt(self):
-        """配乐和 TTS 应共用 Key，并保持密码输入和独立音乐模型配置。"""
+    def test_elevenlabs_music_prompt_stays_in_bgm_panel_and_key_moves_to_providers(
+        self,
+    ):
+        """配乐提示词留在 BGM 面板；共用 Key 集中到服务商配置页音乐 TAB。"""
         for locale in TEST_LOCALES:
             with self.subTest(locale=locale):
                 test_config = dict(
@@ -432,11 +458,24 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
                 ):
                     app = self._open_elevenlabs_bgm_panel(locale)
 
-                api_key_input = self._widget_by_key(
-                    app.text_input, "elevenlabs_api_key_input"
-                )
                 prompt_input = self._widget_by_key(
                     app.text_input, "elevenlabs_music_prompt_input"
+                )
+                self.assertEqual(prompt_input.value, "")
+                # Key 已迁出 BGM 面板。
+                self.assertIsNone(
+                    self._find_by_key(app.text_input, "elevenlabs_api_key_input")
+                )
+                self.assertEqual([str(item.value) for item in app.exception], [])
+
+                # 共用 Key 在服务商配置页音乐 TAB 中回填，展示配乐标签。
+                with (
+                    patch.object(config, "elevenlabs", test_config),
+                    patch.object(config, "save_config"),
+                ):
+                    self._open_provider_music_tab(app)
+                api_key_input = self._widget_by_key(
+                    app.text_input, "elevenlabs_api_key_input"
                 )
                 self.assertEqual(api_key_input.value, "saved-elevenlabs-key")
                 self.assertEqual(
@@ -451,14 +490,13 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
                     api_key_input.proto.type, api_key_input.proto.PASSWORD
                 )
                 self.assertFalse(getattr(api_key_input.proto, "help", ""))
-                self.assertEqual(prompt_input.value, "")
                 self.assertEqual(
                     test_config["model_id"], "eleven_multilingual_v2"
                 )
                 self.assertEqual([str(item.value) for item in app.exception], [])
 
     def test_elevenlabs_tts_and_music_share_one_api_key_widget(self):
-        """同时启用配音和配乐时只能存在一个 Key 状态，修改后不能被旧值覆盖。"""
+        """配音与配乐 TAB 共用同一个 Key 控件状态，修改后不能被旧值覆盖。"""
         test_config = dict(config.elevenlabs, api_key="key-A")
         test_ui = dict(config.ui, voice_mode="tts")
         with (
@@ -470,12 +508,7 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
             app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
             app.session_state["ui_language"] = "en"
             app.run()
-            self._widget_by_key(
-                app.selectbox, "tts_server_select"
-            ).set_value("elevenlabs").run()
-            self._widget_by_key(
-                app.selectbox, "bgm_type_select"
-            ).set_value("elevenlabs").run()
+            self._open_provider_music_tab(app)
 
             shared_inputs = [
                 item
@@ -501,6 +534,19 @@ class TestWebuiBackgroundMusic(unittest.TestCase):
             )
             self.assertEqual(updated_input.value, "key-B")
             self.assertEqual(test_config["api_key"], "key-B")
+
+            # 切到配音 TAB：挂载的是同一个控件状态，展示新值而不是旧值。
+            app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
+            app.run()
+            voiceover_inputs = [
+                item
+                for item in app.text_input
+                if str(getattr(item, "key", "")).startswith(
+                    "elevenlabs_api_key_input"
+                )
+            ]
+            self.assertEqual(len(voiceover_inputs), 1)
+            self.assertEqual(voiceover_inputs[0].value, "key-B")
 
         self.assertEqual([str(item.value) for item in app.exception], [])
 

@@ -67,7 +67,7 @@ def test_all_tts_api_key_labels_include_an_official_configuration_link():
 
 
 def test_tts_provider_inputs_render_the_standardized_labels():
-    """实际切换每个 TTS Provider，确认输入框没有绕过统一后的翻译标签。"""
+    """配音 TAB 懒加载面板内 render-all：全部 Key 输入同时挂载，标签统一。"""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -88,12 +88,13 @@ def test_tts_provider_inputs_render_the_standardized_labels():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "zh"
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.run()
 
-        for provider, (widget_key, label_key) in TTS_PROVIDER_WIDGETS.items():
-            provider_select = _widget_by_key(app.selectbox, "tts_server_select")
-            provider_select.set_value(provider).run()
-
+        # 全部 TTS 服务商的凭证表单在同一面板内挂载，逐个校验标签。
+        for widget_key, label_key in TTS_PROVIDER_WIDGETS.values():
             api_key_input = _widget_by_key(app.text_input, widget_key)
             assert api_key_input.label == translations[label_key]
             assert api_key_input.proto.type == api_key_input.proto.PASSWORD
@@ -124,19 +125,27 @@ def test_voxcpm_settings_render_model_and_endpoint_fields():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "en"
+        # 凭证与端点配置集中在服务商配置页配音 TAB。
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.run()
 
-    api_key_input = _widget_by_key(app.text_input, "voxcpm_api_key_input")
-    assert api_key_input.proto.type == api_key_input.proto.PASSWORD
-    assert _widget_by_key(app.text_input, "voxcpm_model_id_input").value == "speech-model"
-    assert (
-        _widget_by_key(app.text_input, "voxcpm_base_url_input").value
-        == voice.VOXCPM_DEFAULT_BASE_URL
-    )
-    speed_input = _widget_by_key(app.selectbox, "voice_rate_select")
-    assert speed_input.disabled
-    assert "does not support numeric speed" in speed_input.help
-    assert [str(item.value) for item in app.exception] == []
+        api_key_input = _widget_by_key(app.text_input, "voxcpm_api_key_input")
+        assert api_key_input.proto.type == api_key_input.proto.PASSWORD
+        assert _widget_by_key(app.text_input, "voxcpm_model_id_input").value == "speech-model"
+        assert (
+            _widget_by_key(app.text_input, "voxcpm_base_url_input").value
+            == voice.VOXCPM_DEFAULT_BASE_URL
+        )
+
+        # 语速选择器仍是音频面板的参数；关闭弹窗后在创作页验证。
+        app.session_state["settings_dialog_open"] = False
+        app.run()
+        speed_input = _widget_by_key(app.selectbox, "voice_rate_select")
+        assert speed_input.disabled
+        assert "does not support numeric speed" in speed_input.help
+        assert [str(item.value) for item in app.exception] == []
 
 
 @pytest.mark.parametrize(
@@ -239,6 +248,10 @@ def test_voxcpm_reconnect_restores_saved_key_instead_of_clearing_it():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "en"
+        # VoxCPM Key 输入集中在服务商配置页配音 TAB。
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.session_state["voxcpm_api_key_input"] = ""
         app.run()
 
@@ -268,6 +281,10 @@ def test_elevenlabs_reconnect_restores_saved_key_before_loading_voices():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "en"
+        # ElevenLabs Key 输入集中在服务商配置页配音 TAB。
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.session_state["elevenlabs_api_key_input"] = ""
         app.run()
 
@@ -297,6 +314,10 @@ def test_elevenlabs_environment_key_is_used_without_persisting_it():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "en"
+        # 环境变量回填发生在配音 TAB 的 Key 控件上。
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.run()
 
     assert test_config["api_key"] == ""
@@ -318,6 +339,10 @@ def test_minimax_reconnect_restores_saved_tts_key():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "en"
+        # MiniMax TTS 凭证集中在服务商配置页配音 TAB。
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.session_state["minimax_tts_api_key_input"] = ""
         app.run()
 
@@ -344,6 +369,9 @@ def test_minimax_shared_llm_key_is_not_duplicated_in_tts_config():
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "en"
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.run()
 
     api_key_input = _widget_by_key(app.text_input, "minimax_tts_api_key_input")
@@ -425,11 +453,13 @@ def test_minimax_voices_load_only_on_demand_and_sync_the_selected_voice():
             return_value=catalog,
         ) as get_catalog,
     ):
-        app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=60)
         app.session_state["ui_language"] = "zh"
+        # 获取音色按钮在服务商配置页配音 TAB；音色选择器仍在音频面板。
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "llm"
+        app.session_state["service_provider_target_tab"] = "Provider Voiceover Tab"
         app.run()
-
-        # 普通页面 rerun 不能主动消耗 MiniMax API；只有点击按钮才查询。
         get_catalog.assert_not_called()
         _widget_by_key(app.button, "load_minimax_voices_button").click().run()
         get_catalog.assert_called_once_with(
