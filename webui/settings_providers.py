@@ -93,6 +93,9 @@ def configured_material_providers(settings, groups, codex_connected=False):
         provider: _has_keys(settings.get(f"{provider}_api_keys"))
         for provider in ("pexels", "pixabay", "coverr", "wavespeed")
     }
+    # 库存图片源与库存视频共用同一批 API Key，就绪度直接复用。
+    enabled["pexels_image"] = enabled["pexels"]
+    enabled["pixabay_image"] = enabled["pixabay"]
     enabled.update(
         {
             "metaso_minimax": metaso_minimax.is_enabled(settings),

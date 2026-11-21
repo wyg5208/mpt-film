@@ -21,10 +21,11 @@ import contextlib
 import streamlit as st
 import streamlit.components.v1 as components
 from loguru import logger
+from pydantic import ValidationError
 from streamlit_tour import Tour
 
 # WebUI 作为独立入口运行时，需要让项目根目录优先于第三方依赖，
-# 避免依赖中的同名 app 包遮蔽 MoneyPrinterTurbo 自己的 app 包。
+# 避免依赖中的同名 app 包遮蔽 ChangoFilm 自己的 app 包。
 root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 if root_dir in sys.path:
     sys.path.remove(root_dir)
@@ -41,16 +42,23 @@ from app.models.llm_provider import (
 from app.models.schema import (
     ImageMotion,
     MaterialInfo,
+    ScriptPlan,
+    ScriptScene,
+    Series,
+    SeriesCharacter,
+    SeriesEpisode,
     VideoAspect,
     VideoConcatMode,
     VideoFitMode,
     VideoParams,
     VideoTransitionMode,
+    estimate_scene_duration,
 )
 from app.services import bgm as bgm_service
 from app.services import material_upload as material_upload_service
 from app.services import (
     cache_manager,
+    comfy_local,
     llm,
     loomloom,
     material,
@@ -59,6 +67,8 @@ from app.services import (
     infistar_video,
     jalapeno_video,
     ofox,
+    plan_store,
+    series_store,
     social_auto_upload,
     subtitle,
     upload_post,
@@ -82,22 +92,21 @@ from app.utils import utils
 from app.utils.request_logging import trace_http_call
 
 st.set_page_config(
-    page_title="MoneyPrinterTurbo",
-    page_icon="🤖",
+    page_title="ChangoFilm",
+    page_icon="🎬",
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
-        "Report a bug": "https://github.com/harry0703/MoneyPrinterTurbo/issues",
-        "About": "# MoneyPrinterTurbo\nSimply provide a topic or keyword for a video, and it will "
-        "automatically generate the video copy, video materials, video subtitles, "
-        "and video background music before synthesizing a high-definition short "
-        "video.\n\nhttps://github.com/harry0703/MoneyPrinterTurbo",
+        "About": "# ChangoFilm\nA local-first studio for professional series short "
+        "dramas. Provide a topic or script and ChangoFilm produces the copy, "
+        "visuals, voiceover, subtitles and music, then composes a finished "
+        "episode on your own machine.",
     },
 )
 
 
 # Streamlit 1.59 会在页面右上角默认展示 Deploy、skills nudge 等平台入口。
-# MoneyPrinterTurbo 是面向终端用户的本地工具，这些入口会造成顶部大块空白，
+# ChangoFilm 是面向终端用户的本地工具，这些入口会造成顶部大块空白，
 # 也会让新用户误以为需要安装额外组件。这里统一隐藏 Streamlit 平台工具栏，
 # 并压缩主容器顶部留白，只保留项目自己的标题、语言选择和业务设置区域。
 style_file = Path(__file__).with_name("styles.css")
@@ -128,7 +137,7 @@ VOXCPM_PROMPT_TEXT_SESSION_KEY = "voxcpm_prompt_text_input"
 VOXCPM_HIGH_FIDELITY_SESSION_KEY = "voxcpm_high_fidelity_enabled"
 VOXCPM_SEPARATE_PROMPT_AUDIO_SESSION_KEY = "voxcpm_separate_prompt_audio_enabled"
 VOXCPM_PROMPT_EXAMPLE_MODE_SESSION_KEY = "voxcpm_prompt_example_mode"
-ONBOARDING_TOUR_KEY = "mpt-onboarding-v1"
+ONBOARDING_TOUR_KEY = "changofilm-onboarding-v1"
 CUSTOM_LLM_ENDPOINT_ID = "custom"
 VOICE_MODE_TTS = "tts"
 VOICE_MODE_UPLOAD = "upload"
@@ -140,6 +149,7 @@ LOOMLOOM_MAX_POLL_FAILURES = 5
 # 不改变 config.toml、历史任务和 API 请求中的字段语义，旧用户无需迁移配置。
 VIDEO_SOURCE_GROUPS = {
     "stock_video": ("pexels", "pixabay", "coverr"),
+    "stock_image": ("pexels_image", "pixabay_image"),
     "ai_video": (
         "metaso_minimax",
         "ofox",
@@ -283,12 +293,12 @@ _RUNTIME_CONFIG_SECTIONS = {
 }
 # 设置预设与密钥备份使用各自的文件标识。导入时先校验 schema 和版本，
 # 避免把任务记录、config.toml 或其它 JSON 误当成本功能的导出文件。
-SETTINGS_PRESET_SCHEMA = "moneyprinterturbo.settings-preset"
+SETTINGS_PRESET_SCHEMA = "changofilm.settings-preset"
 SETTINGS_PRESET_VERSION = 1
-SETTINGS_PRESET_FILE_NAME = "moneyprinterturbo-settings.json"
-KEY_BACKUP_SCHEMA = "moneyprinterturbo.key-backup"
+SETTINGS_PRESET_FILE_NAME = "changofilm-settings.json"
+KEY_BACKUP_SCHEMA = "changofilm.key-backup"
 KEY_BACKUP_VERSION = 1
-KEY_BACKUP_FILE_NAME = "moneyprinterturbo-keys.json"
+KEY_BACKUP_FILE_NAME = "changofilm-keys.json"
 # Export files contain only settings or credentials, not media. Reject oversized
 # uploads before decoding and parsing them in the Streamlit process.
 MAX_SETTINGS_TRANSFER_BYTES = 2 * 1024 * 1024
@@ -303,9 +313,19 @@ PRESET_EXCLUDED_PARAM_KEYS = frozenset(
 )
 # 项目绑定：每个任务目录一份 params.json 生成参数快照。只有 params.json
 # 而没有 script.json 的目录是“草稿”（保存过但尚未提交生成）。
-PROJECT_PARAMS_SCHEMA = "moneyprinterturbo.project-params"
+PROJECT_PARAMS_SCHEMA = "changofilm.project-params"
 PROJECT_PARAMS_VERSION = 1
 PROJECT_PARAMS_FILE_NAME = "params.json"
+# 品牌升级（MoneyPrinterTurbo → ChangoFilm）前导出的文件仍带旧 schema：
+# 导入/读取时兼容旧标识，新导出一律写新标识，用户无需手工转换。
+LEGACY_SETTINGS_PRESET_SCHEMA = "moneyprinterturbo.settings-preset"
+LEGACY_KEY_BACKUP_SCHEMA = "moneyprinterturbo.key-backup"
+LEGACY_PROJECT_PARAMS_SCHEMA = "moneyprinterturbo.project-params"
+_LEGACY_SCHEMA_ALIASES = {
+    SETTINGS_PRESET_SCHEMA: LEGACY_SETTINGS_PRESET_SCHEMA,
+    KEY_BACKUP_SCHEMA: LEGACY_KEY_BACKUP_SCHEMA,
+    PROJECT_PARAMS_SCHEMA: LEGACY_PROJECT_PARAMS_SCHEMA,
+}
 # 预设库：storage/presets 下的具名预设，复用设置预设的 schema，导出文件
 # 可以直接在其它机器导入。内置预设是代码常量，不落盘、不可删除。
 PRESET_LIBRARY_DIR_NAME = "presets"
@@ -878,7 +898,10 @@ _initialize_session_state()
 
 
 def tr(key):
-    loc = locales.get(st.session_state["ui_language"], {})
+    # AppTest 序列化控件时会在裸线程重调 format_func，此时会话态是全局
+    # mock（无 ui_language）；用 .get 回退英文而不是 KeyError，保证
+    # 已翻译 options 的 selectbox 在测试壳下也能正常序列化。
+    loc = locales.get(st.session_state.get("ui_language", "en"), {})
     value = loc.get("Translation", {}).get(key)
     if value is not None:
         return value
@@ -1901,7 +1924,10 @@ def _read_project_params(task_id):
             payload = json.load(f)
         if not isinstance(payload, dict):
             return None
-        if payload.get("schema") != PROJECT_PARAMS_SCHEMA:
+        if payload.get("schema") not in (
+            PROJECT_PARAMS_SCHEMA,
+            LEGACY_PROJECT_PARAMS_SCHEMA,
+        ):
             return None
         raw_params = payload.get("params")
         if not isinstance(raw_params, dict):
@@ -2509,7 +2535,7 @@ def _render_brand(available_update: str | None = None):
         # Streamlit 会继续用 Markdown 解析传入的 HTML。这里保持链接为单行，
         # 避免多行字符串的缩进被识别成代码块，导致页面直接显示 HTML 源码。
         update_link = (
-            '<a class="mpt-brand__update" '
+            '<a class="changofilm-brand__update" '
             f'href="{version_checker.LATEST_RELEASE_PAGE_URL}" '
             'target="_blank" rel="noopener noreferrer" '
             f'aria-label="{update_label}" title="{update_label}">'
@@ -2517,14 +2543,10 @@ def _render_brand(available_update: str | None = None):
         )
     st.markdown(
         f"""
-        <h1 class="mpt-brand">
-            <span class="mpt-brand__name">MoneyPrinterTurbo</span>
-            <a class="mpt-brand__version"
-               href="https://github.com/harry0703/MoneyPrinterTurbo"
-               target="_blank"
-               rel="noopener noreferrer"
-               aria-label="Open MoneyPrinterTurbo on GitHub"
-               title="Open project on GitHub">v{html.escape(str(config.project_version))}</a>
+        <h1 class="changofilm-brand">
+            <span class="changofilm-brand__name">ChangoFilm</span>
+            <span class="changofilm-brand__version"
+                  title="ChangoFilm version">v{html.escape(str(config.project_version))}</span>
             {update_link}
         </h1>
         """,
@@ -2537,9 +2559,14 @@ def _render_pending_version_check():
     """检查未完成时只刷新品牌区域，避免阻塞或反复执行整页表单。"""
     snapshot = version_checker.poll_available_update(config.project_version)
     if snapshot.complete:
-        # 检查完成后刷新一次整页，让顶部栏改为静态渲染并停止 fragment 轮询。
-        # 该刷新发生在后台请求完成之后，不会延迟初始页面的其它内容。
-        st.rerun(scope="app")
+        # 完成后只在本 fragment 内更新品牌区，不主动整页 rerun：
+        # 那会在启动后 1–3 秒无请求地重渲整页，抢走刚开始交互的
+        # 用户的焦点/滚动位置（“页面漂移”感来源之一）。下一次自然
+        # 交互的整页 rerun 会看到 complete 改走静态渲染停止轮询；
+        # 在此之前本 fragment 每秒重绘同一份品牌内容（缓存快照，
+        # 无视觉差异）。
+        _render_brand(snapshot.available_version)
+        return
     _render_brand()
 
 
@@ -3256,26 +3283,26 @@ def stable_selectbox(label, options, default_value, key, format_func=None, **kwa
 # 原生的键盘导航、无障碍语义和移动端选择体验。组件只传递固定业务值和翻译文本，
 # 不接收任意 HTML，从边界上避免配置内容进入 innerHTML。
 _GROUPED_SELECT_COMPONENT = st.components.v2.component(
-    "mpt_grouped_select",
+    "changofilm_grouped_select",
     html="""
-        <div class="mpt-grouped-select">
-            <div class="mpt-grouped-select__label-row">
-                <label class="mpt-grouped-select__label"></label>
-                <button class="mpt-grouped-select__settings" type="button"></button>
+        <div class="changofilm-grouped-select">
+            <div class="changofilm-grouped-select__label-row">
+                <label class="changofilm-grouped-select__label"></label>
+                <button class="changofilm-grouped-select__settings" type="button"></button>
             </div>
-            <div class="mpt-grouped-select__control">
+            <div class="changofilm-grouped-select__control">
                 <select></select>
             </div>
         </div>
     """,
     css="""
-        .mpt-grouped-select {
+        .changofilm-grouped-select {
             width: 100%;
             color: var(--st-text-color);
             font-family: var(--st-font);
         }
 
-        .mpt-grouped-select__label-row {
+        .changofilm-grouped-select__label-row {
             display: flex;
             flex-wrap: wrap;
             align-items: baseline;
@@ -3283,12 +3310,12 @@ _GROUPED_SELECT_COMPONENT = st.components.v2.component(
             margin-bottom: 0.35rem;
         }
 
-        .mpt-grouped-select__label {
+        .changofilm-grouped-select__label {
             font-size: 0.875rem;
             line-height: 1.25rem;
         }
 
-        .mpt-grouped-select__settings {
+        .changofilm-grouped-select__settings {
             padding: 0;
             border: 0;
             background: transparent;
@@ -3299,22 +3326,22 @@ _GROUPED_SELECT_COMPONENT = st.components.v2.component(
             cursor: pointer;
         }
 
-        .mpt-grouped-select__settings:hover {
+        .changofilm-grouped-select__settings:hover {
             text-decoration: underline;
             text-underline-offset: 0.15rem;
         }
 
-        .mpt-grouped-select__settings:focus-visible {
+        .changofilm-grouped-select__settings:focus-visible {
             border-radius: 0.2rem;
             outline: 2px solid var(--st-primary-color);
             outline-offset: 2px;
         }
 
-        .mpt-grouped-select__control {
+        .changofilm-grouped-select__control {
             position: relative;
         }
 
-        .mpt-grouped-select__control::after {
+        .changofilm-grouped-select__control::after {
             position: absolute;
             top: 50%;
             right: 1rem;
@@ -3327,7 +3354,7 @@ _GROUPED_SELECT_COMPONENT = st.components.v2.component(
             transform: translateY(-70%) rotate(45deg);
         }
 
-        .mpt-grouped-select select {
+        .changofilm-grouped-select select {
             width: 100%;
             min-height: 2.5rem;
             padding: 0.45rem 2.75rem 0.45rem 0.75rem;
@@ -3341,11 +3368,11 @@ _GROUPED_SELECT_COMPONENT = st.components.v2.component(
             cursor: pointer;
         }
 
-        .mpt-grouped-select select:hover {
+        .changofilm-grouped-select select:hover {
             border-color: color-mix(in srgb, currentColor 36%, transparent);
         }
 
-        .mpt-grouped-select select:focus-visible {
+        .changofilm-grouped-select select:focus-visible {
             border-color: var(--st-primary-color);
             box-shadow: 0 0 0 1px var(--st-primary-color);
         }
@@ -3354,7 +3381,7 @@ _GROUPED_SELECT_COMPONENT = st.components.v2.component(
         export default function(component) {
             const { data, parentElement, setTriggerValue } = component;
             const label = parentElement.querySelector("label");
-            const settings = parentElement.querySelector(".mpt-grouped-select__settings");
+            const settings = parentElement.querySelector(".changofilm-grouped-select__settings");
             const select = parentElement.querySelector("select");
 
             label.textContent = data.label;
@@ -3875,7 +3902,7 @@ def _load_transfer_payload(raw_bytes, schema, version):
     payload = json.loads(raw_bytes.decode("utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("exported file must contain a JSON object")
-    if payload.get("schema") != schema:
+    if payload.get("schema") not in (schema, _LEGACY_SCHEMA_ALIASES.get(schema)):
         raise ValueError(f"unexpected schema: {payload.get('schema')!r}")
     if payload.get("version") != version:
         raise ValueError(f"unsupported version: {payload.get('version')!r}")
@@ -4407,7 +4434,7 @@ def _render_presets_page():
                     data=json.dumps(
                         export_payload, ensure_ascii=False, indent=2
                     ).encode("utf-8"),
-                    file_name=f"moneyprinterturbo-preset-{preset_id}.json",
+                    file_name=f"changofilm-preset-{preset_id}.json",
                     mime="application/json",
                     key=f"preset_export_{preset_id}",
                     icon=":material/download:",
@@ -4547,6 +4574,17 @@ def _remember_material_provider(group, widget_key):
     st.session_state["settings_material_providers"] = remembered
 
 
+def _activate_stock_image_source(widget_key):
+    """库存图片下拉选择：同步切换视频来源并记住分组（与通用页激活同口径）。"""
+    selected = st.session_state[widget_key]
+    _set_runtime_config("app", "video_source", selected)
+    _sync_general_provider_widgets("video_source_select", selected)
+    remembered = dict(st.session_state.get("settings_material_providers", {}))
+    remembered["stock_image"] = selected
+    st.session_state["settings_material_providers"] = remembered
+    _save_runtime_config()
+
+
 def _initialize_material_navigation(target, settings):
     groups = {
         group: providers
@@ -4583,6 +4621,8 @@ def _material_provider_labels():
         "pexels": tr("Pexels"),
         "pixabay": tr("Pixabay"),
         "coverr": tr("Coverr"),
+        "pexels_image": tr("Pexels Images"),
+        "pixabay_image": tr("Pixabay Images"),
         "metaso_minimax": tr("Metaso MiniMax H3"),
         "ofox": tr("OFox AI Video"),
         "loomloom": tr("Shengsuan Cloud AI Video"),
@@ -6210,6 +6250,36 @@ def _render_llm_settings_body(app_settings, is_open=True):
             )
 
 
+def _render_image_provider_group(app_settings, remembered):
+    """AI 图像引擎配置组：素材来源页与图片设置 TAB 共用同一批控件键。
+
+    调用方保证同一次 rerun 只有一处渲染（图片 TAB 在素材页/设置弹窗
+    渲染本体时让位），避免重复键。
+    """
+    providers = VIDEO_SOURCE_GROUPS["ai_image"]
+    default_provider = remembered.get("ai_image", providers[0])
+    if default_provider not in providers:
+        default_provider = providers[0]
+    provider_key = localized_widget_key(
+        "settings_material_provider_ai_image_select"
+    )
+    st.session_state[provider_key] = default_provider
+    with st.container(border=True):
+        st.subheader(tr("AI Image Generation APIs"))
+        st.caption(tr("AI Image Generation APIs Help"))
+        provider = st.selectbox(
+            tr("AI Image Generation APIs"),
+            options=providers,
+            key=provider_key,
+            format_func=_material_provider_labels().get,
+            label_visibility="collapsed",
+            on_change=_remember_material_provider,
+            args=("ai_image", provider_key),
+        )
+        _render_material_provider_settings(provider)
+    return provider
+
+
 def _render_material_settings_body(app_settings):
     """素材来源 API 设置体；设置弹窗与一级素材来源页共用。"""
     if "settings_material_group" not in st.session_state:
@@ -6231,6 +6301,12 @@ def _render_material_settings_body(app_settings):
         st.session_state.get("settings_material_providers", {})
     )
     for group, title_key, help_key in sections:
+        if group == "ai_image":
+            # 图像引擎配置组抽为共用 helper：图片设置 TAB 也渲染它。
+            remembered[group] = _render_image_provider_group(
+                app_settings, remembered
+            )
+            continue
         providers = VIDEO_SOURCE_GROUPS[group]
         default_provider = remembered.get(group, providers[0])
         if default_provider not in providers:
@@ -6804,7 +6880,7 @@ def _render_loomloom_video_settings(params):
             st.session_state["loomloom_video_quote"] = quote_result
             st.session_state["loomloom_video_input_signature"] = input_signature
             st.session_state["loomloom_video_client_request_id"] = (
-                f"mpt-video-{uuid4()}"
+                f"changofilm-video-{uuid4()}"
             )
             st.session_state["loomloom_video_confirm_charge"] = False
             logger.info(
@@ -6879,7 +6955,7 @@ def _loomloom_script_signature(
 
 
 def _render_local_script_generation(params):
-    """保留 MoneyPrinterTurbo 原有的本地 LLM 脚本生成路径。"""
+    """保留 ChangoFilm 原有的本地 LLM 脚本生成路径。"""
     if not st.button(
         tr("Generate Video Script and Keywords"),
         key="auto_generate_script",
@@ -7126,7 +7202,7 @@ def _render_loomloom_script_generation(params):
                 st.session_state["loomloom_script_batch"] = batch
                 st.session_state["loomloom_script_quote"] = quote_result
                 st.session_state["loomloom_script_input_signature"] = input_signature
-                st.session_state["loomloom_client_request_id"] = f"mpt-{uuid4()}"
+                st.session_state["loomloom_client_request_id"] = f"changofilm-{uuid4()}"
                 st.session_state["loomloom_run_id"] = ""
                 st.session_state["loomloom_run_status"] = "quoted"
                 st.session_state["loomloom_run_error"] = ""
@@ -7239,6 +7315,34 @@ def _render_loomloom_script_generation(params):
     if run_id and not st.session_state.get("loomloom_poll_paused", False):
         _render_loomloom_run_progress()
     _render_loomloom_candidates()
+
+
+def _render_route_banner(
+    route, page, intro_key, link_label_key, target_page, button_key,
+    target_tab_label_key=None,
+):
+    """创作路线定位横幅：快速成片与专业短剧（向导/脚本方案/系列）。
+
+    render-all 壳下每页都会渲染（隐藏页不占位）；徽章 + 一句定位 +
+    跨路线跳转，让两条路线的分工与“同一时间只跑一个任务”的关系显式可见。
+    键名带 page 后缀：向导与方案页同属专业路线，同一次 rerun 内不得重键。
+    """
+    badge_label = tr("Route Quick Badge") if route == "quick" else tr("Route Pro Badge")
+    badge_icon = ":material/bolt:" if route == "quick" else ":material/movie:"
+    with st.container(key=f"route_banner_{route}_{page}"):
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            with st.container(key=f"route_badge_{route}_{page}"):
+                st.markdown(f"{badge_icon} **{badge_label}**")
+            st.button(
+                tr(link_label_key),
+                key=button_key,
+                type="tertiary",
+                icon=":material/arrow_forward:",
+                width="content",
+                on_click=_navigate_to_route,
+                args=(target_page, target_tab_label_key),
+            )
+        st.caption(tr(intro_key))
 
 
 def _render_script_settings(panel, params):
@@ -7436,6 +7540,123 @@ def _render_script_settings(panel, params):
             )
 
 
+def _render_image_settings(panel, params):
+    """图片设置 TAB：图像动效（项目级参数）+ 图像引擎配置 + 本地关键帧引擎。
+
+    与视频/音频/字幕面板同为 render-all：每次 rerun 都组装 params，
+    保证项目快照/恢复覆盖图像动效。动效仅对本地素材、AI 图像与库存图片源
+    生效，其余素材来源下不挂载控件（与旧视频面板口径一致）。引擎配置为账号级
+    config，设置弹窗打开（任意 TAB）或素材来源页渲染本体时这里让位，
+    避免重复键与在通用 TAB 背后挂载 provider 表单。
+    """
+    with panel:
+        # 图片 TAB 先于视频 TAB 渲染，params.video_source 尚未组装；
+        # 直接读视频来源控件的会话值，回退到含待保存修改的配置快照。
+        effective_source = st.session_state.get(
+            localized_widget_key("video_source_select")
+        ) or str(
+            config.snapshot_config_with_pending(config.app).get("video_source", "")
+            or ""
+        )
+        with st.container(border=True):
+            st.markdown(f"**{tr('Image Motion Section')}**")
+            st.caption(tr("Image Motion Section Help"))
+            if (
+                effective_source in {"local", "openai_image", "codex_image"}
+                or effective_source in material.STOCK_IMAGE_SOURCES
+            ):
+                image_motion_labels = {
+                    ImageMotion.static.value: tr("Static Image"),
+                    ImageMotion.zoom.value: tr("Slow Zoom"),
+                }
+                params.image_motion = ImageMotion(
+                    stable_selectbox(
+                        tr("Image Motion"),
+                        options=list(image_motion_labels),
+                        default_value=_saved_ui_choice(
+                            "image_motion", list(image_motion_labels), ImageMotion.zoom.value,
+                            # 生成任务持锁时，切换语言或素材来源会重建控件；
+                            # 此时必须恢复尚未落盘的最新选择，不能写回旧配置值。
+                            section=config.snapshot_config_with_pending(config.ui),
+                        ),
+                        key="image_motion_select",
+                        format_func=image_motion_labels.get,
+                        help=tr("Image Motion Help"),
+                    )
+                )
+                _set_runtime_config("ui", "image_motion", params.image_motion.value)
+
+        with st.container(border=True):
+            st.markdown(f"**{tr('Stock Image Sources Section')}**")
+            st.caption(tr("Stock Image Sources Section Help"))
+            stock_labels = {
+                source: tr("Pexels Images") if base == "pexels" else tr("Pixabay Images")
+                for source, base in material.STOCK_IMAGE_SOURCES.items()
+            }
+            stock_key = localized_widget_key("stock_image_source_select")
+            if effective_source in stock_labels:
+                # 下拉与实际生效来源保持一致，避免旧会话值误导展示。
+                st.session_state[stock_key] = effective_source
+            selected_stock = stable_selectbox(
+                tr("Stock Image Source"),
+                options=list(stock_labels),
+                default_value=(
+                    effective_source
+                    if effective_source in stock_labels
+                    else "pexels_image"
+                ),
+                key="stock_image_source_select",
+                format_func=stock_labels.get,
+                help=tr("Stock Image Source Help"),
+                on_change=_activate_stock_image_source,
+                args=(stock_key,),
+            )
+            st.caption(tr("Stock Image Keys Shared Hint"))
+            if (
+                st.session_state.get("settings_dialog_open", False)
+                or st.session_state.get("active_page") == "material"
+            ):
+                st.caption(tr("Stock Image Keys Elsewhere Hint"))
+            else:
+                _render_material_provider_settings(
+                    material.STOCK_IMAGE_SOURCES[selected_stock]
+                )
+
+        app_settings = config.snapshot_config_with_pending(config.app)
+        if (
+            st.session_state.get("settings_dialog_open", False)
+            or st.session_state.get("active_page") == "material"
+        ):
+            st.caption(tr("Image Provider Elsewhere Hint"))
+        else:
+            remembered = dict(
+                st.session_state.get("settings_material_providers", {})
+            )
+            remembered["ai_image"] = _render_image_provider_group(
+                app_settings, remembered
+            )
+            st.session_state["settings_material_providers"] = remembered
+
+        with st.container(border=True):
+            st.markdown(f"**{tr('Local Keyframe Engine Section')}**")
+            st.caption(tr("Local Keyframe Engine Help"))
+            if st.button(
+                tr("Local Engine Probe"),
+                key="image_local_engine_probe",
+                icon=":material/network_check:",
+            ):
+                st.session_state["image_local_engine_online"] = (
+                    comfy_local.is_online()
+                )
+            online = st.session_state.get("image_local_engine_online")
+            if online is None:
+                st.caption(tr("Local Engine Unknown"))
+            elif online:
+                st.caption(tr("Local Engine Online"))
+            else:
+                st.caption(tr("Local Engine Offline"))
+
+
 def _render_video_settings(panel, params):
     """渲染视频设置并返回本次选择的本地素材。"""
     uploaded_files = []
@@ -7450,6 +7671,8 @@ def _render_video_settings(panel, params):
                 "pexels": tr("Pexels"),
                 "pixabay": tr("Pixabay"),
                 "coverr": tr("Coverr"),
+                "pexels_image": tr("Pexels Images"),
+                "pixabay_image": tr("Pixabay Images"),
                 "wavespeed": tr("WaveSpeed AI Video"),
                 "volcengine_seedance": tr("Volcano Engine Seedance"),
                 "infistar": tr("Infistar AI Video"),
@@ -7470,6 +7693,7 @@ def _render_video_settings(panel, params):
                 tr("Video Source"),
                 groups=(
                     (tr("Stock Video"), VIDEO_SOURCE_GROUPS["stock_video"]),
+                    (tr("Stock Images"), VIDEO_SOURCE_GROUPS["stock_image"]),
                     (tr("AI Video"), VIDEO_SOURCE_GROUPS["ai_video"]),
                     (tr("AI Image"), VIDEO_SOURCE_GROUPS["ai_image"]),
                     (tr("Local Material"), VIDEO_SOURCE_GROUPS["local"]),
@@ -7652,28 +7876,6 @@ def _render_video_settings(panel, params):
             _set_runtime_config(
                 "ui", "video_fit_mode", params.video_fit_mode.value
             )
-
-            if params.video_source in {"local", "openai_image", "codex_image"}:
-                image_motion_labels = {
-                    ImageMotion.static.value: tr("Static Image"),
-                    ImageMotion.zoom.value: tr("Slow Zoom"),
-                }
-                params.image_motion = ImageMotion(
-                    stable_selectbox(
-                        tr("Image Motion"),
-                        options=list(image_motion_labels),
-                        default_value=_saved_ui_choice(
-                            "image_motion", list(image_motion_labels), ImageMotion.zoom.value,
-                            # 生成任务持锁时，切换语言或素材来源会重建控件；
-                            # 此时必须恢复尚未落盘的最新选择，不能写回旧配置值。
-                            section=config.snapshot_config_with_pending(config.ui),
-                        ),
-                        key="image_motion_select",
-                        format_func=image_motion_labels.get,
-                        help=tr("Image Motion Help"),
-                    )
-                )
-                _set_runtime_config("ui", "image_motion", params.image_motion.value)
 
             # MiniMax H3 的远端时长范围是 4～15 秒。选择秘塔时使用完整能力
             # 范围，既避免 2/3 秒被按 4 秒计费，也让 WebUI 与 CLI、服务层一致。
@@ -10446,6 +10648,11 @@ def _render_generation_controls(
 
         generation_busy = _generation_is_busy(_current_generation_task_id())
         project_locked = _project_is_locked()
+        # 脚本方案页的「确认并生成」与主按钮共用同一条提交链路：
+        # 方案页先渲染，把 confirmed 方案写入会话，这里同一次 rerun 消费。
+        plan_generate_requested = bool(
+            st.session_state.pop("plan_generate_requested", False)
+        )
         start_button = st.button(
             tr("Generating Video") if generation_busy else tr("Generate Video"),
             use_container_width=True,
@@ -10453,12 +10660,44 @@ def _render_generation_controls(
             key="generate_video_button",
             on_click=_prepare_generation_task,
             disabled=generation_busy or project_locked,
-            help=tr("Project Locked Generate Help") if project_locked else None,
+            help=(
+                tr("Project Locked Generate Help")
+                if project_locked
+                else tr("Generate Video Route Help")
+            ),
         )
         render_onboarding_tour()
-        if start_button:
+        if start_button or plan_generate_requested:
+            if plan_generate_requested:
+                _prepare_generation_task()
             _save_runtime_config()
             task_id = st.session_state.get("pending_generation_task_id") or str(uuid4())
+            execute_payload = st.session_state.pop("script_plan_execute_payload", None)
+            if execute_payload is not None:
+                # 方案驱动执行（B4/B5）：携带 confirmed 方案时旁白由方案
+                # 编译，素材源/画幅/音色随方案对齐；快速路径零变化。
+                try:
+                    params.script_plan = ScriptPlan.model_validate(execute_payload)
+                except ValidationError as exc:
+                    _remove_active_generation_task(task_id)
+                    logger.error(f"plan execute payload rejected: {exc}")
+                    st.error(tr("Plan Execute Invalid"))
+                    st.stop()
+                exec_plan = params.script_plan
+                params.video_subject = (
+                    exec_plan.title or exec_plan.logline or task_id
+                )
+                params.video_aspect = VideoAspect(exec_plan.aspect)
+                params.plan_target_duration = exec_plan.target_duration
+                params.voice_name = exec_plan.voice.name
+                params.voice_rate = exec_plan.voice.rate
+                if all(
+                    scene.engine in {"local_fl2v", "local_i2v"}
+                    for scene in exec_plan.scenes
+                ):
+                    params.video_source = "local"
+                elif params.video_source not in {"pexels", "pixabay", "coverr"}:
+                    params.video_source = "pexels"
             _add_active_generation_task(
                 task_id,
                 subject=params.video_subject or params.video_script or task_id,
@@ -10510,6 +10749,8 @@ def _render_generation_controls(
                 "loomloom",
                 "openai_image",
                 "codex_image",
+                "pexels_image",
+                "pixabay_image",
                 "local",
             ]:
                 _remove_active_generation_task(task_id)
@@ -10524,6 +10765,20 @@ def _render_generation_controls(
                 st.stop()
 
             if params.video_source == "pixabay" and not config.app.get(
+                "pixabay_api_keys", ""
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the Pixabay API Key"))
+                st.stop()
+
+            if params.video_source == "pexels_image" and not config.app.get(
+                "pexels_api_keys", ""
+            ):
+                _remove_active_generation_task(task_id)
+                st.error(tr("Please Enter the Pexels API Key"))
+                st.stop()
+
+            if params.video_source == "pixabay_image" and not config.app.get(
                 "pixabay_api_keys", ""
             ):
                 _remove_active_generation_task(task_id)
@@ -10712,9 +10967,14 @@ def _render_generation_controls(
                 st.error(tr("ElevenLabs API Key Required"))
                 st.stop()
 
-            if params.video_source == "local" and not has_local_materials:
+            if (
+                params.video_source == "local"
+                and not has_local_materials
+                and params.script_plan is None
+            ):
                 # 本地素材为空时继续执行会先产生 TTS/字幕，最后才在素材预处理阶段失败。
                 # 在任务启动前拦截，可以避免无意义的 API 调用和中间文件。
+                # 方案驱动执行的本地场景自带关键帧链，不需要上传素材。
                 _remove_active_generation_task(task_id)
                 st.error(tr("Please Upload Local Materials First"))
                 st.stop()
@@ -10898,14 +11158,921 @@ def _render_generation_controls(
 
 
 # -----------------------------------------------------------------------------
+# 脚本方案专业模式（B7）：创作向导 / 脚本方案 / 系列管理
+# -----------------------------------------------------------------------------
+
+WIZARD_GENRES = (
+    ("urban_revenge", "Genre Urban Revenge"),
+    ("period_romance", "Genre Period Romance"),
+    ("suspense", "Genre Suspense"),
+    ("healing", "Genre Healing"),
+    ("scifi", "Genre Scifi"),
+    ("custom", "Genre Custom"),
+)
+# cloud_ai 尚未接入任务编排（保留升级项），下拉框不提供该选项；
+# 导入的旧方案若含 cloud_ai 场景，渲染时回退 stock 并提示。
+PLAN_ENGINE_OPTIONS = ("stock", "local_fl2v", "local_i2v")
+PLAN_ENGINE_LABELS = {
+    "stock": "Plan Engine Stock",
+    "local_fl2v": "Plan Engine Local FL2V",
+    "local_i2v": "Plan Engine Local I2V",
+    "cloud_ai": "Plan Engine Cloud AI",
+}
+PLAN_TRANSITION_OPTIONS = ("none", "fade", "slide", "zoom", "match_cut")
+PLAN_TRANSITION_LABELS = {
+    "none": "Transition None",
+    "fade": "Transition Fade",
+    "slide": "Transition Slide",
+    "zoom": "Transition Zoom",
+    "match_cut": "Transition Match Cut",
+}
+EPISODE_STATUS_LABELS = {
+    "draft": "Episode Status Draft",
+    "confirmed": "Episode Status Confirmed",
+    "rendered": "Episode Status Rendered",
+}
+_LOCAL_ENGINES_STATUS_TTL_SECONDS = 15.0
+
+
+def _local_engines_status_cached():
+    """引擎就绪度探针的会话级 TTL 缓存：render-all 壳下每次 rerun 都
+    渲染仪表盘，不能每次都发三个 HTTP 探针；fragment 定时刷新负责续探。"""
+    cached = st.session_state.get("local_engines_status_cache")
+    now = time.time()
+    if cached and now - cached[0] < _LOCAL_ENGINES_STATUS_TTL_SECONDS:
+        return cached[1]
+    try:
+        status = comfy_local.local_engines_status()
+    except Exception as exc:
+        logger.warning(f"local engines status probe failed: {exc}")
+        status = {
+            "comfyui": {"online": False},
+            "acestep": {"online": False},
+            "ollama": {"online": False},
+        }
+    st.session_state["local_engines_status_cache"] = (now, status)
+    return status
+
+
+@st.fragment(run_every="15s")
+def _render_local_engine_dashboard(key_prefix):
+    # 白话名称 + 状态点；离线只置灰提示，不抛异常（快速模式不受影响）。
+    status = _local_engines_status_cached()
+    cols = st.columns([1, 1, 1, 1.2])
+    for col, engine, label_key in zip(
+        cols,
+        ("comfyui", "acestep", "ollama"),
+        ("Local Video Engine", "Local Music Engine", "Local Writer Engine"),
+    ):
+        online = bool(status.get(engine, {}).get("online"))
+        dot = "🟢" if online else "⚪"
+        col.markdown(f"**{dot} {tr(label_key)}**")
+        col.caption(tr("Engine Online") if online else tr("Engine Offline"))
+    with cols[3]:
+        if st.button(
+            tr("Local Bundle Preset"),
+            key=f"{key_prefix}_local_bundle",
+            icon="⚡",
+            width="stretch",
+            help=tr("Engine Status Help"),
+        ):
+            # 一键本地全家桶：编剧引擎切 ollama，模型为空时补推荐默认；
+            # 画面/音乐引擎由方案逐场景选择，不在这里改全局素材源。
+            _set_runtime_config("app", "llm_provider", "ollama")
+            if not str(config.app.get("ollama_model_name", "") or "").strip():
+                _set_runtime_config("app", "ollama_model_name", "gemma4:26b")
+            _save_runtime_config()
+            st.toast(tr("Local Bundle Applied"))
+
+
+def _plan_reset_widgets():
+    """AI 重生成/导入/切换草稿后清除场景控件的会话值，让下一次渲染
+    从新方案的 value 重新初始化（Streamlit 控件状态优先于 value 参数）。"""
+    fixed_keys = {
+        "plan_quality_tier", "plan_title_field", "plan_logline_field",
+        "plan_style_tone", "plan_style_palette", "plan_style_camera",
+        "plan_voice_name", "plan_voice_rate",
+    }
+    for key in list(st.session_state.keys()):
+        if str(key).startswith("plan_scene_") or key in fixed_keys:
+            del st.session_state[key]
+
+
+def _plan_mutate(plan_id, mutator, *, confirm=False):
+    """草稿的锁内读→改→校验→写。编辑一律回退 draft 并 revision++；
+    confirm=True 只置 confirmed（付费门禁重新生效的入口）。失败不写盘，
+    错误存入会话由页面顶部横幅展示。"""
+    try:
+        payload = plan_store.load_plan(plan_id)
+        if payload is None:
+            raise plan_store.PlanStoreError(f"plan draft missing: {plan_id}")
+        plan = ScriptPlan.model_validate(payload)
+        mutator(plan)
+        if confirm:
+            plan.status = "confirmed"
+        else:
+            plan.status = "draft"
+            plan.revision += 1
+        updated = plan.model_dump(mode="json", by_alias=True)
+        plan_store.save_plan(updated, plan_id=plan_id)
+    except (plan_store.PlanStoreError, ValidationError, ValueError) as exc:
+        st.session_state["plan_edit_error"] = str(exc)
+        return None
+    st.session_state.pop("plan_edit_error", None)
+    return updated
+
+
+def _plan_scene_field_changed(plan_id, scene_id, field, widget_key):
+    value = st.session_state.get(widget_key)
+    if value is None:
+        # _plan_reset_widgets 删除会话键后（AI 重生成/导入/切换草稿），
+        # Streamlit 重建控件时可能以 None 重放 on_change——控件重置产物，
+        # 非用户编辑。目标字段均不可空，跳过以免把 None 写进模型。
+        return
+
+    def mutate(plan):
+        scene = next(s for s in plan.scenes if s.id == scene_id)
+        if field == "keywords":
+            scene.keywords = [
+                term.strip() for term in str(value or "").split(",")
+                if term.strip()
+            ]
+        elif field == "narration":
+            scene.narration = str(value or "")
+            estimated = estimate_scene_duration(scene.narration)
+            if estimated > 0:
+                scene.est_duration = estimated
+        else:
+            setattr(scene, field, value)
+
+    _plan_mutate(plan_id, mutate)
+
+
+def _plan_setting_changed(plan_id, path, widget_key):
+    value = st.session_state.get(widget_key)
+    if value is None:
+        # 同 _plan_scene_field_changed：重置产物 None 不是用户编辑；
+        # pydantic 默认不校验赋值，放行会让 null 进 model_dump 而被
+        # save_plan 拒绝（用户实测 quality_tier literal_error）。
+        return
+
+    def mutate(plan):
+        target = plan
+        parts = path.split(".")
+        for part in parts[:-1]:
+            target = getattr(target, part)
+        setattr(target, parts[-1], value)
+
+    _plan_mutate(plan_id, mutate)
+
+
+def _plan_reorder_scenes(plan_id, scene_id, delta):
+    def mutate(plan):
+        index = next(i for i, s in enumerate(plan.scenes) if s.id == scene_id)
+        target = index + delta
+        if target < 0 or target >= len(plan.scenes):
+            return
+        scenes = plan.scenes
+        scenes[index], scenes[target] = scenes[target], scenes[index]
+        for order, scene in enumerate(scenes, start=1):
+            scene.order = order
+            # 调序后共享边界帧约束不再成立：统一解除共享并置 unknown，
+            # 由后续关键帧链重新建立（与 Demo 的重算语义一致）。
+            scene.keyframe.shared_with_prev = False
+            scene.relation_to_prev = "establish" if order == 1 else "unknown"
+
+    _plan_mutate(plan_id, mutate)
+
+
+def _plan_delete_scene(plan_id, scene_id):
+    def mutate(plan):
+        if len(plan.scenes) <= 1:
+            raise ValueError("a plan must keep at least one scene")
+        plan.scenes = [s for s in plan.scenes if s.id != scene_id]
+        for order, scene in enumerate(plan.scenes, start=1):
+            scene.order = order
+            scene.keyframe.shared_with_prev = False
+            scene.relation_to_prev = "establish" if order == 1 else "unknown"
+
+    _plan_mutate(plan_id, mutate)
+
+
+def _plan_add_scene(plan_id):
+    def mutate(plan):
+        used = {s.id for s in plan.scenes}
+        index = len(plan.scenes) + 1
+        while f"s{index}" in used:
+            index += 1
+        plan.scenes.append(
+            ScriptScene(id=f"s{index}", order=len(plan.scenes) + 1, est_duration=5.0)
+        )
+
+    _plan_mutate(plan_id, mutate)
+
+
+def _wizard_characters_snapshot(characters):
+    st.session_state["wizard_characters_snapshot"] = characters
+
+
+def _render_wizard_page():
+    # 仪表盘只在所属 TAB 活动时渲染：render-all 壳下非活动页不发
+    # HTTP 探针（避免干扰无关页面的网络断言/离线环境）。
+    if _pro_tab_active("Creation Wizard"):
+        _render_local_engine_dashboard("wizard_dashboard")
+    st.subheader(tr("Creation Wizard"))
+    st.caption(tr("Wizard Intro"))
+
+    st.markdown(f"**{tr('Wizard Section Idea')}**")
+    st.text_area(
+        tr("Wizard Story Idea"),
+        key="wizard_story_idea",
+        placeholder=tr("Wizard Story Idea Placeholder"),
+        height=90,
+    )
+    idea_cols = st.columns([2, 1, 1])
+    with idea_cols[0]:
+        # 标签在渲染期预算好：format_func 闭包只查字典，不在序列化期
+        # 读会话态（AppTest 裸线程重调时没有 ui_language）。
+        genre_labels = {genre: tr(label) for genre, label in WIZARD_GENRES}
+        st.selectbox(
+            tr("Wizard Genre"),
+            options=[genre for genre, _ in WIZARD_GENRES],
+            format_func=genre_labels.get,
+            key="wizard_genre",
+        )
+    with idea_cols[1]:
+        st.number_input(
+            tr("Wizard Episode Duration"),
+            min_value=30, max_value=300, value=60, step=10,
+            key="wizard_episode_duration",
+        )
+    with idea_cols[2]:
+        st.number_input(
+            tr("Wizard Episode Count"),
+            min_value=1, max_value=12, value=3, step=1,
+            key="wizard_episode_count",
+        )
+
+    st.markdown(f"**{tr('Wizard Section Characters')}**")
+    st.caption(tr("Wizard Characters Help"))
+    edited_characters = st.data_editor(
+        [{"name": "", "voice_name": "", "appearance_prompt": ""}],
+        num_rows="dynamic",
+        key="wizard_characters_editor",
+        column_config={
+            "name": st.column_config.TextColumn(tr("Wizard Character Name")),
+            "voice_name": st.column_config.TextColumn(
+                tr("Wizard Character Voice"),
+                help="zh-CN-XiaoxiaoNeural / zh-CN-YunxiNeural",
+            ),
+            "appearance_prompt": st.column_config.TextColumn(
+                tr("Wizard Character Appearance")
+            ),
+        },
+        width="stretch",
+    )
+    _wizard_characters_snapshot(edited_characters)
+
+    st.markdown(f"**{tr('Wizard Section Generate')}**")
+    if st.button(
+        tr("Wizard Generate"),
+        key="wizard_generate_button",
+        type="primary",
+        icon=":material/auto_awesome:",
+        width="stretch",
+        disabled=_generation_is_busy(_current_generation_task_id()),
+    ):
+        idea = str(st.session_state.get("wizard_story_idea", "") or "").strip()
+        if not idea:
+            st.error(tr("Wizard Idea Required"))
+        else:
+            genre = st.session_state.get("wizard_genre", "urban_revenge")
+            duration = float(st.session_state.get("wizard_episode_duration", 60))
+            count = int(st.session_state.get("wizard_episode_count", 3))
+            characters = [
+                character
+                for character in st.session_state.get(
+                    "wizard_characters_snapshot", []
+                )
+                if str(character.get("name", "") or "").strip()
+            ]
+            with st.spinner(tr("Wizard Generating")):
+                payload = llm.generate_script_plan(
+                    video_subject=idea,
+                    language=str(config.app.get("video_language", "") or ""),
+                    target_duration=duration,
+                    aspect="9:16",
+                )
+            if payload is None:
+                st.error(tr("Wizard Generate Failed"))
+            else:
+                try:
+                    series = Series(
+                        id=series_store.new_series_id(),
+                        title=idea[:60],
+                        genre_template=genre,
+                        characters=[
+                            SeriesCharacter(
+                                id=f"c{index}",
+                                name=str(character["name"]).strip(),
+                                voice_name=str(
+                                    character.get("voice_name", "") or ""
+                                ).strip(),
+                                appearance_prompt=str(
+                                    character.get("appearance_prompt", "") or ""
+                                ).strip(),
+                            )
+                            for index, character in enumerate(characters, start=1)
+                        ],
+                        episodes=[
+                            SeriesEpisode(
+                                id=f"ep{index}",
+                                seq=index,
+                                title=idea[:40] if index == 1 else "",
+                            )
+                            for index in range(1, count + 1)
+                        ],
+                    )
+                    series_store.save_series(series)
+                    plan_id = plan_store.save_plan(payload)
+                    series_store.bind_episode_plan(series.id, "ep1", plan_id)
+                except (
+                    series_store.SeriesStoreError,
+                    plan_store.PlanStoreError,
+                    ValidationError,
+                    ValueError,
+                ) as exc:
+                    logger.error(f"wizard series creation failed: {exc}")
+                    st.error(f"{tr('Wizard Generate Failed')}: {exc}")
+                else:
+                    st.session_state["script_plan_current_id"] = plan_id
+                    _plan_reset_widgets()
+                    st.toast(tr("Wizard Created"))
+                    _navigate_to_page("plan")
+
+
+def _plan_draft_picked():
+    st.session_state["script_plan_current_id"] = st.session_state.get(
+        "plan_draft_picker"
+    )
+    _plan_reset_widgets()
+
+
+def _render_plan_page():
+    if _pro_tab_active("Script Plan"):
+        _render_local_engine_dashboard("plan_dashboard")
+    st.subheader(tr("Script Plan"))
+    edit_error = st.session_state.get("plan_edit_error")
+    if edit_error:
+        st.error(f"{tr('Plan Edit Failed')}: {edit_error}")
+
+    summaries = plan_store.list_plans()
+    current_id = st.session_state.get("script_plan_current_id")
+    if summaries:
+        ids = [item["id"] for item in summaries]
+        labels = {
+            item["id"]: (
+                f"{item['title'] or item['id']} · "
+                f"{tr('Plan Status Confirmed' if item['status'] == 'confirmed' else 'Plan Status Draft')}"
+                f" · r{item['revision']}"
+            )
+            for item in summaries
+        }
+        st.selectbox(
+            tr("Plan Draft Picker"),
+            options=ids,
+            index=ids.index(current_id) if current_id in ids else 0,
+            format_func=lambda plan_id: labels[plan_id],
+            key="plan_draft_picker",
+            on_change=_plan_draft_picked,
+        )
+        current_id = st.session_state.get("plan_draft_picker", current_id)
+
+    payload = None
+    if current_id:
+        try:
+            payload = plan_store.load_plan(current_id)
+        except plan_store.PlanStoreError as exc:
+            st.error(f"{tr('Plan Edit Failed')}: {exc}")
+            st.session_state.pop("script_plan_current_id", None)
+            current_id = None
+
+    if payload is None:
+        st.info(tr("Plan Empty Hint"))
+        subject = st.text_input(tr("Plan New Subject"), key="plan_new_subject")
+        if st.button(
+            tr("Plan Generate"),
+            key="plan_generate_button",
+            type="primary",
+            icon=":material/auto_awesome:",
+            disabled=_generation_is_busy(_current_generation_task_id()),
+        ):
+            if not subject.strip():
+                st.error(tr("Wizard Idea Required"))
+            else:
+                with st.spinner(tr("Plan Generating")):
+                    generated = llm.generate_script_plan(
+                        video_subject=subject.strip(),
+                        language=str(config.app.get("video_language", "") or ""),
+                        target_duration=60.0,
+                    )
+                if generated is None:
+                    st.error(tr("Plan Generate Failed"))
+                else:
+                    try:
+                        plan_id = plan_store.save_plan(generated)
+                    except plan_store.PlanStoreError as exc:
+                        st.error(f"{tr('Plan Generate Failed')}: {exc}")
+                    else:
+                        st.session_state["script_plan_current_id"] = plan_id
+                        _plan_reset_widgets()
+                        st.rerun()
+        return
+
+    plan = ScriptPlan.model_validate(payload)
+    total = plan.estimated_total_duration()
+    header_cols = st.columns([1.4, 1, 1, 1.6])
+    status_key = (
+        "Plan Status Confirmed" if plan.status == "confirmed"
+        else "Plan Status Draft"
+    )
+    header_cols[0].markdown(
+        f"**{'🟠' if plan.status == 'draft' else '🟢'} {tr(status_key)}** · "
+        f"{plan.title or current_id}"
+    )
+    header_cols[1].caption(f"{tr('Plan Revision')} r{plan.revision}")
+    header_cols[2].caption(
+        f"{tr('Plan Scenes Count')}: {len(plan.scenes)}"
+    )
+    header_cols[3].caption(
+        f"{tr('Plan Target Duration')} {plan.target_duration:.0f}s · "
+        f"{tr('Plan Estimated Duration')} {total:.1f}s"
+    )
+    st.progress(min(total / plan.target_duration, 1.0) if plan.target_duration else 0.0)
+    for warning in plan.duration_warnings():
+        st.warning(f"{tr('Plan Duration Over')}: {warning['message']}")
+
+    action_cols = st.columns([1.2, 1, 1, 1, 1.4])
+    with action_cols[0]:
+        tier_labels = {"draft": tr("Plan Tier Draft"), "final": tr("Plan Tier Final")}
+        st.radio(
+            tr("Plan Quality Tier"),
+            options=["draft", "final"],
+            index=["draft", "final"].index(plan.quality_tier),
+            format_func=tier_labels.get,
+            horizontal=True,
+            key="plan_quality_tier",
+            on_change=_plan_setting_changed,
+            args=(current_id, "quality_tier", "plan_quality_tier"),
+        )
+    with action_cols[1]:
+        regenerate_clicked = st.button(
+            tr("Plan Regenerate"),
+            key="plan_regenerate_button",
+            icon=":material/refresh:",
+            width="stretch",
+            disabled=_generation_is_busy(_current_generation_task_id()),
+        )
+    with action_cols[2]:
+        st.download_button(
+            tr("Plan Export JSON"),
+            data=json.dumps(payload, ensure_ascii=False, indent=2),
+            file_name=f"{plan.title or current_id}.json",
+            mime="application/json",
+            key="plan_export_button",
+            width="stretch",
+        )
+    with action_cols[3]:
+        confirm_clicked = st.button(
+            tr("Plan Confirm"),
+            key="plan_confirm_button",
+            width="stretch",
+            disabled=plan.status == "confirmed",
+        )
+    with action_cols[4]:
+        execute_clicked = st.button(
+            tr("Plan Confirm And Generate"),
+            key="plan_execute_button",
+            type="primary",
+            icon=":material/play_arrow:",
+            width="stretch",
+            disabled=(
+                _generation_is_busy(_current_generation_task_id())
+                or _project_is_locked()
+            ),
+        )
+
+    import_cols = st.columns([2, 1])
+    with import_cols[0]:
+        imported_file = st.file_uploader(
+            tr("Plan Import JSON"), type=["json"], key="plan_import_uploader"
+        )
+    with import_cols[1]:
+        delete_clicked = st.button(
+            tr("Plan Delete Draft"),
+            key="plan_delete_button",
+            icon=":material/delete:",
+            width="stretch",
+        )
+
+    if regenerate_clicked:
+        with st.spinner(tr("Plan Generating")):
+            generated = llm.generate_script_plan(
+                video_subject=plan.title or plan.logline,
+                language=str(config.app.get("video_language", "") or ""),
+                target_duration=plan.target_duration,
+                aspect=plan.aspect,
+                voice_name=plan.voice.name,
+                series_id=plan.series_id,
+                episode_id=plan.episode_id,
+            )
+        if generated is None:
+            st.error(tr("Plan Generate Failed"))
+        else:
+            try:
+                new_plan = ScriptPlan.model_validate(generated)
+                locked_old = [s for s in plan.scenes if s.locked]
+                for old_scene in locked_old:
+                    index = old_scene.order - 1
+                    if index < len(new_plan.scenes):
+                        target = new_plan.scenes[index]
+                        target.narration = old_scene.narration
+                        target.visual = old_scene.visual
+                        target.keywords = list(old_scene.keywords)
+                        target.est_duration = old_scene.est_duration
+                        target.locked = True
+                new_plan.revision = plan.revision + 1
+                plan_store.save_plan(
+                    new_plan.model_dump(mode="json", by_alias=True),
+                    plan_id=current_id,
+                )
+            except (plan_store.PlanStoreError, ValidationError) as exc:
+                st.error(f"{tr('Plan Generate Failed')}: {exc}")
+            else:
+                _plan_reset_widgets()
+                if locked_old:
+                    st.toast(tr("Plan Locked Scenes Kept"))
+                st.rerun()
+
+    if imported_file is not None:
+        marker = f"{imported_file.name}:{imported_file.size}"
+        if st.session_state.get("plan_import_last") != marker:
+            st.session_state["plan_import_last"] = marker
+            try:
+                imported_payload = json.loads(imported_file.getvalue())
+                imported_payload["status"] = "draft"
+                imported_payload["revision"] = (
+                    int(imported_payload.get("revision", 1)) + 1
+                )
+                plan_id = plan_store.save_plan(imported_payload)
+            except (ValueError, TypeError, plan_store.PlanStoreError) as exc:
+                st.error(f"{tr('Plan Import Invalid')}: {exc}")
+            else:
+                st.session_state["script_plan_current_id"] = plan_id
+                _plan_reset_widgets()
+                st.toast(tr("Plan Imported"))
+                st.rerun()
+
+    if confirm_clicked:
+        if _plan_mutate(current_id, lambda _plan: None, confirm=True):
+            st.toast(tr("Plan Confirmed"))
+            st.rerun()
+
+    if delete_clicked:
+        plan_store.delete_plan(current_id)
+        st.session_state.pop("script_plan_current_id", None)
+        _plan_reset_widgets()
+        st.toast(tr("Plan Draft Deleted"))
+        st.rerun()
+
+    if execute_clicked:
+        if any(not scene.narration.strip() for scene in plan.scenes):
+            st.error(tr("Plan Narration Required"))
+        else:
+            confirmed = _plan_mutate(current_id, lambda _plan: None, confirm=True)
+            if confirmed:
+                st.session_state["script_plan_execute_payload"] = confirmed
+                st.session_state["plan_generate_requested"] = True
+                st.toast(tr("Plan Execute Requested"))
+
+    with st.expander(tr("Plan Settings")):
+        setting_cols = st.columns(2)
+        with setting_cols[0]:
+            st.text_input(
+                tr("Plan Title Field"), value=plan.title, key="plan_title_field",
+                on_change=_plan_setting_changed,
+                args=(current_id, "title", "plan_title_field"),
+            )
+            st.text_input(
+                tr("Plan Logline"), value=plan.logline, key="plan_logline_field",
+                on_change=_plan_setting_changed,
+                args=(current_id, "logline", "plan_logline_field"),
+            )
+            st.text_input(
+                tr("Plan Voice Name"), value=plan.voice.name, key="plan_voice_name",
+                on_change=_plan_setting_changed,
+                args=(current_id, "voice.name", "plan_voice_name"),
+            )
+            st.number_input(
+                tr("Plan Voice Rate"), value=plan.voice.rate, step=0.1,
+                min_value=0.5, max_value=2.0, key="plan_voice_rate",
+                on_change=_plan_setting_changed,
+                args=(current_id, "voice.rate", "plan_voice_rate"),
+            )
+        with setting_cols[1]:
+            st.text_input(
+                tr("Plan Style Tone"), value=plan.style.tone, key="plan_style_tone",
+                on_change=_plan_setting_changed,
+                args=(current_id, "style.tone", "plan_style_tone"),
+            )
+            st.text_input(
+                tr("Plan Style Palette"), value=plan.style.palette,
+                key="plan_style_palette",
+                on_change=_plan_setting_changed,
+                args=(current_id, "style.palette", "plan_style_palette"),
+            )
+            st.text_input(
+                tr("Plan Style Camera"), value=plan.style.camera,
+                key="plan_style_camera",
+                on_change=_plan_setting_changed,
+                args=(current_id, "style.camera", "plan_style_camera"),
+            )
+
+    for scene in plan.scenes:
+        with st.container(key=f"plan_scene_card_{scene.id}", border=True):
+            head_cols = st.columns([3, 1, 0.8, 0.8, 0.8])
+            head_cols[0].markdown(
+                f"**{scene.id}** · {scene.est_duration:.1f}s"
+                + (" 🔗" if scene.keyframe.shared_with_prev else "")
+            )
+            head_cols[1].checkbox(
+                tr("Plan Scene Locked"),
+                value=scene.locked,
+                key=f"plan_scene_locked_{scene.id}",
+                on_change=_plan_scene_field_changed,
+                args=(current_id, scene.id, "locked", f"plan_scene_locked_{scene.id}"),
+            )
+            head_cols[2].button(
+                "↑", key=f"plan_scene_up_{scene.id}", help=tr("Plan Scene Move Up"),
+                on_click=_plan_reorder_scenes, args=(current_id, scene.id, -1),
+            )
+            head_cols[3].button(
+                "↓", key=f"plan_scene_down_{scene.id}", help=tr("Plan Scene Move Down"),
+                on_click=_plan_reorder_scenes, args=(current_id, scene.id, 1),
+            )
+            head_cols[4].button(
+                "🗑", key=f"plan_scene_delete_{scene.id}", help=tr("Plan Scene Delete"),
+                on_click=_plan_delete_scene, args=(current_id, scene.id),
+            )
+            st.text_area(
+                tr("Plan Scene Narration"),
+                value=scene.narration,
+                key=f"plan_scene_narration_{scene.id}",
+                height=90,
+                on_change=_plan_scene_field_changed,
+                args=(
+                    current_id, scene.id, "narration",
+                    f"plan_scene_narration_{scene.id}",
+                ),
+            )
+            scene_cols = st.columns([1, 2])
+            with scene_cols[0]:
+                st.number_input(
+                    tr("Plan Scene Est Duration"),
+                    value=scene.est_duration,
+                    min_value=0.5, max_value=120.0, step=0.5, format="%.1f",
+                    key=f"plan_scene_est_{scene.id}",
+                    on_change=_plan_scene_field_changed,
+                    args=(current_id, scene.id, "est_duration", f"plan_scene_est_{scene.id}"),
+                )
+            with scene_cols[1]:
+                st.text_input(
+                    tr("Plan Scene Visual"),
+                    value=scene.visual,
+                    key=f"plan_scene_visual_{scene.id}",
+                    on_change=_plan_scene_field_changed,
+                    args=(current_id, scene.id, "visual", f"plan_scene_visual_{scene.id}"),
+                )
+            st.text_input(
+                tr("Plan Scene Keywords"),
+                value=", ".join(scene.keywords),
+                key=f"plan_scene_keywords_{scene.id}",
+                on_change=_plan_scene_field_changed,
+                args=(current_id, scene.id, "keywords", f"plan_scene_keywords_{scene.id}"),
+            )
+            engine_cols = st.columns(2)
+            engine_value = scene.engine if scene.engine in PLAN_ENGINE_OPTIONS else "stock"
+            if scene.engine not in PLAN_ENGINE_OPTIONS:
+                st.warning(f"{scene.id}: {tr('Plan Engine Cloud AI')} → {tr('Plan Engine Stock')}")
+            # 同 wizard_genre：渲染期预算标签，序列化期不读会话态。
+            engine_labels = {value: tr(label) for value, label in PLAN_ENGINE_LABELS.items()}
+            transition_labels = {
+                value: tr(label) for value, label in PLAN_TRANSITION_LABELS.items()
+            }
+            with engine_cols[0]:
+                st.selectbox(
+                    tr("Plan Scene Engine"),
+                    options=list(PLAN_ENGINE_OPTIONS),
+                    index=PLAN_ENGINE_OPTIONS.index(engine_value),
+                    format_func=engine_labels.get,
+                    key=f"plan_scene_engine_{scene.id}",
+                    on_change=_plan_scene_field_changed,
+                    args=(current_id, scene.id, "engine", f"plan_scene_engine_{scene.id}"),
+                )
+            with engine_cols[1]:
+                st.selectbox(
+                    tr("Plan Scene Transition"),
+                    options=list(PLAN_TRANSITION_OPTIONS),
+                    index=PLAN_TRANSITION_OPTIONS.index(scene.transition_to_next),
+                    format_func=transition_labels.get,
+                    key=f"plan_scene_transition_{scene.id}",
+                    on_change=_plan_scene_field_changed,
+                    args=(
+                        current_id, scene.id, "transition_to_next",
+                        f"plan_scene_transition_{scene.id}",
+                    ),
+                )
+
+    if st.button(tr("Plan Scene Add"), key="plan_scene_add_button", icon=":material/add:"):
+        _plan_add_scene(current_id)
+        st.rerun()
+
+
+def _series_character_appearance_changed(series_id, character_id, widget_key):
+    value = str(st.session_state.get(widget_key, "") or "")
+
+    def mutate(series):
+        character = next(c for c in series.characters if c.id == character_id)
+        character.appearance_prompt = value
+
+    try:
+        series_store.update_series(series_id, mutate)
+    except series_store.SeriesStoreError as exc:
+        st.session_state["series_edit_error"] = str(exc)
+
+
+def _series_reference_lock_changed(series_id, character_id, basename, widget_key):
+    try:
+        if st.session_state.get(widget_key):
+            series_store.lock_reference_image(series_id, character_id, basename)
+        else:
+            series_store.unlock_reference_image(series_id, character_id, basename)
+    except series_store.SeriesStoreError as exc:
+        st.session_state["series_edit_error"] = str(exc)
+
+
+def _render_series_page():
+    st.subheader(tr("Series Library"))
+    edit_error = st.session_state.get("series_edit_error")
+    if edit_error:
+        st.error(f"{tr('Series Load Failed')}: {edit_error}")
+    summaries = series_store.list_series()
+    create_cols = st.columns([3, 1])
+    with create_cols[1]:
+        if st.button(
+            tr("Series Create"), key="series_create_button",
+            icon=":material/add:", width="stretch",
+        ):
+            _navigate_to_page("wizard")
+    if not summaries:
+        st.info(tr("Series Empty Hint"))
+        return
+    with create_cols[0]:
+        # 渲染期预算标签（含 tr）：序列化期重调 format_func 时不再读
+        # 会话态/重拼文案，与 plan_draft_picker 同惯例。
+        series_labels = {
+            item["id"]: (
+                f"{item['title'] or item['id']} · "
+                f"{tr('Series Episodes Count')} {item['episodes']} · "
+                f"{tr('Series Characters Count')} {item['characters']}"
+            )
+            for item in summaries
+        }
+        selected_id = st.selectbox(
+            tr("Series Picker"),
+            options=[item["id"] for item in summaries],
+            format_func=lambda sid: series_labels.get(sid, sid),
+            key="series_picker",
+        )
+    try:
+        series = series_store.load_series(selected_id)
+    except series_store.SeriesStoreError as exc:
+        st.error(f"{tr('Series Load Failed')}: {exc}")
+        return
+    if series is None:
+        st.info(tr("Series Empty Hint"))
+        return
+    st.caption(
+        f"{tr('Series Genre')}: {tr(dict(WIZARD_GENRES).get(series.genre_template, 'Genre Custom'))}"
+    )
+
+    episodes_tab, characters_tab = st.tabs(
+        [tr("Series Episodes Tab"), tr("Series Characters Tab")],
+        key="series_detail_tabs",
+    )
+    with episodes_tab:
+        for episode in series.episodes:
+            with st.container(key=f"series_episode_{episode.id}", border=True):
+                ep_cols = st.columns([3, 1])
+                ep_cols[0].markdown(
+                    f"**EP{episode.seq} {episode.title or ''}** · "
+                    f"{tr(EPISODE_STATUS_LABELS[episode.status])}"
+                )
+                if episode.logline:
+                    st.caption(f"{tr('Series Episode Logline')}: {episode.logline}")
+                if episode.hook:
+                    st.caption(f"{tr('Series Episode Hook')}: {episode.hook}")
+                with ep_cols[1]:
+                    if episode.plan_id:
+                        if st.button(
+                            tr("Series Open Plan"),
+                            key=f"series_open_plan_{episode.id}",
+                            width="stretch",
+                        ):
+                            st.session_state["script_plan_current_id"] = episode.plan_id
+                            _plan_reset_widgets()
+                            _navigate_to_page("plan")
+                    else:
+                        st.caption(tr("Series No Plan"))
+    with characters_tab:
+        for character in series.characters:
+            with st.container(key=f"series_character_{character.id}", border=True):
+                st.markdown(
+                    f"**{character.name or character.id}** · "
+                    f"{tr('Series Character Role')}: {character.role}"
+                )
+                st.caption(
+                    f"{tr('Series Character Voice')}: {character.voice_name or '—'}"
+                )
+                st.text_input(
+                    tr("Series Character Appearance"),
+                    value=character.appearance_prompt,
+                    key=f"series_char_appearance_{series.id}_{character.id}",
+                    on_change=_series_character_appearance_changed,
+                    args=(
+                        series.id, character.id,
+                        f"series_char_appearance_{series.id}_{character.id}",
+                    ),
+                )
+                st.caption(tr("Series Reference Images"))
+                for index, relative in enumerate(character.reference_images):
+                    image_path = series_store.series_dir(series.id) / relative
+                    ref_cols = st.columns([1, 1, 1])
+                    if image_path.is_file():
+                        ref_cols[0].image(str(image_path), width=96)
+                    basename = Path(relative).name
+                    locked = series_store.is_reference_locked(
+                        series.id, character.id, basename
+                    )
+                    lock_widget_key = (
+                        f"series_ref_lock_{series.id}_{character.id}_{index}"
+                    )
+                    ref_cols[1].checkbox(
+                        tr("Series Reference Locked"),
+                        value=locked,
+                        key=lock_widget_key,
+                        on_change=_series_reference_lock_changed,
+                        args=(series.id, character.id, basename, lock_widget_key),
+                    )
+                    if ref_cols[2].button(
+                        tr("Series Reference Delete"),
+                        key=f"series_ref_del_{series.id}_{character.id}_{index}",
+                    ):
+                        try:
+                            series_store.remove_reference_image(
+                                series.id, character.id, basename
+                            )
+                            st.rerun()
+                        except series_store.SeriesStoreError:
+                            st.error(tr("Series Reference Delete Refused"))
+                uploaded_ref = st.file_uploader(
+                    tr("Series Reference Upload"),
+                    type=["png", "jpg", "jpeg", "webp"],
+                    key=f"series_ref_upload_{series.id}_{character.id}",
+                )
+                if uploaded_ref is not None:
+                    marker = f"{uploaded_ref.name}:{uploaded_ref.size}"
+                    last_key = f"series_ref_last_{series.id}_{character.id}"
+                    if st.session_state.get(last_key) != marker:
+                        st.session_state[last_key] = marker
+                        try:
+                            series_store.add_reference_image(
+                                series.id, character.id, uploaded_ref.getvalue(),
+                                suffix=Path(uploaded_ref.name).suffix or ".png",
+                            )
+                            st.toast(tr("Series Reference Added"))
+                            st.rerun()
+                        except series_store.SeriesStoreError as exc:
+                            st.error(str(exc))
+
+
+# -----------------------------------------------------------------------------
 # 三列应用壳：左导航 / 中功能页 / 右生成日志
 # -----------------------------------------------------------------------------
 
 NAV_PAGES = (
-    ("script", "Video Script Settings", ":material/edit_note:", "creation"),
-    ("video", "Video Settings", ":material/movie:", "creation"),
-    ("audio", "Audio Settings", ":material/graphic_eq:", "creation"),
-    ("subtitle", "Subtitle Settings", ":material/subtitles:", "creation"),
+    ("quick", "Nav Quick Film", ":material/bolt:", "creation"),
+    ("pro", "Nav Pro Drama", ":material/movie:", "creation"),
     ("tasks", "Task Manager", ":material/checklist:", "publish"),
     ("publish_history", "Publish History Tab", ":material/history:", "publish"),
     ("llm", "LLM Settings Tab", ":material/psychology:", "config"),
@@ -10915,6 +12082,32 @@ NAV_PAGES = (
     ("settings", "Settings", ":material/settings:", "config"),
 )
 NAV_PAGE_IDS = tuple(page for page, _, _, _ in NAV_PAGES)
+# 旧一级创作页 → 新两路线 + TAB 下标：历史会话/测试/深链仍可用旧 id 导航。
+LEGACY_CREATION_PAGES = {
+    "script": ("quick", 0),
+    "video": ("quick", 2),
+    "audio": ("quick", 3),
+    "subtitle": ("quick", 4),
+    "wizard": ("pro", 0),
+    "plan": ("pro", 1),
+    "series": ("pro", 2),
+}
+QUICK_TAB_LABEL_KEYS = (
+    "Tab Script",
+    "Image Settings",
+    "Tab Video",
+    "Tab Audio",
+    "Tab Subtitle",
+)
+PRO_TAB_LABEL_KEYS = (
+    "Creation Wizard",
+    "Script Plan",
+    "Series Library",
+    "Image Settings",
+    "Tab Video",
+    "Tab Audio",
+    "Tab Subtitle",
+)
 NAV_GROUP_LABELS = {
     "creation": "Nav Group Creation",
     "publish": "Nav Group Publish",
@@ -10922,12 +12115,79 @@ NAV_GROUP_LABELS = {
 }
 
 
+def _request_creation_tab(page, tab_label_key=None):
+    """登记路线页 TAB 预选请求（回调/渲染期都安全，不碰控件键）。
+
+    st.tabs 带键挂载时若会话无选中值，react-aria 会补发一次选中
+    变更事件，on_change="rerun" 据此再跑一整轮 render-all（导航延迟
+    翻倍）。请求在下一轮 st.tabs 实例化前消费：显式跳转用目标 TAB，
+    否则用影子键里的上次选中，挂载即稳定且保留用户的 TAB 记忆。
+    控件键直写在渲染期会撞 already-instantiated（页内旧 id 跳转按钮
+    是 if st.button 而非 on_click），故统一走请求旗标。
+    """
+    if page not in ("quick", "pro"):
+        return
+    st.session_state["creation_tab_request"] = (page, tab_label_key)
+
+
+def _consume_creation_tab_request(active_page):
+    """st.tabs 实例化前消费预选请求；无请求且无选中值时预置首 TAB。"""
+    if active_page not in ("quick", "pro"):
+        st.session_state.pop("creation_tab_request", None)
+        return
+    tabs_key = "quick_tabs" if active_page == "quick" else "pro_tabs"
+    label_keys = (
+        QUICK_TAB_LABEL_KEYS if active_page == "quick" else PRO_TAB_LABEL_KEYS
+    )
+    labels = [tr(key) for key in label_keys]
+    request = st.session_state.pop("creation_tab_request", None)
+    selected = None
+    if request and request[0] == active_page:
+        if request[1]:
+            selected = tr(request[1])
+        else:
+            selected = st.session_state.get(f"{tabs_key}_last")
+    if selected not in labels:
+        selected = st.session_state.get(tabs_key)
+    if selected not in labels:
+        selected = labels[0]
+    st.session_state[tabs_key] = selected
+    st.session_state[f"{tabs_key}_last"] = selected
+
+
 def _navigate_to_page(page):
+    if page in LEGACY_CREATION_PAGES:
+        # 旧创作页 id（向导/方案页内跳转等）归一到路线 + 对应 TAB。
+        route, tab_index = LEGACY_CREATION_PAGES[page]
+        label_keys = QUICK_TAB_LABEL_KEYS if route == "quick" else PRO_TAB_LABEL_KEYS
+        _request_creation_tab(route, label_keys[tab_index])
+        page = route
     if page in NAV_PAGE_IDS:
         st.session_state["active_page"] = page
+        _request_creation_tab(page)
     # 导航可能来自 fragment 内的按钮（任务计数、移动端更多菜单），
     # 显式整页 rerun 才能切换中列页面。
     st.rerun(scope="app")
+
+
+def _navigate_to_route(page, tab_label_key=None):
+    """路线横幅跳转：切页的同时预选目标 TAB（请求旗标，挂载前消费）。"""
+    st.session_state["active_page"] = page
+    _request_creation_tab(page, tab_label_key)
+    st.rerun(scope="app")
+
+
+def _pro_tab_active(label_key):
+    """专业页某个 TAB 是否选中：未交互过时默认首 TAB（向导）。"""
+    if st.session_state.get("active_page") != "pro":
+        return False
+    selected = st.session_state.get("pro_tabs")
+    # 语言切换后旧标签失效：与 st.tabs 的回退行为一致，视为首 TAB。
+    if selected not in [tr(key) for key in PRO_TAB_LABEL_KEYS]:
+        selected = None
+    if selected is None:
+        return label_key == PRO_TAB_LABEL_KEYS[0]
+    return selected == tr(label_key)
 
 
 def _toggle_nav_collapsed():
@@ -10989,8 +12249,8 @@ def _render_shell_shortcuts():
         <script>
         try {
             window.parent.eval(`(() => {
-                if (!window.__mptShellShortcutHandler) {
-                    window.__mptShellShortcutHandler = (event) => {
+                if (!window.__changoFilmShellShortcutHandler) {
+                    window.__changoFilmShellShortcutHandler = (event) => {
                         if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
                             return;
                         }
@@ -11016,7 +12276,7 @@ def _render_shell_shortcuts():
                         }
                     };
                 }
-                const handler = window.__mptShellShortcutHandler;
+                const handler = window.__changoFilmShellShortcutHandler;
                 document.removeEventListener("keydown", handler, true);
                 document.addEventListener("keydown", handler, true);
             })()`);
@@ -11027,11 +12287,7 @@ def _render_shell_shortcuts():
     )
 
 
-@st.fragment(run_every="2s")
-def _render_nav_tasks_button(active_page):
-    # 任务计数沿用旧顶部入口的定时刷新策略：只重绘这一个按钮，
-    # 不打断中列表单输入。
-    processing_count = _count_processing_tasks(_collect_task_summaries())
+def _render_nav_tasks_button_static(active_page, processing_count, collapsed):
     st.button(
         _task_manager_label(processing_count),
         key="nav_page_tasks",
@@ -11040,8 +12296,31 @@ def _render_nav_tasks_button(active_page):
         on_click=_navigate_to_page,
         args=("tasks",),
         width="stretch",
-        help=tr("Task Manager"),
+        # 展开态按钮文本已可见，悬浮提示冗余；仅收起态（纯图标）保留。
+        help=tr("Task Manager") if collapsed else None,
     )
+
+
+@st.fragment(run_every="2s")
+def _render_nav_tasks_button(active_page, collapsed):
+    # 有处理中任务时才定时重绘这一个按钮，不打断中列表单输入。
+    # 计数归零时做一次整页刷新切回静态渲染停止定时器（唯一的
+    # 主动整页刷新，发生在批次完成这个有意义的时刻）。
+    processing_count = _count_processing_tasks(_collect_task_summaries())
+    if processing_count == 0:
+        st.rerun(scope="app")
+    _render_nav_tasks_button_static(active_page, processing_count, collapsed)
+
+
+def _render_nav_tasks_entry(active_page, collapsed):
+    # 任务徽章只在有处理中任务时启动 2s 轮询；空闲时静态渲染
+    # （计数在每次整页 rerun 重算，外部创建的任务仍能捕获），
+    # 避免没有任何任务时导航 fragment 也每 2 秒扫描任务目录。
+    processing_count = _count_processing_tasks(_collect_task_summaries())
+    if processing_count > 0:
+        _render_nav_tasks_button(active_page, collapsed)
+    else:
+        _render_nav_tasks_button_static(active_page, processing_count, collapsed)
 
 
 def _render_nav_sidebar(active_page, collapsed):
@@ -11059,7 +12338,7 @@ def _render_nav_sidebar(active_page, collapsed):
             ),
             on_click=_toggle_nav_collapsed,
             width="stretch",
-            help=toggle_label,
+            help=toggle_label if collapsed else None,
         )
         current_group = None
         for page, label_key, icon, group in NAV_PAGES:
@@ -11067,7 +12346,7 @@ def _render_nav_sidebar(active_page, collapsed):
                 current_group = group
                 st.caption(tr(NAV_GROUP_LABELS[group]))
             if page == "tasks":
-                _render_nav_tasks_button(active_page)
+                _render_nav_tasks_entry(active_page, collapsed)
                 continue
             st.button(
                 tr(label_key),
@@ -11077,7 +12356,8 @@ def _render_nav_sidebar(active_page, collapsed):
                 on_click=_navigate_to_page,
                 args=(page,),
                 width="stretch",
-                help=tr(label_key),
+                # 展开态文本可见无需悬浮提示；收起态纯图标时保留。
+                help=tr(label_key) if collapsed else None,
             )
     _render_shell_shortcuts()
 
@@ -11171,8 +12451,8 @@ def _render_settings_page():
 
 
 def _render_active_feature_page(active_page):
-    if active_page in {"script", "video", "audio", "subtitle"}:
-        # 四个创作页的控件已经在 main_settings_grid 中全量渲染，
+    if active_page in {"quick", "pro"}:
+        # 两条创作路线的控件已经在 main_settings_grid 中全量渲染，
         # 这里只负责非创作页的惰性加载。
         return
     with st.container(key=f"feature_page_{active_page}"):
@@ -11201,7 +12481,7 @@ def _render_mobile_tab_bar(active_page, mobile_log_open):
     # 窄屏底部 tab 栏：四个创作页 + 日志浮层开关 + “更多”入口；
     # 桌面端由 CSS 隐藏。
     with st.container(key="mobile_tab_bar", horizontal=True, gap="small"):
-        for page, label_key, icon, _ in NAV_PAGES[:4]:
+        for page, label_key, icon, _ in NAV_PAGES[:2]:
             st.button(
                 tr(label_key),
                 key=f"nav_mobile_{page}",
@@ -11227,7 +12507,7 @@ def _render_mobile_tab_bar(active_page, mobile_log_open):
             key="nav_mobile_more",
             width="stretch",
         ):
-            for page, label_key, icon, _ in NAV_PAGES[4:]:
+            for page, label_key, icon, _ in NAV_PAGES[2:]:
                 st.button(
                     tr(label_key),
                     key=f"nav_mobile_page_{page}",
@@ -11296,9 +12576,17 @@ def _render_application():
     if st.session_state.pop("preset_delete_failed", False):
         st.error(tr("Preset Delete Failed"))
 
-    active_page = st.session_state.get("active_page", "script")
+    active_page = st.session_state.get("active_page", "quick")
+    if active_page in LEGACY_CREATION_PAGES:
+        # 旧一级创作页 id 归一到两路线，并预选对应 TAB（请求旗标，
+        # 下方 st.tabs 挂载前消费，不直写控件键）。
+        route, tab_index = LEGACY_CREATION_PAGES[active_page]
+        label_keys = QUICK_TAB_LABEL_KEYS if route == "quick" else PRO_TAB_LABEL_KEYS
+        _request_creation_tab(route, label_keys[tab_index])
+        active_page = route
+        st.session_state["active_page"] = route
     if active_page not in NAV_PAGE_IDS:
-        active_page = "script"
+        active_page = "quick"
     nav_collapsed = _saved_ui_bool("nav_collapsed", False)
     log_collapsed = _saved_ui_bool("log_collapsed", False)
     mobile_log_open = bool(st.session_state.get("mobile_log_open", False))
@@ -11328,23 +12616,87 @@ def _render_application():
         with st.container(key=f"active_page_{active_page}"):
             # 锁定横幅只在创作页显示：CSS 以横幅为锚禁用创作区指针事件；
             # 配置页不受项目锁定影响。
-            if _project_is_locked() and active_page in (
-                "script", "video", "audio", "subtitle"
-            ):
+            if _project_is_locked() and active_page in ("quick", "pro"):
                 _render_project_lock_banner()
-            # 四个创作面板必须每次 rerun 都渲染：计费确认、上传、报价等
-            # 会话级状态在它们内部；非活动页只通过 CSS st-key 约定隐藏。
+            # 路线横幅置于 TAB 栏之上：任何 TAB 下都能看到定位与跨路线
+            # 跳转（埋在文案 TAB 内会导致其它 TAB 下不可达）。
+            if active_page == "quick":
+                _render_route_banner(
+                    "quick", "quick", "Route Quick Intro",
+                    "Route Quick To Plan", "pro", "route_quick_to_plan",
+                    "Script Plan",
+                )
+            elif active_page == "pro":
+                _render_route_banner(
+                    "pro", "pro", "Route Pro Intro",
+                    "Route Pro To Quick", "quick", "route_pro_to_quick",
+                )
+            # 创作区 IA：快速成片 / 专业短剧 两个一级页，其余全部 TAB 化。
+            # 七个渲染器（文案/图片/视频/音频/字幕/向导/方案/系列）每次
+            # rerun 恰好渲染一次：活动路线页的 st.tabs 会服务端全量渲染
+            # 所有 TAB 面板（params 组装不漂移）；未安置的渲染器进
+            # creation_fallback 隐藏容器（CSS 常隐），保持 render-all 契约。
             with st.container(key="main_settings_grid"):
-                script_panel = st.container(key="page_script")
-                video_panel = st.container(key="page_video")
-                audio_panel = st.container(key="page_audio")
-                subtitle_panel = st.container(key="page_subtitle")
+                fallback = st.container(key="creation_fallback")
+                # 挂载前消费 TAB 预选请求（含首次进页预置），避免
+                # react-aria 补发选中事件触发额外整轮 rerun。
+                _consume_creation_tab_request(active_page)
+                if active_page == "quick":
+                    (
+                        script_panel,
+                        image_panel,
+                        video_panel,
+                        audio_panel,
+                        subtitle_panel,
+                    ) = st.tabs(
+                        [tr(key) for key in QUICK_TAB_LABEL_KEYS],
+                        key="quick_tabs",
+                        on_change="rerun",
+                    )
+                    with fallback:
+                        wizard_panel = st.container(key="fb_wizard")
+                        plan_panel = st.container(key="fb_plan")
+                        series_panel = st.container(key="fb_series")
+                elif active_page == "pro":
+                    (
+                        wizard_panel,
+                        plan_panel,
+                        series_panel,
+                        image_panel,
+                        video_panel,
+                        audio_panel,
+                        subtitle_panel,
+                    ) = st.tabs(
+                        [tr(key) for key in PRO_TAB_LABEL_KEYS],
+                        key="pro_tabs",
+                        on_change="rerun",
+                    )
+                    with fallback:
+                        script_panel = st.container(key="fb_script")
+                if active_page in ("quick", "pro"):
+                    # 影子键记录当前选中：页内切 TAB 后导航离开再回来，
+                    # 预置值仍是用户最后选中的 TAB（控件清理不带走记忆）。
+                    _tabs_key = "quick_tabs" if active_page == "quick" else "pro_tabs"
+                    _tabs_now = st.session_state.get(_tabs_key)
+                    if _tabs_now:
+                        st.session_state[f"{_tabs_key}_last"] = _tabs_now
+                else:
+                    with fallback:
+                        script_panel = st.container(key="fb_script")
+                        image_panel = st.container(key="fb_image")
+                        video_panel = st.container(key="fb_video")
+                        audio_panel = st.container(key="fb_audio")
+                        subtitle_panel = st.container(key="fb_subtitle")
+                        wizard_panel = st.container(key="fb_wizard")
+                        plan_panel = st.container(key="fb_plan")
+                        series_panel = st.container(key="fb_series")
 
             params = VideoParams(video_subject="")
             params.match_materials_to_script = bool(
                 st.session_state.get("match_materials_to_script", False)
             )
             _render_script_settings(script_panel, params)
+            _render_image_settings(image_panel, params)
 
             uploaded_files = _render_video_settings(video_panel, params)
             uploaded_audio_file, uploaded_bgm_file, voice_mode = _render_audio_settings(
@@ -11356,10 +12708,37 @@ def _render_application():
             # 任务管理/发布历史沿用旧顶栏 popover 的契约：行级操作按钮
             # 在每次 rerun 都必须存在（headless 回归测试依赖）；非活动
             # 时与创作页一样仅由 CSS st-key 约定隐藏。
+            # 定时轮询只在所属页活动时启动：render-all 壳下隐藏页的
+            # 2s fragment 会永不停止地重建任务面板与发布历史（磁盘扫描
+            # + 隐藏节点替换），占用脚本线程并导致活动页背景重渲染/
+            # 滚动漂移。非活动时改静态渲染：元素仍全部存在，只是不再
+            # 注册定时器（面板内全是无状态按钮，切换不丢控件状态）。
             with st.container(key="page_tasks"):
-                _render_tasks_page()
+                if active_page == "tasks":
+                    _render_tasks_page()
+                else:
+                    _render_task_manager_panel(include_publish_history=False)
             with st.container(key="page_publish_history"):
-                _render_publish_history_page()
+                if active_page == "publish_history":
+                    _render_publish_history_page()
+                else:
+                    _render_publish_history(
+                        publish_history.list_publish_history(limit=100)
+                    )
+
+            # 向导/脚本方案/系列管理（B7）沿用 render-all 壳决策：草稿与
+            # 编辑状态全部在 session_state/磁盘；专业页活动时安置在 TAB，
+            # 否则进隐藏 fallback。wizard_wrap/series_wrap 键供锁定 CSS
+            # 豁免（新建草稿不受已完成项目锁定影响）。
+            with wizard_panel:
+                with st.container(key="wizard_wrap"):
+                    _render_wizard_page()
+            with plan_panel:
+                with st.container(key="plan_wrap"):
+                    _render_plan_page()
+            with series_panel:
+                with st.container(key="series_wrap"):
+                    _render_series_page()
 
             _render_active_feature_page(active_page)
             action_bar = st.container(key="action_bar")

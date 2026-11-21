@@ -26,7 +26,7 @@ class _GroupedSelectHarness:
     def declare(self, name, *args, **kwargs):
         # 新手引导等第三方组件同样使用 Components v2。透传这些声明可以避免
         # 测试桩改变页面其它功能，只控制本用例关心的视频来源选择结果。
-        if name != "mpt_grouped_select":
+        if name != "changofilm_grouped_select":
             return self._original_component(name, *args, **kwargs)
 
         self.declaration = kwargs
@@ -108,6 +108,7 @@ def test_grouped_video_source_keeps_groups_and_accessible_label_binding():
         assert data["controlId"] == "video_source_select_en_control"
         assert [group["label"] for group in data["groups"]] == [
             "Stock Video",
+            "Stock Images",
             "AI Video",
             "AI Image",
             "Local Files",
@@ -118,6 +119,8 @@ def test_grouped_video_source_keeps_groups_and_accessible_label_binding():
             "pexels",
             "pixabay",
             "coverr",
+            "pexels_image",
+            "pixabay_image",
             "metaso_minimax",
             "ofox",
             "loomloom",

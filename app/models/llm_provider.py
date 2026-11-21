@@ -594,6 +594,16 @@ LLM_PROVIDER_REGISTRY = (
         requires_api_key=False,
         show_api_key=False,
     ),
+    # llama-server（llama.cpp）暴露 OpenAI-compatible 端点，与 Ollama 同法
+    # 接入：默认端口 8080，API Key 可选（llama-server --api-key 启用时才需要）。
+    # 模型名由 llama-server 忽略，填任意非空值即可；默认值保证开箱可用。
+    LLMProviderSpec(
+        "llamacpp",
+        "llama.cpp (llama-server)",
+        default_model="local-model",
+        default_base_url="http://127.0.0.1:8080/v1",
+        requires_api_key=False,
+    ),
     # Claude 订阅（Pro / Max / Team）不签发 API Key，凭证只能由 Claude Code
     # 官方客户端使用，因此这个 Provider 不走 HTTP 接口，而是调用本机已登录
     # 的 claude CLI。模型名留空即沿用 CLI 当前的默认模型。
