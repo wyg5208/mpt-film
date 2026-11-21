@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MoneyPrinterTurbo · 三列布局 UI Demo</title>
+<title>ChangoFilm · 三列布局 UI Demo</title>
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2300c880'/%3E%3Cpath d='M9 7.5v9l8-4.5z' fill='%2304121a'/%3E%3C/svg%3E">
 </head>
@@ -15,8 +15,8 @@
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6.5v11l9.5-5.5z"/></svg>
       </span>
-      <span class="brand-name">MoneyPrinterTurbo</span>
-      <span class="brand-ver">v1.5.0 · UI Demo</span>
+      <span class="brand-name">ChangoFilm</span>
+      <span class="brand-ver">v1.7.0 · UI Demo</span>
     </div>
     <span class="run-badge" id="runBadge" role="status"></span>
     <div class="topbar-spacer"></div>
@@ -28,6 +28,8 @@
     </div>
     <div class="topbar-spacer"></div>
     <button class="icon-btn mobile-only" id="genToggleMobile" data-action="genToggleMobile" aria-label="生成日志"></button>
+    <!-- Simple / Pro dual-track mode switch (persisted) -->
+    <button class="mode-toggle" id="modeToggle" data-action="modeToggle" aria-pressed="false"></button>
     <select class="lang-select" id="langSelect" aria-label="Language / 语言">
       <option value="zh">简体中文</option>
       <option value="en">English</option>
@@ -107,6 +109,7 @@
 <input type="file" id="presetImportFile" accept="application/json,.json" hidden>
 <input type="file" id="presetLibImportFile" accept="application/json,.json" hidden>
 <input type="file" id="keyImportFile" accept="application/json,.json" hidden>
+<input type="file" id="planImportFile" accept="application/json,.json" hidden>
 
 <script src="app.js"></script>
 </body>
