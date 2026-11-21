@@ -319,22 +319,49 @@ semi-portal 非模态清理与 Escape/blur。修复后 headed 探针 47/47 采�
 - 教训：**把用户手动救援路径当成一等公民自动化**；平台 UI 变体随机下发时，
   选择器修正无效，状态感知 + 已验证救援路径才是治本。
 
+## 2026-11-22 补充：抖音全流程拟人化层（用户两次提醒后补全）
+
+- 背景：此前抖音只有上传前预热 + 等待轮鼠标微动作，标题仍是瞬时 `.fill()`、
+  全部原生点击、发布后秒退出——用户两次提醒“要加入拟人化操作，包括适当的随机浏览”。
+- 原语共享：新增 `uploader/humanize_core.py`（钟形延迟/逐字打字/三阶贝塞尔点击/
+  分段滚动浏览），小红书 humanize.py 改薄包装（模块级名字与 SAU_XHS_* 开关、
+  测试 patch 契约不变），抖音新增 `uploader/douyin_uploader/humanize.py`
+  （SAU_DOUYIN_HUMANIZE / SAU_DOUYIN_WARMUP 开关）。
+- 随机浏览三场景：warmup_browse 上传前逛创作者首页；idle_browse 等待期只在当前页
+  移动/滚动/偶尔回看/停留（**绝不导航**，离开上传页会丢进度）；post_publish_browse
+  发布后在内容管理页滚动作品列表再回写 cookie/关浏览器，打散“发布→秒退出”。
+- 接线点：标题=贝塞尔点击聚焦+全选清空+逐字打字（保留 input_value 落地核验与
+  3 轮折叠重填）；描述/话题逐字+话题间停顿；声明/合集/发布按钮贝塞尔点击
+  （发布回退保留 force=True）；步骤间钟形停顿。
+- 纪律：救援路径（_recover_stuck_form）保持原生点击——可靠性与速度优先；
+  拟人层任何异常回退原生，绝不因拟人失败中断发布；测试加接线守卫防回退。
+- 顺手修复：upload() 拆出 _upload_flow(context)，外层 try/finally 保证声明/发布
+  中途失败也关浏览器（旧 declaration 测试因此复活，另两例 stale 测试适配当前架构）。
+- 验证：五套相关测试 67/67 绿；headed 干跑（不发布）预热 6.9s、拟人填标题 4.4s、
+  描述+2 话题 17.9s，标题回读一致、截图表单完好，暂存离开后“放弃”丢弃草稿，0 错误。
+- 教训：**拟人化是全程行为形状，不是几个 sleep**：输入/点击/等待/收尾都要覆盖；
+  共享原语时保住各平台测试的 patch 契约（asyncio 是同一模块对象，patch 全局生效）。
+
 ## 附录：本地补丁清单（上游更新时需重查）
 
 bundled 检出 `opensources/social-auto-upload` 内的本地修改（外层仓库 gitignore，不随提交）：
 
 | 文件 | 修改 |
 |------|------|
-| `uploader/douyin_uploader/main.py` | 引导浮层清除、draft 页接受、空闲重注入、离页回归、15 分钟 deadline、解析感知表单等待、持久化真实用户身份（视频+图文）、模块级 `import json` 修复、登录/验证页踢出即时报错+超时截图留证、上传前预热浏览、表单死状态自愈（不点快速填写，暂存离开→草稿态重进，触发阈值 60s→20s）、三处抗干扰清理表单容器守卫（mention-wrapper 含表单控件不删）、标题落地核验+瞬态折叠重填、上传后解析等待、发布后核验、等待轮仿人微动作 |
+| `uploader/douyin_uploader/main.py` | 引导浮层清除、draft 页接受、空闲重注入、离页回归、15 分钟 deadline、解析感知表单等待、持久化真实用户身份（视频+图文）、模块级 `import json` 修复、登录/验证页踢出即时报错+超时截图留证、上传前预热浏览、表单死状态自愈（不点快速填写，暂存离开→草稿态重进，触发阈值 60s→20s）、三处抗干扰清理表单容器守卫（mention-wrapper 含表单控件不删）、标题落地核验+瞬态折叠重填、上传后解析等待、发布后核验、全流程拟人化（逐字打字/贝塞尔点击/随机停顿/等待期与发布后随机浏览）、upload() try/finally 中途失败也关浏览器 |
+| `uploader/humanize_core.py` | 新增：平台中立拟人原语，小红书/抖音共用，异常回退原生 |
+| `uploader/douyin_uploader/humanize.py` | 新增：抖音拟人层开关 + 预热/等待期/发布后三个随机浏览场景 |
 | `uploader/tencent_uploader/main.py` | 启动兜底 `channel="chrome"` → `"chromium"` |
 | `uploader/xiaohongshu_uploader/main.py` | 二维码面板状态驱动激活 + src 异步填充容忍、持久化真实用户身份（视频+图文）、拟人行为层接入 |
-| `uploader/xiaohongshu_uploader/humanize.py` | 新增：随机延迟/逐字打字/贝塞尔点击/预热浏览，环境变量开关，失败自动回退 |
+| `uploader/xiaohongshu_uploader/humanize.py` | 新增：随机延迟/逐字打字/贝塞尔点击/预热浏览，环境变量开关，失败自动回退；原语抽到 humanize_core 后为薄包装 |
 | `.venv/.../patchright/driver/package/lib/server/chromium/crNetworkManager.js` | `_fixCSP` 仅在原策略含 default-src 时补 script-src（抖音 blob Worker 修复；**重装 patchright 后需重新应用**） |
 | `uploader/bilibili_uploader/runtime.py` | 下载重试、分离超时、镜像兜底 + sha256 校验、友好报错 |
 | `tests/test_xiaohongshu_uploader.py` | 话题等待超时断言 2000→4000（对齐既有代码漂移）；fill_meta 断言对齐拟人层原生路径（关开关保确定性） |
 | `tests/test_xiaohongshu_humanize.py` | 新增：拟人层开关/延迟分布/逐字打字/贝塞尔点击/回退/预热专项测试 |
 | `tests/test_biliup_runtime.py` | 新增：镜像 URL 选择与 digest 门槛测试 |
-| `tests/test_douyin_form_wait.py` | 新增：登录/验证页踢出即时失败、超时留证、预热浏览、死状态自愈（快速填写禁点守卫）、标题落地核验、解析等待、发布后核验、三处清理表单容器守卫专项测试（15 例） |
+| `tests/test_douyin_form_wait.py` | 新增：登录/验证页踢出即时失败、超时留证、预热浏览、死状态自愈（快速填写禁点守卫）、标题落地核验、解析等待、发布后核验、三处清理表单容器守卫、拟人化接线守卫、try/finally 关浏览器守卫（22 例） |
+| `tests/test_douyin_humanize.py` | 新增：抖音拟人层开关/逐字打字/贝塞尔点击/force 兜底/浏览不导航专项测试（17 例） |
+| `tests/test_douyin_declaration.py` | 适配持久化上下文与当前构造签名（7 例） |
 
 宿主侧（MoneyPrinterTurbo，随正常提交）：stdout+stderr 双流回调、`social_publish_headed` 配置/快照/UI/14 语言、
 发布队列面板与阶段徽标、失败原因上任务卡。详见 [auto-publish-cn.md](auto-publish-cn.md)。
