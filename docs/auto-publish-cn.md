@@ -149,6 +149,15 @@ The **Publish Queue** panel at the top of the task manager lists running and
 waiting publishes with queue positions, a progress bar and an expandable live
 log tail (last lines of the `sau` output); it refreshes every 2 seconds.
 
+The task manager also shows a **zombie publish warning panel** when it finds
+orphaned `sau.exe` publish trees left over from a previous WebUI session
+(their parent process has exited). Each row shows the title, platform,
+account, PID and how long the process has been alive, with a **Kill** button
+per row and a **Kill all** button; killing removes the whole process tree
+(browser included) after re-verifying the process command line, and never
+touches video files. Live publishes of the current session and manual runs
+in a terminal are never flagged.
+
 The **Publish History** tab in the task manager keeps a durable record of every
 publish attempt — both automatic (post-generation) and manual (Publish Now /
 Republish). Each row shows the video subject and files, finish time, trigger
@@ -169,7 +178,7 @@ afterwards does not affect already-queued publishes.
 | `social-auto-upload CLI not found` | Install sau under `opensources/social-auto-upload` (auto-detected), or set the absolute `sau_cli_path` in Advanced settings. |
 | Publish state `failed` with "queue is full" | Too many pending publish jobs. Generation still succeeded; retry later. |
 | Publish state `failed` after a restart | Publish jobs live in the current process and are not resumed after restart; the videos are intact and can be published again. |
-| Publish stuck at a low percentage, log shows upload retries | Watch the visible browser window: a captcha/SMS check may need manual handling. Also make sure only one publish runs per account — an orphaned `sau.exe` from a previous WebUI session keeps uploading in the background; end it via Task Manager (process tree) before retrying. |
+| Publish stuck at a low percentage, log shows upload retries | Watch the visible browser window: a captcha/SMS check may need manual handling. Also make sure only one publish runs per account — an orphaned `sau.exe` from a previous WebUI session keeps uploading in the background; the task manager's zombie publish panel detects it and offers a one-click Kill (whole process tree). |
 | Platform rejects the upload or shows a captcha | Risk control. Keep a visible (headed) browser on a desktop machine, publish at low frequency, and avoid headless cloud servers. |
 | Bilibili rejects the partition | Change `social_publish_bilibili_tid` to a partition that matches the content (see the biliup partition list). |
 

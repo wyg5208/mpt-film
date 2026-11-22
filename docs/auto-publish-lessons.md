@@ -342,6 +342,35 @@ semi-portal 非模态清理与 Escape/blur。修复后 headed 探针 47/47 采�
 - 教训：**拟人化是全程行为形状，不是几个 sleep**：输入/点击/等待/收尾都要覆盖；
   共享原语时保住各平台测试的 patch 契约（asyncio 是同一模块对象，patch 全局生效）。
 
+## 2026-11-22 补充：僵尸发布进程探测器（桌面端一键杀灭）
+
+- 背景：重启/杀掉 WebUI 只终止 WebUI 本身，它派生的 sau.exe → node → chromium
+  进程树变孤儿继续后台上传（2026-11-19 小红书僵尸任务实测遗留 3 天，14 个进程，
+  同账号双开抬高风控概率）。用户要求：桌面端自己探测提醒，按钮直接杀灭。
+- 实现（外层仓库，零新增 Python 依赖）：`app/services/publish_zombies.py`
+  一次 PowerShell CIM 快照取全量 PID/父PID/名称/命令行/创建时间（缓存 20s，
+  不拖慢 2s fragment）；`social_auto_upload._run_command` 增加活子进程 PID
+  注册表（try/finally 登记/注销）作双保险。
+- 判定纪律（宁可漏报不可误杀）：只认 `sau.exe <平台> upload-video/upload-note`
+  命令行身份；只看**直接父进程**是否已死（或父 PID 被复用：现持有者出生晚于
+  子进程）——沿祖先链上溯会把用户终端手动发布误判成孤儿（几乎每条链都终止于
+  已退出的 userinit）；父进程健在的外部任务一律不碰；60s 宽限期防瞬态误判。
+- 杀灭纪律：kill_zombie 先按 PID 重拉命令行重新核验身份（PID 复用/身份不符
+  拒绝执行），再 `taskkill /F /T` 整树清理；杀后失效缓存。视频文件不受影响，
+  Chrome profile 单例锁随进程死亡自动释放。
+- UI：任务管理面板顶部警示区（先于空列表早退——重启后任务列表为空但孤儿仍在），
+  每行标题/平台/账号/PID/存活时长 + 终止按钮，另有全部终止；14 语言 7 新键。
+- 编码坑（实测踩坑）：PowerShell 5.1 重定向 stdout 的代码页随环境漂移，CIM 脚本
+  必须显式 `[Console]::OutputEncoding=UTF8` 再 ConvertTo-Json，否则中文标题乱码；
+  taskkill 输出按 `encoding="oem"` 解码。外层 GBK 控制台管道显示乱码不代表数据
+  损坏——以落盘 JSON 文件为准。
+- 验证：21 新测试 + 25 既有 sau 测试 + 7 WebUI 契约测试全绿；真机端到端实证
+  （csc 编译无害 sleeper 伪装 sau.exe 发布命令行，经立即退出的 powershell 派生
+  成真孤儿）：宽限期内不报 → 精确探测并解析全部字段 → 整树杀灭（含 conhost
+  子进程）→ 杀后归零 → 对无关活进程拒绝杀灭（temp/probe_zombie_detector.json）。
+- 教训：**杀进程自动化必须身份先行**：映像名/端口都不足以定身份，命令行模式 +
+  父进程状态 + 杀前重核验三层缺一不可；孤儿判定只看直接父进程，祖先链上溯必误报。
+
 ## 附录：本地补丁清单（上游更新时需重查）
 
 bundled 检出 `opensources/social-auto-upload` 内的本地修改（外层仓库 gitignore，不随提交）：
