@@ -556,7 +556,7 @@ def request_image(payload, *, generation, session, timeout, read_result):
                         "Accept": "text/event-stream",
                         "OpenAI-Beta": "responses=experimental",
                         "originator": "changofilm",
-                        "User-Agent": "ChangoFilm/1.9.0",
+                        "User-Agent": "ChangoFilm/1.10.0",
                     },
                     json=payload,
                 )
@@ -668,7 +668,7 @@ def generate_text(prompt, model, timeout=300):
                     "Accept": "text/event-stream",
                     "OpenAI-Beta": "responses=experimental",
                     "originator": "changofilm",
-                    "User-Agent": "ChangoFilm/1.9.0",
+                    "User-Agent": "ChangoFilm/1.10.0",
                 },
                 json={
                     "model": model,
