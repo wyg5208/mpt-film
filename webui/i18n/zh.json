@@ -965,7 +965,7 @@
     "Plan Confirmed": "方案已确认",
     "Plan Delete Draft": "删除草稿",
     "Plan Draft Deleted": "草稿已删除",
-    "Plan Narration Required": "生成前每个场景都需要旁白。",
+    "Plan Narration Required": "生成前至少需要一个场景填写旁白（并非每个镜头都必须有）。",
     "Plan Execute Requested": "已确认方案已提交生成流水线",
     "Plan Execute Invalid": "已确认方案校验失败，未提交。",
     "Plan Locked Scenes Kept": "锁定场景已保持不变",

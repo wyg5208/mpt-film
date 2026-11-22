@@ -12195,7 +12195,11 @@ def _render_plan_page():
         st.rerun()
 
     if execute_clicked:
-        if any(not scene.narration.strip() for scene in plan.scenes):
+        # 专业短剧允许个别镜头无旁白（静音空镜）：编译器会跳过空旁白场景，
+        # 画面仍占时间窗。但旁白是一次整篇 TTS，若所有场景都没有旁白则无可
+        # 读内容、音频阶段必然失败，因此只要求“至少一个场景有旁白”，而不是
+        # 每个场景都必须有。
+        if not any(scene.narration.strip() for scene in plan.scenes):
             st.error(tr("Plan Narration Required"))
         else:
             confirmed = _plan_mutate(current_id, lambda _plan: None, confirm=True)

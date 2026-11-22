@@ -624,7 +624,7 @@
     "Plan Confirmed": "계획이 확정되었습니다",
     "Plan Delete Draft": "초안 삭제",
     "Plan Draft Deleted": "초안이 삭제되었습니다",
-    "Plan Narration Required": "생성 전에 모든 장면에 내레이션이 필요합니다.",
+    "Plan Narration Required": "생성 전에 최소 한 장면에는 내레이션이 필요합니다(모든 장면에 필요한 것은 아닙니다).",
     "Plan Execute Requested": "확정된 계획이 생성 파이프라인에 제출되었습니다",
     "Plan Execute Invalid": "확정된 계획이 검증에 실패하여 제출되지 않았습니다.",
     "Plan Locked Scenes Kept": "잠긴 장면은 변경되지 않았습니다",

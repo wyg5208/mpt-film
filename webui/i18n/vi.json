@@ -624,7 +624,7 @@
     "Plan Confirmed": "Đã xác nhận kế hoạch",
     "Plan Delete Draft": "Xóa bản nháp",
     "Plan Draft Deleted": "Đã xóa bản nháp",
-    "Plan Narration Required": "Mỗi cảnh cần có lời thuyết minh trước khi tạo.",
+    "Plan Narration Required": "Cần có lời thuyết minh ở ít nhất một cảnh trước khi tạo (không phải mọi cảnh).",
     "Plan Execute Requested": "Kế hoạch đã xác nhận được gửi vào dây chuyền tạo",
     "Plan Execute Invalid": "Kế hoạch đã xác nhận không qua kiểm tra và chưa được gửi.",
     "Plan Locked Scenes Kept": "Các cảnh bị khóa được giữ nguyên",

@@ -624,7 +624,7 @@
     "Plan Confirmed": "Rencana terkonfirmasi",
     "Plan Delete Draft": "Hapus draf",
     "Plan Draft Deleted": "Draf dihapus",
-    "Plan Narration Required": "Setiap adegan memerlukan narasi sebelum menghasilkan.",
+    "Plan Narration Required": "Minimal satu adegan memerlukan narasi sebelum menghasilkan (tidak setiap adegan).",
     "Plan Execute Requested": "Rencana terkonfirmasi dikirim ke jalur produksi",
     "Plan Execute Invalid": "Rencana terkonfirmasi gagal validasi dan tidak dikirim.",
     "Plan Locked Scenes Kept": "Adegan terkunci dipertahankan tanpa perubahan",

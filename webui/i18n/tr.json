@@ -624,7 +624,7 @@
     "Plan Confirmed": "Plan onaylandı",
     "Plan Delete Draft": "Taslağı sil",
     "Plan Draft Deleted": "Taslak silindi",
-    "Plan Narration Required": "Üretmeden önce her sahnenin anlatıma ihtiyacı var.",
+    "Plan Narration Required": "Üretmeden önce en az bir sahnenin anlatıma ihtiyacı var (her sahne değil).",
     "Plan Execute Requested": "Onaylanan plan üretim hattına gönderildi",
     "Plan Execute Invalid": "Onaylanan plan doğrulamayı geçemedi ve gönderilmedi.",
     "Plan Locked Scenes Kept": "Kilitli sahneler değiştirilmeden korundu",

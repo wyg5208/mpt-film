@@ -624,7 +624,7 @@
     "Plan Confirmed": "Pla confirmat",
     "Plan Delete Draft": "Elimina l'esborrany",
     "Plan Draft Deleted": "Esborrany eliminat",
-    "Plan Narration Required": "Cada escena necessita narració abans de generar.",
+    "Plan Narration Required": "Almenys una escena necessita narració abans de generar (no totes).",
     "Plan Execute Requested": "Pla confirmat enviat a la canonada de generació",
     "Plan Execute Invalid": "El pla confirmat no ha superat la validació i no s'ha enviat.",
     "Plan Locked Scenes Kept": "Les escenes blocades s'han mantingut sense canvis",

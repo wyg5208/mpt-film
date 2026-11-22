@@ -965,7 +965,7 @@
     "Plan Confirmed": "Plan confirmed",
     "Plan Delete Draft": "Delete draft",
     "Plan Draft Deleted": "Draft deleted",
-    "Plan Narration Required": "Every scene needs narration before generating.",
+    "Plan Narration Required": "At least one scene needs narration before generating (not every shot requires it).",
     "Plan Execute Requested": "Confirmed plan submitted to the generation pipeline",
     "Plan Execute Invalid": "The confirmed plan failed validation and was not submitted.",
     "Plan Locked Scenes Kept": "Locked scenes were kept unchanged",

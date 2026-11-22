@@ -624,7 +624,7 @@
     "Plan Confirmed": "Plan bestätigt",
     "Plan Delete Draft": "Entwurf löschen",
     "Plan Draft Deleted": "Entwurf gelöscht",
-    "Plan Narration Required": "Jede Szene benötigt vor dem Generieren einen Erzähltext.",
+    "Plan Narration Required": "Mindestens eine Szene benötigt vor dem Generieren einen Erzähltext (nicht jede).",
     "Plan Execute Requested": "Bestätigter Plan an die Generierungspipeline übergeben",
     "Plan Execute Invalid": "Der bestätigte Plan hat die Validierung nicht bestanden und wurde nicht übergeben.",
     "Plan Locked Scenes Kept": "Gesperrte Szenen blieben unverändert",

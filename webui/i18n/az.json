@@ -624,7 +624,7 @@
     "Plan Confirmed": "Plan təsdiqləndi",
     "Plan Delete Draft": "Qaralamanı sil",
     "Plan Draft Deleted": "Qaralama silindi",
-    "Plan Narration Required": "Yaratmazdan əvvəl hər səhnənin səsləndirməyə ehtiyacı var.",
+    "Plan Narration Required": "Yaratmazdan əvvəl ən azı bir səhnənin səsləndirməyə ehtiyacı var (hər səhnənin deyil).",
     "Plan Execute Requested": "Təsdiqlənmiş plan yaratma xəttinə göndərildi",
     "Plan Execute Invalid": "Təsdiqlənmiş plan yoxlamadan keçmədi və göndərilmədi.",
     "Plan Locked Scenes Kept": "Kilidli səhnələr dəyişməz saxlanıldı",
