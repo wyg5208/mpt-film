@@ -1,6 +1,6 @@
 # pip 安装包与 PyPI 发布
 
-发行包名与项目名统一为 `changofilm` / ChangoFilm，当前待发布版本为 `1.10.0`。
+发行包名与项目名统一为 `changofilm` / ChangoFilm，当前待发布版本为 `1.11.1`。
 品牌升级前，`1.3.8` 曾于 2026-10-16 以旧包名 `mpt`、使用 `harry0703` 账号发布到
 [PyPI](https://pypi.org/project/mpt/1.3.8/)，同时提供 wheel 和 sdist。
 已发布文件不可覆盖，后续代码变更需要提升版本后重新构建和验证；新版本以
@@ -23,7 +23,7 @@ changofilm cli --help
 
 ```sh
 uv build --out-dir storage/package/changofilm-dist
-python -m pip install ./storage/package/changofilm-dist/changofilm-1.10.0-py3-none-any.whl
+python -m pip install ./storage/package/changofilm-dist/changofilm-1.11.1-py3-none-any.whl
 changofilm --help
 changofilm webui
 changofilm cli --help
@@ -36,8 +36,8 @@ changofilm cli --help
 
 ```sh
 uvx twine check --strict \
-  storage/package/changofilm-dist/changofilm-1.10.0-py3-none-any.whl \
-  storage/package/changofilm-dist/changofilm-1.10.0.tar.gz
+  storage/package/changofilm-dist/changofilm-1.11.1-py3-none-any.whl \
+  storage/package/changofilm-dist/changofilm-1.11.1.tar.gz
 ```
 
 检查 PyPI 说明页、发行包元数据和依赖可安装性，并在新虚拟环境中完成视频生成。

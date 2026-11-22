@@ -7,7 +7,7 @@
 Provide a <b>topic</b> or a <b>script</b>, and ChangoFilm produces the copy, visuals,
 voiceover, subtitles and music — then composes a finished episode on your own machine.
 
-[![Version](https://img.shields.io/badge/version-1.10.0-blue)](https://github.com/wyg5208/changofilm)
+[![Version](https://img.shields.io/badge/version-1.11.1-blue)](https://github.com/wyg5208/changofilm)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/wyg5208/changofilm)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

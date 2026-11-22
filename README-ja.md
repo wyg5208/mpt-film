@@ -7,7 +7,7 @@
 <b>テーマ</b>または<b>脚本</b>を提供するだけで、ChangoFilm が文案・映像・ナレーション・
 字幕・音楽を生成し、あなたのマシン上で完成したエピソードを合成します。
 
-[![Version](https://img.shields.io/badge/version-1.10.0-blue)](https://github.com/wyg5208/changofilm)
+[![Version](https://img.shields.io/badge/version-1.11.1-blue)](https://github.com/wyg5208/changofilm)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/wyg5208/changofilm)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
