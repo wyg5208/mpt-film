@@ -17,9 +17,15 @@ as an earlier WebUI, listens on at 127.0.0.1: Windows lets a plain bind to
 
 Run as administrator starts batch files in the System32 folder of Windows, and
 a cmd window in another folder starts webui.bat in that folder. The launcher
-took the folder it was started in for the project, so it stopped with "Neither
-project Python, uv, nor streamlit was found" although the project had its
-.venv, or ran uv in the wrong folder.
+took the folder it was started in for the project, so it stopped with "No
+project virtual environment found" although the project had its .venv in a
+different folder.
+
+The launcher must start the WebUI only from the project's own Python (the built-in
+virtual environment, or a project-local bundled runtime). It must never fall back
+to the machine's global "uv run" or a streamlit on PATH, which would run the app
+against packages the project did not pin; with no project interpreter it stops
+instead of reaching for the computer's environment.
 """
 
 import json
@@ -134,7 +140,10 @@ def test_webui_bat_starts_project_python_from_any_folder(tmp_path, folder_name):
     ]
 
 
-def test_webui_bat_falls_back_to_uv_from_folder_with_parentheses(tmp_path):
+def test_webui_bat_does_not_fall_back_to_uv_without_a_virtual_environment(tmp_path):
+    # With no project .venv, the machine's uv on PATH must not start the WebUI:
+    # that would run the app against packages the project did not pin. The launcher
+    # stops with the virtual-environment error and never invokes uv.
     project = _make_project(tmp_path, "ChangoFilm (1)")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -145,15 +154,9 @@ def test_webui_bat_falls_back_to_uv_from_folder_with_parentheses(tmp_path):
 
     result, port = _run_webui_bat(project, record, extra_path=[str(bin_dir)])
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert record.read_text(encoding="ascii").split()[:6] == [
-        "run",
-        "streamlit",
-        "run",
-        r".\webui\Main.py",
-        "--server.address=127.0.0.1",
-        f"--server.port={port}",
-    ]
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "No project virtual environment found" in result.stdout
+    assert not record.exists()  # uv.bat was never invoked
 
 
 @pytest.mark.parametrize(
@@ -184,12 +187,15 @@ def test_webui_bat_starts_project_python_when_started_in_system32(
     ]
 
 
-def test_webui_bat_runs_uv_in_project_folder_when_started_in_system32(tmp_path):
+def test_webui_bat_needs_a_virtual_environment_when_started_in_system32(tmp_path):
+    # Started in System32 with only the machine's uv on PATH and no project .venv:
+    # the launcher resolves the project folder from the script, finds no virtual
+    # environment, and stops there rather than run uv against the computer.
     system32 = Path(os.environ["SYSTEMROOT"], "System32")
     project = _make_project(tmp_path, "ChangoFilm (1)")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # Records the folder that uv runs in; cmd /u writes it as UTF-16, whatever the code page.
+    # Would record the folder uv runs in; must never be reached now that uv is not used.
     (bin_dir / "uv.bat").write_text(
         '@echo off\n>"%CHANGOFILM_TEST_LAUNCH_RECORD%" cmd /d /u /c cd\n', encoding="ascii"
     )
@@ -197,8 +203,9 @@ def test_webui_bat_runs_uv_in_project_folder_when_started_in_system32(tmp_path):
 
     result, _ = _run_webui_bat(project, record, extra_path=[str(bin_dir)], cwd=system32)
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert Path(record.read_text(encoding="utf-16-le").strip()) == project
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "No project virtual environment found" in result.stdout
+    assert not record.exists()  # uv.bat was never invoked
 
 
 @pytest.mark.parametrize(

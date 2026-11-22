@@ -14,26 +14,20 @@ if not defined CHANGOFILM_WEBUI_HOST set "CHANGOFILM_WEBUI_HOST=127.0.0.1"
 if not defined CHANGOFILM_WEBUI_PORT set "CHANGOFILM_WEBUI_PORT=8501"
 
 set "STREAMLIT_CMD="
+rem Start the WebUI only from the project's own Python, never the computer's global
+rem environment: the built-in virtual environment first, then a project-local bundled
+rem runtime. Do NOT fall back to "uv run" or a streamlit on PATH, which resolve against
+rem the machine and can run the app against packages this project did not pin. When
+rem neither project interpreter exists, stop and ask for the virtual environment.
 rem Quote only the python.exe path: quoting the whole assignment leaves the path itself unquoted, and a ")" or "&" in it breaks this block.
 if exist "%CURRENT_DIR%\.venv\Scripts\python.exe" (
     set STREAMLIT_CMD="%CURRENT_DIR%\.venv\Scripts\python.exe" -m streamlit
 ) else if exist "%CURRENT_DIR%\lib\python\python.exe" (
     set STREAMLIT_CMD="%CURRENT_DIR%\lib\python\python.exe" -m streamlit
-) else (
-    where uv >nul 2>nul
-    if not errorlevel 1 set "STREAMLIT_CMD=uv run streamlit"
 )
 
 if not defined STREAMLIT_CMD (
-    where streamlit >nul 2>nul
-    if not errorlevel 1 (
-        echo ***** Warning: using streamlit from PATH. If dependencies fail, run 'uv sync --frozen' first. *****
-        set "STREAMLIT_CMD=streamlit"
-    )
-)
-
-if not defined STREAMLIT_CMD (
-    echo ***** Neither project Python, uv, nor streamlit was found. Please install dependencies first. *****
+    echo ***** No project virtual environment found. Create it first with: uv sync --frozen *****
     pause
     exit /b 1
 )
