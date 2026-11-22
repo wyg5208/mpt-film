@@ -84,6 +84,7 @@ from app.services import sonilo as sonilo_service
 from app.services import state as sm
 from app.services import task as tm
 from app.services import publish_history
+from app.services import publish_zombies
 from app.services import version_checker
 from app.utils.logging_utils import (
     LOG_LEVELS,
@@ -1625,6 +1626,90 @@ def _render_task_table(filtered_tasks, key_prefix):
                             st.error(tr("Task Delete Failed"))
 
 
+def _format_zombie_age(seconds):
+    """僵尸进程存活时长：超过一天用 d/h，超过一小时用 h/m。"""
+    if seconds is None:
+        return "-"
+    seconds = int(seconds)
+    if seconds >= 86400:
+        return f"{seconds // 86400}d{(seconds % 86400) // 3600}h"
+    if seconds >= 3600:
+        return f"{seconds // 3600}h{(seconds % 3600) // 60}m"
+    return f"{seconds // 60}m{seconds % 60:02d}s"
+
+
+def _render_zombie_publishes():
+    """僵尸发布进程警示区：上一代 WebUI 遗留的孤儿 sau 进程树。
+
+    探测器只报“直接父进程已死”的 sau 发布进程（服务层缓存 20s，
+    不拖慢 2s fragment）；杀灭前服务层会重新核验命令行身份。
+    任务列表为空时也要渲染（重启后僵尸最常见的场景）。
+    """
+    try:
+        zombies = publish_zombies.detect_zombies()
+    except Exception:
+        # 探测失败不得影响任务面板本身。
+        return
+    if not zombies:
+        return
+    with st.expander(
+        f"⚠️ {tr('Zombie Publish Detected')} ({len(zombies)})", expanded=True
+    ):
+        st.caption(tr("Zombie Publish Hint"))
+        for zombie in zombies:
+            with st.container(border=True):
+                cols = st.columns([3, 1.6, 1.4], vertical_alignment="center")
+                platform_label = SOCIAL_PUBLISH_PLATFORM_LABELS.get(
+                    zombie["platform"], zombie["platform"]
+                )
+                subject = (
+                    zombie["title"]
+                    or os.path.basename(zombie["file"] or "")
+                    or f"PID {zombie['pid']}"
+                )
+                cols[0].markdown(f"**{_format_task_subject(subject)}**")
+                cols[0].caption(
+                    f"{platform_label} · PID {zombie['pid']} · {zombie['account']}"
+                )
+                cols[1].caption(
+                    f"{tr('Zombie Alive For')}: {_format_zombie_age(zombie['age_seconds'])}"
+                )
+                if cols[2].button(
+                    tr("Kill Zombie"),
+                    key=f"kill_zombie_{zombie['pid']}",
+                    use_container_width=True,
+                    icon=":material/delete_forever:",
+                ):
+                    result = publish_zombies.kill_zombie(zombie["pid"])
+                    if result["success"]:
+                        st.toast(tr("Zombie Killed"), icon="🧹")
+                        st.rerun()
+                    else:
+                        st.toast(
+                            f"{tr('Zombie Kill Failed')}: {result['detail'][:120]}",
+                            icon="⚠️",
+                        )
+        if st.button(
+            tr("Kill All Zombies"),
+            key="kill_all_zombies",
+            icon=":material/clear_all:",
+            type="primary",
+        ):
+            failures = []
+            for zombie in zombies:
+                result = publish_zombies.kill_zombie(zombie["pid"])
+                if not result["success"]:
+                    failures.append(f"PID {zombie['pid']}: {result['detail'][:80]}")
+            if failures:
+                st.toast(
+                    f"{tr('Zombie Kill Failed')}: {'; '.join(failures)[:200]}",
+                    icon="⚠️",
+                )
+            else:
+                st.toast(tr("Zombie Killed"), icon="🧹")
+            st.rerun()
+
+
 def _render_publish_queue(tasks):
     """发布队列面板：排队中/进行中的发布任务，随 fragment 每 2 秒刷新。
 
@@ -1763,6 +1848,8 @@ def _render_publish_history(entries):
 
 def _render_task_manager_panel(tasks=None, include_publish_history=True):
     tasks = tasks if tasks is not None else _collect_task_summaries()
+    # 僵尸警示区先于空列表早退：重启后任务列表为空但孤儿进程仍在。
+    _render_zombie_publishes()
     # 发布历史提升为一级页后，任务页不再重复拉取和渲染历史记录。
     history_entries = (
         publish_history.list_publish_history(limit=100)
@@ -12702,7 +12789,6 @@ def _render_nav_sidebar(active_page, collapsed):
             width="stretch",
             help=toggle_label if collapsed else None,
         )
-        brand_theme.render_nav_brand(collapsed)
         current_group = None
         for page, label_key, icon, group in NAV_PAGES:
             if group != current_group:
@@ -12722,9 +12808,6 @@ def _render_nav_sidebar(active_page, collapsed):
                 # 展开态文本可见无需悬浮提示；收起态纯图标时保留。
                 help=tr(label_key) if collapsed else None,
             )
-        if not collapsed:
-            # 常驻品牌主题控制区：改动经 on_change 同步会话主题并整页重渲染。
-            brand_theme.render_controls("cfnav", tr)
     _render_shell_shortcuts()
 
 
@@ -12798,11 +12881,12 @@ def _render_settings_page():
             tr("Interface Settings Tab"),
             tr("Key Backup Tab"),
             tr("Cache Management Tab"),
+            tr("Brand Theme Tab"),
         ],
         key="settings_page_tabs",
         on_change="rerun",
     )
-    general_tab, interface_tab, keys_tab, cache_tab = tabs
+    general_tab, interface_tab, keys_tab, cache_tab, brand_tab = tabs
     with general_tab:
         if general_tab.open:
             _render_general_settings(app_settings)
@@ -12814,6 +12898,10 @@ def _render_settings_page():
         _render_key_backup_settings(keys_tab)
     if cache_tab.open:
         _render_cache_management_settings(cache_tab)
+    # 品牌主题面板：与设置弹窗共享会话主题，改动即时生效；前缀不同无键冲突。
+    if brand_tab.open:
+        st.caption(tr("Theme Dialog Hint"))
+        brand_theme.render_controls("cfpage", tr)
 
 
 def _render_active_feature_page(active_page):

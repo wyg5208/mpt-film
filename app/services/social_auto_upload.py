@@ -72,6 +72,17 @@ def _bundled_cli_path() -> str:
 # 登录态体检会启动浏览器，禁止 UI 重复点击造成并发体检。
 _check_lock = threading.Lock()
 
+# 本进程正在运行的 sau 子进程 PID 注册表：僵尸探测器据此排除自家活任务
+# （父链核验之外的双保险，见 publish_zombies.py）。
+_live_pids_lock = threading.Lock()
+_live_pids: set[int] = set()
+
+
+def live_publish_pids() -> set[int]:
+    """当前 WebUI 进程仍在等待的 sau 子进程 PID 快照。"""
+    with _live_pids_lock:
+        return set(_live_pids)
+
 
 def is_sau_platform(platform: str) -> bool:
     return (platform or "").strip().lower() in _SAU_PLATFORMS
@@ -134,52 +145,58 @@ def _run_command(
         env=env,
         **popen_kwargs,
     )
-    timeout_error = f"sau command timed out after {timeout}s: {' '.join(args[:3])}"
-    if on_output is None:
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-            return proc.returncode, stdout or "", stderr or ""
-        except subprocess.TimeoutExpired:
-            _kill_process_tree(proc)
-            return -1, "", timeout_error
-
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
-
-    def _pump(stream, sink, callback) -> None:
-        try:
-            for line in stream:
-                sink.append(line)
-                if callback is not None:
-                    try:
-                        callback(line.rstrip("\r\n"))
-                    except Exception:
-                        # 日志回调失败不得影响发布本身。
-                        pass
-        except Exception:
-            pass
-        finally:
+    with _live_pids_lock:
+        _live_pids.add(proc.pid)
+    try:
+        timeout_error = f"sau command timed out after {timeout}s: {' '.join(args[:3])}"
+        if on_output is None:
             try:
-                stream.close()
+                stdout, stderr = proc.communicate(timeout=timeout)
+                return proc.returncode, stdout or "", stderr or ""
+            except subprocess.TimeoutExpired:
+                _kill_process_tree(proc)
+                return -1, "", timeout_error
+
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        def _pump(stream, sink, callback) -> None:
+            try:
+                for line in stream:
+                    sink.append(line)
+                    if callback is not None:
+                        try:
+                            callback(line.rstrip("\r\n"))
+                        except Exception:
+                            # 日志回调失败不得影响发布本身。
+                            pass
             except Exception:
                 pass
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
-    pumps = [
-        threading.Thread(target=_pump, args=(proc.stdout, stdout_chunks, on_output), daemon=True),
-        threading.Thread(target=_pump, args=(proc.stderr, stderr_chunks, on_output), daemon=True),
-    ]
-    for pump in pumps:
-        pump.start()
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill_process_tree(proc, drain=False)
+        pumps = [
+            threading.Thread(target=_pump, args=(proc.stdout, stdout_chunks, on_output), daemon=True),
+            threading.Thread(target=_pump, args=(proc.stderr, stderr_chunks, on_output), daemon=True),
+        ]
         for pump in pumps:
-            pump.join(timeout=5)
-        return -1, "".join(stdout_chunks), timeout_error
-    for pump in pumps:
-        pump.join(timeout=10)
-    return proc.returncode, "".join(stdout_chunks), "".join(stderr_chunks)
+            pump.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc, drain=False)
+            for pump in pumps:
+                pump.join(timeout=5)
+            return -1, "".join(stdout_chunks), timeout_error
+        for pump in pumps:
+            pump.join(timeout=10)
+        return proc.returncode, "".join(stdout_chunks), "".join(stderr_chunks)
+    finally:
+        with _live_pids_lock:
+            _live_pids.discard(proc.pid)
 
 
 class SocialAutoUploadService:
