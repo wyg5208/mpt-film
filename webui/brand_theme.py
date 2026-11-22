@@ -1,9 +1,9 @@
 """ChangoFilm 品牌主题：定稿商标「霓虹快门 Shutter C」的产品侧生效层。
 
 职责：
-- 向页面注入品牌 CSS 变量（强调色 / 背景场 / 光晕 / 圆角 / 动效 / 密度）与 brand.css；
-- 提供顶栏 h1 与左导航的品牌标识 SVG；
-- 提供常驻主题控制区（左导航展开态 + 设置对话框「品牌主题」TAB），
+- 向页面注入品牌 CSS 变量（明暗模式 / 强调色 / 背景场 / 光晕 / 圆角 / 动效 / 密度）与 brand.css；
+- 提供顶栏 h1 的品牌标识 SVG；
+- 提供主题控制区（设置对话框与设置页的「品牌主题」TAB），
   控件改动经 session_state["cf_theme"] 立即重渲染生效。
 
 几何常量与 docs/changofilm-logo/build-brand.mjs 保持同源。
@@ -17,6 +17,7 @@ _CSS_FILE = Path(__file__).with_name("brand.css")
 ICON_FILE = Path(__file__).with_name("brand") / "changofilm-mark-192.png"
 
 DEFAULTS = {
+    "mode": "dark",
     "accent": "magenta",
     "field": "deep",
     "glow": 45,
@@ -24,6 +25,37 @@ DEFAULTS = {
     "motion": True,
     "logo": True,
     "density": "cozy",
+}
+
+MODES = {"dark": "Theme Mode Dark", "light": "Theme Mode Light"}
+
+# 两套表面调色板：浅色保持品牌紫罗兰底味，等价替换暗色的五组表面变量；
+# 阴影变量同步给出暗色硬阴影与浅色软化版本，避免黑阴影压在浅底上。
+_DARK_PALETTE = {
+    "bg": "#0D0714",
+    "bg2": "#140B1F",
+    "surface": "#1B1029",
+    "surface2": "#241636",
+    "line": "#3A2452",
+    "line_soft": "#2A1A3C",
+    "ink": "#F7F2FA",
+    "muted": "#B49CC6",
+    "shadow_strong": "0 24px 64px rgba(0, 0, 0, 0.55)",
+    "shadow_bar": "0 8px 24px rgba(0, 0, 0, 0.45)",
+    "shadow_row": "0 4px 16px rgba(0, 0, 0, 0.4)",
+}
+_LIGHT_PALETTE = {
+    "bg": "#F4F1F8",
+    "bg2": "#FBF9FD",
+    "surface": "#FFFFFF",
+    "surface2": "#F7F4FB",
+    "line": "#DCD2EA",
+    "line_soft": "#E9E2F4",
+    "ink": "#1D1330",
+    "muted": "#6F5C88",
+    "shadow_strong": "0 24px 64px rgba(29, 19, 48, 0.22)",
+    "shadow_bar": "0 8px 24px rgba(29, 19, 48, 0.16)",
+    "shadow_row": "0 4px 16px rgba(29, 19, 48, 0.14)",
 }
 
 ACCENTS = {
@@ -53,10 +85,26 @@ def theme():
         t["field"] = DEFAULTS["field"]
     if t.get("density") not in DENSITIES:
         t["density"] = DEFAULTS["density"]
+    if t.get("mode") not in MODES:
+        t["mode"] = DEFAULTS["mode"]
     return t
 
 
-def _field_bg(field, a, b):
+def _field_bg(field, a, b, mode):
+    if mode == "light":
+        if field == "black":
+            return _LIGHT_PALETTE["bg2"]
+        if field == "aurora":
+            return (
+                f"radial-gradient(circle at 18% 12%, {a}26, transparent 55%), "
+                f"radial-gradient(circle at 85% 88%, {b}28, transparent 52%), "
+                f"radial-gradient(circle at 60% 40%, {a}12, transparent 60%), "
+                f"{_LIGHT_PALETTE['bg']}"
+            )
+        return (
+            f"radial-gradient(circle at 50% 0%, {b}1a, transparent 60%), "
+            f"{_LIGHT_PALETTE['bg']}"
+        )
     if field == "black":
         return "#000000"
     if field == "aurora":
@@ -74,15 +122,39 @@ def variables_css():
     play = "running" if t["motion"] else "paused"
     pad = "0.5rem" if t["density"] == "cozy" else "0.2rem"
     gap = "1rem" if t["density"] == "cozy" else "0.55rem"
+    light = t["mode"] == "light"
+    p = _LIGHT_PALETTE if light else _DARK_PALETTE
+    # 浅色下以强调深色替代浅粉：链接、悬停、选中文字在白底上保持可读。
+    pale = c["deep"] if light else c["pale"]
+    scheme = "light" if light else "dark"
+    mark_tri = c["deep"] if light else "#F5D0FE"
+    # 浅色需同时覆写 Streamlit 基础变量（--st-* 与旧无前缀名双写），
+    # 否则未走 --cf-* 的通用文字/输入面仍继承暗色主题的浅色字。
+    st_overrides = (
+        (
+            f"--st-text-color:{p['ink']};--st-background-color:{p['bg']};"
+            f"--st-secondary-background-color:{p['surface']};"
+            f"--text-color:{p['ink']};--background-color:{p['bg']};"
+            f"--secondary-background-color:{p['surface']};"
+        )
+        if light
+        else ""
+    )
     return (
         "<style>:root{"
-        f"--cf-accent:{c['a']};--cf-accent-2:{c['b']};--cf-accent-pale:{c['pale']};--cf-accent-deep:{c['deep']};"
-        "--cf-bg:#0D0714;--cf-bg2:#140B1F;--cf-surface:#1B1029;--cf-surface2:#241636;"
-        "--cf-line:#3A2452;--cf-line-soft:#2A1A3C;--cf-ink:#F7F2FA;--cf-muted:#B49CC6;"
-        f"--cf-link:{c['pale']};--cf-glow:{t['glow']};--cf-radius:{t['radius']}px;"
+        f"color-scheme:{scheme};"
+        f"--cf-accent:{c['a']};--cf-accent-2:{c['b']};--cf-accent-pale:{pale};--cf-accent-deep:{c['deep']};"
+        f"--cf-bg:{p['bg']};--cf-bg2:{p['bg2']};--cf-surface:{p['surface']};--cf-surface2:{p['surface2']};"
+        f"--cf-line:{p['line']};--cf-line-soft:{p['line_soft']};--cf-ink:{p['ink']};--cf-muted:{p['muted']};"
+        f"--cf-link:{pale};--cf-glow:{t['glow']};--cf-radius:{t['radius']}px;"
         f"--cf-play:{play};--cf-pad-top:{pad};--cf-gap:{gap};"
-        f"--cf-field-bg:{_field_bg(t['field'], c['a'], c['b'])};"
-        f"--st-primary-color:{c['a']};--st-link-color:{c['pale']};"
+        f"--cf-mark-tri:{mark_tri};"
+        f"--cf-shadow-strong:{p['shadow_strong']};"
+        f"--cf-shadow-bar:{p['shadow_bar']};"
+        f"--cf-shadow-row:{p['shadow_row']};"
+        f"--cf-field-bg:{_field_bg(t['field'], c['a'], c['b'], t['mode'])};"
+        f"--st-primary-color:{c['a']};--st-link-color:{pale};"
+        f"{st_overrides}"
         "}</style>"
     )
 
@@ -115,30 +187,7 @@ def mark_svg():
     )
 
 
-def lockup_svg():
-    global _uid
-    _uid += 1
-    gid = f"cfl{_uid}"
-    return (
-        f'<svg viewBox="0 0 340 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ChangoFilm">'
-        f'<defs><linearGradient id="{gid}t" gradientUnits="userSpaceOnUse" x1="228" y1="50" x2="334" y2="50">'
-        f'<stop offset="0" stop-color="#EC4899"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient></defs>'
-        f'<g transform="translate(4 4) scale(0.92)">{_mark_inner(gid)}</g>'
-        f'<text x="112" y="64" font-family="Inter,\'Segoe UI\',\'Microsoft YaHei\',sans-serif" font-size="37" '
-        f'font-weight="600" fill="#F7F2FA">Chango<tspan font-weight="800" fill="url(#{gid}t)">Film</tspan></text></svg>'
-    )
-
-
-def render_nav_brand(collapsed):
-    if not theme()["logo"]:
-        return
-    if collapsed:
-        st.markdown(f'<div class="cf-nav-mark">{mark_svg()}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div class="cf-nav-lockup">{lockup_svg()}</div>', unsafe_allow_html=True)
-
-
-_FIELDS = ("accent", "field", "glow", "radius", "motion", "logo", "density")
+_FIELDS = ("mode", "accent", "field", "glow", "radius", "motion", "logo", "density")
 
 
 def _sync(prefix):
@@ -154,14 +203,15 @@ def _reset():
     st.session_state["cf_theme"] = dict(DEFAULTS)
     # 不能 pop 控件键：前端控件状态会在下次 rerun 时把旧值写回，
     # 显式赋默认值才能让两处控制区与主题真正回到默认。
-    for prefix in ("cfnav", "cfset"):
+    # 设置页与设置弹窗两处控制区的前缀都要复位；旧 cfnav 前键随左导航撤场废弃。
+    for prefix in ("cfset", "cfpage"):
         for field in _FIELDS:
             st.session_state[f"{prefix}_{field}"] = DEFAULTS[field]
     st.rerun(scope="app")
 
 
 def render_controls(prefix, tr):
-    """常驻主题控制区：8 项工具，改动即生效（on_change 同步会话主题）。"""
+    """主题控制区：9 项工具（明暗模式等），改动即生效（on_change 同步会话主题）。"""
     t = theme()
     # 会话主题是唯一事实源：渲染前把控件键对齐到主题，
     # 避免前端旧控件状态回写造成控件与主题漂移。
@@ -172,9 +222,15 @@ def render_controls(prefix, tr):
     accent_labels = {key: tr(ACCENTS[key]["label"]) for key in ACCENTS}
     field_labels = {key: tr(FIELDS[key]) for key in FIELDS}
     density_labels = {key: tr(DENSITIES[key]) for key in DENSITIES}
+    mode_labels = {key: tr(MODES[key]) for key in MODES}
     st.markdown(
         f'<div class="cf-theme-title">{tr("Theme Panel Title")}</div>',
         unsafe_allow_html=True,
+    )
+    st.selectbox(
+        tr("Theme Mode"), list(MODES), index=list(MODES).index(t["mode"]),
+        format_func=mode_labels.__getitem__,
+        key=f"{prefix}_mode", on_change=_sync, args=(prefix,),
     )
     st.selectbox(
         tr("Theme Accent"), list(ACCENTS), index=list(ACCENTS).index(t["accent"]),

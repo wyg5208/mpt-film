@@ -1,11 +1,13 @@
 /* ==========================================================================
    ChangoFilm 品牌主题结构层 —— 定稿商标「霓虹快门 Shutter C」
    在 styles.css 之后注入；颜色变量由 brand_theme.variables_css() 提供：
+   --cf-mode 下的表面调色板（明暗两套）：
    --cf-accent / --cf-accent-2 / --cf-accent-pale / --cf-accent-deep
    --cf-bg / --cf-bg2 / --cf-surface / --cf-surface2 / --cf-line / --cf-line-soft
    --cf-ink / --cf-muted / --cf-glow / --cf-radius / --cf-play / --cf-pad-top
-   --cf-gap / --cf-field-bg，并覆写 --st-primary-color / --st-link-color，
-   让站内既有基于 Streamlit 主题变量的规则自动跟随品牌强调色。
+   --cf-gap / --cf-mark-tri / --cf-shadow-strong / --cf-shadow-bar / --cf-shadow-row
+   --cf-field-bg，并覆写 --st-primary-color / --st-link-color（浅色另覆写
+   文字与背景基础变量），让站内既有基于 Streamlit 主题变量的规则自动跟随品牌。
    ========================================================================== */
 
 /* ---------- 背景场与基础文本 ---------- */
@@ -34,6 +36,97 @@ a,
 :focus-visible {
     outline: 2px solid color-mix(in srgb, var(--cf-accent) 70%, transparent) !important;
     outline-offset: 2px;
+}
+
+/* ---------- Streamlit 硬编码底色/文字跟随明暗模式 ----------
+   Streamlit 的 emotion 样式直接使用 config.toml [theme] 的暗色解析值，
+   不经过 --st-* 变量（实跑探针证实：变量已覆写但 computed color 不变），
+   浅色模式单靠变量覆写无法翻转正文与控件底色。以下规则以品牌变量显式
+   锚定这些位置；暗色下各变量值与 config.toml 调色板完全一致，因此暗色
+   视觉零变化，浅色则整体翻转为可读的深字浅底。 */
+body {
+    color: var(--cf-ink) !important;
+    background-color: var(--cf-bg) !important;
+}
+
+[data-testid="stApp"] {
+    background-color: var(--cf-bg) !important;
+}
+
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"] {
+    color: var(--cf-ink);
+}
+
+/* 下拉触发器：1.66 已迁移到 react-aria（无 baseweb），暗面节点实测为
+   selectbox 内的 role=group 层，底色与文字锚到品牌变量。 */
+[data-testid="stSelectbox"] div[role="group"] {
+    background-color: var(--cf-surface) !important;
+    color: var(--cf-ink);
+}
+
+[data-testid="stSelectbox"] div[role="group"] input[role="combobox"] {
+    color: var(--cf-ink) !important;
+}
+
+[data-testid="stSelectbox"] div[role="group"] svg {
+    fill: var(--cf-ink);
+}
+
+/* 文本域：根元素底色锚表面变量（文字颜色随容器继承）。 */
+[data-testid="stTextAreaRootElement"] {
+    background-color: var(--cf-surface) !important;
+}
+
+/* 下拉菜单浮层（body 门户）：外壳背景与选项文字锚到品牌变量；
+   高亮项的强调色浅底不动，暗色现值与变量值一致。 */
+[data-testid="stSelectboxVirtualDropdown"] {
+    background-color: var(--cf-bg) !important;
+}
+
+[data-testid="stSelectboxVirtualDropdown"] [role="option"] {
+    color: var(--cf-ink) !important;
+}
+
+/* 按钮/页签/复选框文字：暗色现值与 ink 相同，浅色翻转为深字。 */
+button[data-testid="stBaseButton-secondary"],
+button[data-testid="stBaseButton-tertiary"] {
+    color: var(--cf-ink) !important;
+}
+
+/* Popover 触发钮（项目切换器等）：底色/描边为暗色常量，不随 mode 翻转，
+   显式锚到 bg2 与 20% ink（暗色描边现值即 20% ink）。 */
+[data-testid="stPopover"] button {
+    background-color: var(--cf-bg2) !important;
+    border-color: color-mix(in srgb, var(--cf-ink) 20%, transparent);
+    color: var(--cf-ink) !important;
+}
+
+div[data-testid="stTab"] p {
+    color: var(--cf-ink);
+}
+
+/* 控件标签有独立的 emotion 颜色规则（非继承），需显式锚定。 */
+[data-testid="stWidgetLabel"] p {
+    color: var(--cf-ink) !important;
+}
+
+[data-testid="stCheckbox"] {
+    color: var(--cf-ink);
+}
+
+/* 滑杆刻度条与上传区提示：暗色 60% ink 精确等于现值。 */
+div[data-testid="stSliderTickBar"] {
+    background-color: color-mix(in srgb, var(--cf-ink) 60%, transparent) !important;
+}
+
+[data-testid="stFileUploaderDropzone"] {
+    background-color: var(--cf-surface) !important;
+}
+
+[data-testid="stFileUploaderDropzoneInstructions"] {
+    color: color-mix(in srgb, var(--cf-ink) 60%, transparent);
 }
 
 /* ---------- 品牌滚动条：轨道深空、滑块强调渐变 ---------- */
@@ -248,7 +341,7 @@ div[data-testid="stRadio"] [aria-checked="true"] > div:first-child {
     background: var(--cf-bg2) !important;
     border: 1px solid var(--cf-line) !important;
     border-radius: calc(var(--cf-radius) + 4px) !important;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55),
+    box-shadow: var(--cf-shadow-strong),
         0 0 calc(var(--cf-glow) * 0.5px) color-mix(in srgb, var(--cf-accent) 25%, transparent);
 }
 
@@ -294,7 +387,7 @@ div[class*="st-key-action_bar"] {
     background: color-mix(in srgb, var(--cf-surface) 92%, transparent) !important;
     border-color: color-mix(in srgb, var(--cf-accent) 35%, var(--cf-line)) !important;
     border-radius: var(--cf-radius) !important;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45),
+    box-shadow: var(--cf-shadow-bar),
         0 0 calc(var(--cf-glow) * 0.3px) color-mix(in srgb, var(--cf-accent) 22%, transparent);
 }
 
@@ -304,7 +397,7 @@ div[class*="st-key-action_bar"] {
 
 [class*="st-key-preset_row_"]:hover {
     border-color: color-mix(in srgb, var(--cf-accent) 55%, transparent) !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4),
+    box-shadow: var(--cf-shadow-row),
         0 0 calc(var(--cf-glow) * 0.2px) color-mix(in srgb, var(--cf-accent) 25%, transparent);
 }
 
@@ -352,6 +445,11 @@ div[class*="st-key-mobile_tab_bar"] {
     color: transparent;
 }
 
+/* 播放三角跟随明暗模式（CSS 规则优先于 SVG 表现属性 fill）。 */
+.cf-mark path:last-of-type {
+    fill: var(--cf-mark-tri, #F5D0FE);
+}
+
 .changofilm-brand__version {
     color: var(--cf-muted) !important;
 }
@@ -383,38 +481,12 @@ div[class*="st-key-mobile_tab_bar"] {
 }
 
 .cf-mark,
-.cf-nav-lockup svg {
+.changofilm-brand__mark svg {
     animation: cfGlow 3.8s ease-in-out infinite;
     animation-play-state: var(--cf-play);
 }
 
-/* ---------- 左导航品牌区与常驻主题控制区 ---------- */
-.cf-nav-lockup {
-    border-bottom: 1px solid var(--cf-line-soft);
-    padding: 0.15rem 0.25rem 0.6rem;
-    margin-bottom: 0.4rem;
-    line-height: 0;
-}
-
-.cf-nav-lockup svg {
-    width: 100%;
-    height: auto;
-}
-
-.cf-nav-mark {
-    display: flex;
-    justify-content: center;
-    padding: 0.1rem 0 0.45rem;
-    border-bottom: 1px solid var(--cf-line-soft);
-    margin-bottom: 0.4rem;
-    line-height: 0;
-}
-
-.cf-nav-mark svg {
-    width: 30px;
-    height: 30px;
-}
-
+/* ---------- 常驻主题控制区标题（设置页 / 设置弹窗 TAB） ---------- */
 .cf-theme-title {
     margin-top: 0.75rem;
     padding-top: 0.75rem;
