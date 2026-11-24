@@ -68,3 +68,9 @@ temp-clip-*.mp4
 .tmp-ui-impl/
 .ui-demo-verify/
 
+# 迭代验证截图归档后的会话工件（fork changeset 备份、验证截图、测试日志），不纳入版本控制
+.tmp-ehist/
+.evidence/
+.verify/
+.pytest-*.log
+
