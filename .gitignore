@@ -56,6 +56,7 @@ htmlcov/
 temp-clip-*.mp4
 *.m4s
 /*-screenshot.png
+/check*.png
 
 # 本地临时目录（含 Cloudflare Cookie 等敏感记录），禁止提交
 /temp/
