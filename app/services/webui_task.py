@@ -3,7 +3,6 @@ import hashlib
 import json
 import threading
 import time
-from collections import deque
 from dataclasses import asdict
 
 from loguru import logger
@@ -14,6 +13,7 @@ from app.models import const
 from app.models.schema import VideoParams
 from app.services import state as sm
 from app.services import task as tm
+from app.services import task_logs
 from app.services import codex_image, jalapeno_video, volcengine_seedance
 from app.services.loomloom import LoomLoomConfirmedVideoRequest
 from app.utils.logging_utils import (
@@ -30,15 +30,16 @@ _task_manager = InMemoryTaskManager(
     max_concurrent_tasks=1,
     max_queued_tasks=max(1, int(config.app.get("max_queued_tasks", 100))),
 )
-_task_logs: dict[str, deque[str]] = {}
-_task_logs_lock = threading.RLock()
-_MAX_LOG_TASKS = 20
-_MAX_LOG_RECORDS_PER_TASK = 1000
 _submission_lock = threading.RLock()
 _active_submissions: dict[str, str] = {}
-# Streamlit 无法由后台线程直接推送组件更新，只能通过 Fragment 轮询。0.5 秒
-# 足以让 WebUI 日志接近终端实时输出，又不会像高频刷新那样持续占用浏览器资源。
-TASK_LOG_REFRESH_INTERVAL_SECONDS = 0.5
+# 日志缓冲已抽取到 task_logs 模块（迁移方案 1.2 / Phase 0）。这里保留同名引用，
+# 使既有 Streamlit 路径、video.py SSE 端点与测试对 webui_task 属性的访问继续解析
+# 到同一份进程级缓冲，实现对 Streamlit 路径零行为改变的委托。
+_task_logs = task_logs._task_logs
+_task_logs_lock = task_logs._task_logs_lock
+_MAX_LOG_TASKS = task_logs._MAX_LOG_TASKS
+_MAX_LOG_RECORDS_PER_TASK = task_logs._MAX_LOG_RECORDS_PER_TASK
+TASK_LOG_REFRESH_INTERVAL_SECONDS = task_logs.TASK_LOG_REFRESH_INTERVAL_SECONDS
 
 
 def is_generation_active(task_id: str) -> bool:
@@ -84,25 +85,55 @@ def _submission_signature(
     ).hexdigest()
 
 
-def _append_task_log(task_id: str, message: str) -> None:
-    """按任务保存有限数量的日志，供 Streamlit Fragment 安全轮询。"""
-    with _task_logs_lock:
-        records = _task_logs.get(task_id)
-        if records is None:
-            # 只保留最近任务的日志，避免 WebUI 服务长时间运行后持续占用内存。
-            # dict 保持插入顺序；任务日志仅用于界面诊断，淘汰最早记录不影响任务。
-            if len(_task_logs) >= _MAX_LOG_TASKS:
-                oldest_task_id = next(iter(_task_logs))
-                _task_logs.pop(oldest_task_id, None)
-            records = deque(maxlen=_MAX_LOG_RECORDS_PER_TASK)
-            _task_logs[task_id] = records
-        records.append(message.rstrip())
+# 委托到 task_logs 模块，保持既有函数名可被 Streamlit 路径与测试引用。
+_append_task_log = task_logs.append_task_log
+get_task_logs = task_logs.get_task_logs
 
 
-def get_task_logs(task_id: str) -> list[str]:
-    """返回日志快照，避免页面渲染期间持有后台线程使用的锁。"""
-    with _task_logs_lock:
-        return list(_task_logs.get(task_id, ()))
+def add_task_log_sink(task_id: str):
+    """为当前线程安装任务日志捕获 sink，返回 sink id 供 finally 移除。
+
+    Loguru 的 sink 是进程级资源，必须按启动任务的线程过滤（辅助线程通过
+    bind_log_scope 归属到工作线程），否则同时运行的任务日志会互相串流。
+    Streamlit 路径（_run_generation）与 API 任务路径（run_api_task）共用
+    本函数与同一份 task_logs 缓冲。
+    """
+    worker_thread_id = threading.get_ident()
+    return logger.add(
+        lambda message: _append_task_log(task_id, str(message)),
+        level=0,
+        format=format_log_record,
+        colorize=False,
+        filter=lambda record: (
+            log_scope_thread_id(record["thread"].id) == worker_thread_id
+            and runtime_log_filter(record)
+        ),
+    )
+
+
+def remove_task_log_sink(handler_id) -> None:
+    """移除任务日志 sink；未安装（None）或已失效（ValueError）时静默忽略。"""
+    if handler_id is None:
+        return
+    try:
+        logger.remove(handler_id)
+    except ValueError:
+        logger.debug(f"task log handler already removed: id={handler_id}")
+
+
+def run_api_task(task_id: str, params, stop_at: str = "video") -> dict:
+    """API 任务队列的线程入口：安装与 Streamlit 路径相同的日志捕获。
+
+    此前 API 侧直接把 tm.start 提交给 TaskManager，工作线程内没有安装任何
+    sink，task_logs 缓冲始终为空，导致 /tasks/{id}/events 与 /tasks/{id}/logs
+    无进度日志可推（React 实时日志栏恒为空）。本包装只负责日志捕获与清理，
+    不改变流水线语义；tm.start 内部仍会把流水线异常转换成失败终态。
+    """
+    log_handler_id = add_task_log_sink(task_id)
+    try:
+        return tm.start(task_id=task_id, params=params, stop_at=stop_at)
+    finally:
+        remove_task_log_sink(log_handler_id)
 
 
 def _run_generation(
@@ -127,19 +158,9 @@ def _run_generation(
     线程访问 Streamlit session_state，从根源上避免刷新时的 delta 路径错乱。
     """
     log_handler_id = None
-    worker_thread_id = threading.get_ident()
     try:
         if capture_logs:
-            log_handler_id = logger.add(
-                lambda message: _append_task_log(task_id, str(message)),
-                level=0,
-                format=format_log_record,
-                colorize=False,
-                filter=lambda record: (
-                    log_scope_thread_id(record["thread"].id) == worker_thread_id
-                    and runtime_log_filter(record)
-                ),
-            )
+            log_handler_id = add_task_log_sink(task_id)
 
         # 完整任务仍使用原来的配置锁，防止另一个 WebUI 会话在生成中途修改
         # Provider、密钥等进程级配置，造成同一条视频前后使用不同设置。
@@ -186,13 +207,7 @@ def _run_generation(
             for signature, active_id in list(_active_submissions.items()):
                 if active_id == task_id:
                     del _active_submissions[signature]
-        if log_handler_id is not None:
-            try:
-                logger.remove(log_handler_id)
-            except ValueError:
-                logger.debug(
-                    f"WebUI task log handler already removed: task_id={task_id}"
-                )
+        remove_task_log_sink(log_handler_id)
 
 
 def submit_generation(

@@ -14,9 +14,12 @@ from app.models import const
 from app.models.schema import AudioRequest, SubtitleRequest, VideoParams
 from app.services import state as sm
 from app.services import task as tm
+from app.services import webui_task
 
 FUNC_MAP = {
     "start": tm.start,
+    # API 任务路径的日志捕获包装（video.create_task 提交的就是它）。
+    "run_api_task": webui_task.run_api_task,
     # 'start_test': tm.start_test
 }
 
