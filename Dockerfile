@@ -1,3 +1,12 @@
+# Stage 1: build the React SPA (migration Phase 3.2, revised-1 multi-stage).
+# dist output is embedded into resource/public in the runtime image (Mode A).
+FROM node:20-slim AS webui-builder
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --registry=https://registry.npmmirror.com
+COPY frontend/ ./
+RUN npm run build
+
 # Use an official Python runtime as a parent image
 FROM python:3.11-slim-trixie
 
@@ -102,6 +111,9 @@ RUN export UV_HTTP_TIMEOUT=60 UV_HTTP_RETRIES=3; \
 
 # Now copy the rest of the codebase into the image
 COPY . .
+
+# Embed the SPA build output into the FastAPI static root (same as build:embedded).
+COPY --from=webui-builder /build/dist/ ./resource/public/
 
 # Expose the port the app runs on
 EXPOSE 8501

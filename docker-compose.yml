@@ -19,6 +19,6 @@ services:
     container_name: "changofilm-api"
     ports:
       - "127.0.0.1:8080:8080"
-    command: [ "python3", "main.py" ]
+    command: [ "python3", "main.py", "web" ]
     volumes: *common-volumes
     restart: always

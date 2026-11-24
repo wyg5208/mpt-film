@@ -2,6 +2,7 @@
 
 import math
 import os
+import pathlib
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -9,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -290,7 +291,10 @@ async def protect_generated_task_files(request: Request, call_next):
 
     ``/tasks`` 由 StaticFiles 独立挂载，无法复用 APIRouter 的依赖，
     因此在中间件中调用同一个 verify_token。鉴权函数会在未配置
-    api_key 时放行；OPTIONS 预检请求也保留给 CORS 中间件处理。
+    api_key 时放行；对 /tasks 白名单前缀，同一个汇聚点也会校验短时效
+    签名 URL（供 ``<video src>`` 无法携带自定义头的场景）；OPTIONS 预检
+    请求保留给 CORS 中间件处理。签名校验只决定放行与否，不重写
+    StaticFiles 的 Range/206 处理，视频拖动行为不变。
     """
 
     request_path = request.url.path
@@ -315,3 +319,32 @@ app.mount("/tasks", StaticFiles(directory=task_dir, html=True), name="")
 
 public_dir = utils.public_dir()
 app.mount("/", StaticFiles(directory=public_dir, html=True), name="")
+
+
+# SPA history fallback（迁移方案 Phase 0.5 / 3.1 Mode A 单源）：BrowserRouter 的客户端
+# 路由（如 /jobs、/login）在磁盘上没有对应静态文件，StaticFiles 会 404。这里对非
+# /api、非 /tasks 且无文件扩展名的 GET 请求，若命中 404 且内嵌产物 index.html 存在，
+# 则回退到 SPA 外壳，交给前端路由渲染。未构建内嵌产物时（index.html 不存在）行为
+# 不变，避免影响现有 Streamlit 安全网与纯 API 部署。
+_spa_index = pathlib.Path(public_dir) / "index.html"
+
+
+@app.middleware("http")
+async def spa_history_fallback(request: Request, call_next):
+    if request.method != "GET":
+        return await call_next(request)
+
+    path = request.url.path
+    last_segment = path.rsplit("/", 1)[-1]
+    is_app_route = (
+        not path.startswith("/api")
+        and not path.startswith("/tasks")
+        and "." not in last_segment
+    )
+    if not is_app_route or not _spa_index.is_file():
+        return await call_next(request)
+
+    response = await call_next(request)
+    if response.status_code == 404:
+        return FileResponse(_spa_index)
+    return response

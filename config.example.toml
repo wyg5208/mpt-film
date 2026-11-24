@@ -51,6 +51,16 @@ openai_chatgpt_timeout = ""
 # 应由 API 客户端携带请求头下载。
 api_key = ""
 
+# Optional secrets for the stateless short-lived Bearer tokens and signed media
+# URLs used by the React SPA. When left empty they are derived from api_key via
+# HMAC-SHA256, so rotating api_key invalidates old tokens/links automatically.
+# Provide explicit values only if you want token signing independent of api_key.
+# 可选：React SPA 短时令牌与签名媒体链接的签名密钥。留空时由 api_key 经
+# HMAC-SHA256 派生（轮换 api_key 即令旧令牌/链接自动失效）；仅在需要与 api_key
+# 解耦时才显式配置。切勿提交真实值。
+# session_secret = ""
+# media_signing_key = ""
+
 # -----------------------------------------------------------------------------
 # General / 通用设置
 # -----------------------------------------------------------------------------
