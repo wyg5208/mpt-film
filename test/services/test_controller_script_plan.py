@@ -37,7 +37,10 @@ class TestScriptPlanController(unittest.TestCase):
 
         update_task.assert_called_once()
         add_task.assert_called_once()
-        self.assertIs(add_task.call_args.args[0], video_controller.tm.start)
+        # 队列入口是带日志捕获的 webui_task.run_api_task 包装（而非裸 tm.start）。
+        self.assertIs(
+            add_task.call_args.args[0], video_controller.webui_task.run_api_task
+        )
         self.assertEqual(add_task.call_args.kwargs["stop_at"], "plan")
         self.assertIs(add_task.call_args.kwargs["params"], body)
 

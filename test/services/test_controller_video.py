@@ -260,7 +260,11 @@ class TestVideoControllerTasks(unittest.TestCase):
                 add_task.assert_called_once()
 
     def test_create_task_queues_requested_pipeline_stage(self):
-        """创建任务应持久化初始状态，并把原请求模型与停止阶段交给队列。"""
+        """创建任务应持久化初始状态，并把原请求模型与停止阶段交给队列。
+
+        队列入口是带日志捕获的 webui_task.run_api_task 包装（而非裸 tm.start）：
+        工作线程必须安装线程作用域 sink，SSE/REST 日志端点才能实时读到进度。
+        """
         body = MagicMock()
         body.model_dump.return_value = {"video_subject": "Coffee"}
 
@@ -278,7 +282,7 @@ class TestVideoControllerTasks(unittest.TestCase):
         self.assertEqual(response["data"]["request_id"], "request-123")
         update_task.assert_called_once_with("task-123")
         add_task.assert_called_once_with(
-            video_controller.tm.start,
+            video_controller.webui_task.run_api_task,
             task_id="task-123",
             params=body,
             stop_at="audio",

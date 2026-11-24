@@ -5,6 +5,10 @@ import shutil
 from typing import Union
 from urllib.parse import quote
 
+import asyncio
+import json
+import time
+
 from fastapi import BackgroundTasks, Depends, Path, Query, Request, UploadFile
 from fastapi.params import File
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -17,6 +21,7 @@ from app.controllers.manager.base_manager import TaskQueueFullError
 from app.controllers.manager.memory_manager import InMemoryTaskManager
 from app.controllers.manager.redis_manager import RedisTaskManager
 from app.controllers.v1.base import new_router
+from app.models import const
 from app.models.exception import HttpException
 from app.models.schema import (
     AudioRequest,
@@ -36,6 +41,8 @@ from app.services import bgm as bgm_service
 from app.services import material_upload as material_upload_service
 from app.services import state as sm
 from app.services import task as tm
+from app.services import task_logs
+from app.services import webui_task
 from app.utils import file_security, utils
 
 # 统一在 V1 视频路由入口执行鉴权。verify_token 会在 api_key 为空时
@@ -283,8 +290,9 @@ def create_task(
         }
         sm.state.update_task(task_id)
         try:
+            # 交给带日志捕获的包装入口，保证 SSE/REST 日志端点能实时读到进度。
             task_manager.add_task(
-                tm.start, task_id=task_id, params=body, stop_at=stop_at
+                webui_task.run_api_task, task_id=task_id, params=body, stop_at=stop_at
             )
         except Exception:
             # 状态记录在调度前创建，默认标记为 processing。如果调度器没能
@@ -327,6 +335,225 @@ def get_all_tasks(
     }
     return utils.get_response(200, response)
 
+
+
+_ARTIFACT_CATEGORIES = {
+    ".mp4": "video",
+    ".mov": "video",
+    ".webm": "video",
+    ".mp3": "audio",
+    ".wav": "audio",
+    ".m4a": "audio",
+    ".srt": "subtitle",
+    ".vtt": "subtitle",
+    ".ass": "subtitle",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
+    ".json": "data",
+    ".txt": "data",
+}
+
+
+def _artifact_category(name: str) -> str:
+    """按扩展名归类任务产物，供素材库分组展示。"""
+    return _ARTIFACT_CATEGORIES.get(os.path.splitext(name)[1].lower(), "other")
+
+
+@router.get(
+    "/tasks/{task_id}/files",
+    summary="List task artifacts (media library)",
+)
+def get_task_files(
+    request: Request, task_id: str = Path(..., description="Task ID")
+):
+    """列出任务目录内的全部产物，供 React 素材库页浏览与下载。
+
+    路径白名单与签名端点一致：产物 URL 一律返回相对 ``task_dir`` 的引用路径
+    （``{task_id}/{file}``），前端再经 ``POST /media/sign`` 换取短时效签名 URL。
+    目录即事实源：状态丢失（如重启后）的历史任务仍可浏览其落盘产物。
+    """
+
+    request_id = base.get_task_id(request)
+    task_dir = utils.task_dir()
+    try:
+        resolved_dir = file_security.resolve_path_within_directory(
+            task_dir, task_id, require_file=False
+        )
+    except ValueError as exc:
+        logger.warning(
+            f"reject unsafe task directory, request_id: {request_id}, "
+            f"task_id: {task_id}, error: {str(exc)}"
+        )
+        raise HttpException(
+            task_id=task_id,
+            status_code=403,
+            message=f"{request_id}: invalid task directory",
+        )
+    if not os.path.isdir(resolved_dir):
+        raise HttpException(
+            task_id=task_id, status_code=404, message=f"{request_id}: task not found"
+        )
+
+    files = []
+    for entry in os.scandir(resolved_dir):
+        if not entry.is_file():
+            continue
+        stat = entry.stat()
+        files.append(
+            {
+                "name": entry.name,
+                # 与 _task_file_to_uri 一致：URL 路径统一 percent-encoding。
+                "path": quote(f"{task_id}/{entry.name}"),
+                "size": stat.st_size,
+                "mtime": int(stat.st_mtime),
+                "category": _artifact_category(entry.name),
+            }
+        )
+    files.sort(key=lambda item: (-item["mtime"], item["name"]))
+    return utils.get_response(200, {"task_id": task_id, "files": files})
+
+
+def _dir_mtime(path: str) -> int:
+    try:
+        return int(os.stat(path).st_mtime)
+    except OSError:
+        return 0
+
+
+def _read_script_subject(task_dir: str, task_id: str) -> str:
+    """从落盘 script.json 读回主题；历史任务状态丢失时的展示回退。"""
+    path = os.path.join(task_dir, task_id, "script.json")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    params = data.get("params") if isinstance(data, dict) else None
+    if isinstance(params, dict):
+        return str(params.get("video_subject") or "")
+    return ""
+
+
+@router.get(
+    "/videos-library",
+    summary="List finished videos across task state and on-disk history",
+)
+def get_videos_library(request: Request, limit: int = Query(100, ge=1, le=500)):
+    """成片库数据源：状态内已完成任务 + 落盘历史合并。
+
+    内存/Redis 状态重启后会丢，但任务目录仍在；对齐 Streamlit 任务历史的
+    磁盘扫描语义——目录里存在 ``final-*.mp4`` 即视为成片，主题优先取状态
+    字段，历史目录回退读 ``script.json`` 的 ``params.video_subject``。视频
+    引用与任务列表同一套 ``/tasks/...`` URI，由前端换取签名 URL 播放。
+    """
+
+    request_id = base.get_task_id(request)
+    task_dir = utils.task_dir()
+    endpoint = config.app.get("endpoint", "").rstrip("/")
+    items: dict[str, dict] = {}
+
+    tasks, _total = sm.state.get_all_tasks(1, limit)
+    for task in tasks:
+        task_id = str(task.get("task_id") or "")
+        videos = task.get("videos") or []
+        if (
+            not task_id
+            or task.get("state") != const.TASK_STATE_COMPLETE
+            or not videos
+        ):
+            continue
+        items[task_id] = {
+            "task_id": task_id,
+            "subject": str(task.get("video_subject") or task_id[:8]),
+            "videos": [
+                _task_file_to_uri(video, endpoint, task_dir, request_id)
+                for video in videos
+                if isinstance(video, str)
+            ],
+            "source": "state",
+        }
+
+    # 磁盘扫描补充状态之外的历史目录（按目录 mtime 取最近的 limit 个）。
+    disk_dirs = []
+    try:
+        with os.scandir(task_dir) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    disk_dirs.append((entry.name, entry.stat().st_mtime))
+    except OSError:
+        disk_dirs = []
+    disk_dirs.sort(key=lambda pair: -pair[1])
+
+    for name, mtime in disk_dirs[:limit]:
+        if name in items:
+            continue
+        dir_path = os.path.join(task_dir, name)
+        try:
+            finals = sorted(
+                file_name
+                for file_name in os.listdir(dir_path)
+                if file_name.startswith("final-") and file_name.endswith(".mp4")
+            )
+        except OSError:
+            continue
+        if not finals:
+            continue
+        subject = _read_script_subject(task_dir, name) or name[:8]
+        items[name] = {
+            "task_id": name,
+            "subject": subject,
+            "videos": [
+                _task_file_to_uri(os.path.join(name, file_name), endpoint, task_dir, request_id)
+                for file_name in finals
+            ],
+            "source": "disk",
+        }
+
+    result = []
+    for item in items.values():
+        item["mtime"] = _dir_mtime(os.path.join(task_dir, item["task_id"]))
+        result.append(item)
+    result.sort(key=lambda item: (-item["mtime"], item["task_id"]))
+    return utils.get_response(200, {"items": result[:limit]})
+
+
+@router.get(
+    "/task-dirs",
+    summary="List task directories on disk (materials library selector)",
+)
+def get_task_dirs(request: Request, limit: int = Query(100, ge=1, le=500)):
+    """磁盘任务目录清单：素材库任务选择器的数据源。
+
+    任务状态重启后会丢，素材库需要能选中历史任务目录，因此独立于
+    ``GET /tasks``（仅状态内任务）扫描 ``task_dir`` 的一级子目录；主题
+    回退读 ``script.json`` 的 ``params.video_subject``。
+    """
+
+    request_id = base.get_task_id(request)
+    task_dir = utils.task_dir()
+    items = []
+    try:
+        with os.scandir(task_dir) as entries:
+            for entry in entries:
+                if not entry.is_dir():
+                    continue
+                items.append(
+                    {
+                        "task_id": entry.name,
+                        "subject": _read_script_subject(task_dir, entry.name)
+                        or entry.name[:8],
+                        "mtime": _dir_mtime(entry.path),
+                    }
+                )
+    except OSError as exc:
+        logger.warning(
+            f"scan task dirs failed, request_id: {request_id}, error: {str(exc)}"
+        )
+        items = []
+    items.sort(key=lambda item: (-item["mtime"], item["task_id"]))
+    return utils.get_response(200, {"items": items[:limit]})
 
 
 @router.get(
@@ -634,3 +861,113 @@ async def download_video(request: Request, file_path: str):
         # GET-only Range processing to this HEAD request.
         return Response(headers=response.headers)
     return response
+
+
+@router.get(
+    "/tasks/{task_id}/events",
+    summary="Stream generation logs and state for a task over Server-Sent Events",
+)
+async def stream_task_events(
+    request: Request, task_id: str = Path(..., description="Task ID")
+):
+    """以 SSE 推送任务日志与状态，取代 Streamlit Fragment 轮询（迁移方案 1.2）。
+
+    - ``event: log``：新增的日志行，附带单调 ``id`` 供 ``Last-Event-ID`` 续传；
+    - ``event: state``：状态/进度变化；
+    - ``event: end``：到达终态（完成/失败）后收尾，不再重发；
+    - 周期 ``: ping``：15s 心跳，对抗边缘/反向代理空闲断连。
+
+    复用抽取后的 task_logs 缓冲与任务状态，不改动流水线。鉴权由路由依赖统一拦。
+    """
+
+    request_id = base.get_task_id(request)
+    # 先确认任务可追溯，避免对不存在的 task_id 开一个永不结束的流。
+    task = sm.state.get_task(task_id)
+    if task is None and not task_logs.get_task_logs(task_id):
+        raise HttpException(
+            task_id=task_id, status_code=404, message=f"{request_id}: task not found"
+        )
+
+    last_event_id = request.headers.get("last-event-id")
+    start_index = int(last_event_id) + 1 if (last_event_id or "").isdigit() else 0
+    if start_index < 0:
+        start_index = 0
+
+    async def event_stream():
+        index = start_index
+        last_ping = time.monotonic()
+        last_state_signature = None
+        heartbeat = 15.0
+        while True:
+            logs = task_logs.get_task_logs(task_id)
+            while index < len(logs):
+                data = json.dumps({"line": logs[index]}, ensure_ascii=False)
+                yield f"id: {index}\nevent: log\ndata: {data}\n\n"
+                index += 1
+
+            task = sm.state.get_task(task_id)
+            if task is None:
+                # 任务在完成推送前被删除：发一个空状态收尾，避免永久挂起。
+                yield "event: end\ndata: " + json.dumps(
+                    {"state": None, "progress": 0}
+                ) + "\n\n"
+                return
+
+            state = task.get("state")
+            progress = task.get("progress", 0)
+            signature = f"{state}:{progress}"
+            if signature != last_state_signature:
+                data = json.dumps({"state": state, "progress": progress})
+                yield f"event: state\ndata: {data}\n\n"
+                last_state_signature = signature
+
+            if state in (const.TASK_STATE_COMPLETE, const.TASK_STATE_FAILED):
+                data = json.dumps({"state": state, "progress": progress})
+                yield f"event: end\ndata: {data}\n\n"
+                return
+
+            now = time.monotonic()
+            if now - last_ping >= heartbeat:
+                yield ": ping\n\n"
+                last_ping = now
+
+            await asyncio.sleep(task_logs.TASK_LOG_REFRESH_INTERVAL_SECONDS)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+
+@router.get(
+    "/tasks/{task_id}/logs",
+    summary="Poll task generation logs as a REST fallback for SSE reconnects",
+)
+async def get_task_logs(
+    request: Request,
+    task_id: str = Path(..., description="Task ID"),
+    after: int = Query(-1, description="仅返回序号大于 after 的日志行"),
+    tail: int | None = Query(
+        None, ge=0, description="最多返回最近的 tail 条（缺口补齐上限）"
+    ),
+):
+    """REST 日志兜底（迁移方案 1.2）：SSE 断线重连后用于补齐 ``?after=<seq>&tail=<n>`` 缺口。
+
+    返回 ``{items: [{seq, line}], latest_seq}``；``seq`` 与 SSE ``id:`` 同一单调序号，
+    便于客户端无缝续接。鉴权由路由依赖统一拦。
+    """
+
+    request_id = base.get_task_id(request)
+    task = sm.state.get_task(task_id)
+    if task is None and not task_logs.get_task_logs(task_id):
+        raise HttpException(
+            task_id=task_id, status_code=404, message=f"{request_id}: task not found"
+        )
+
+    indexed, latest_seq = task_logs.get_task_logs_after(task_id, after=after, tail=tail)
+    items = [{"seq": seq, "line": line} for seq, line in indexed]
+    return utils.get_response(
+        200, {"items": items, "latest_seq": latest_seq, "task_id": task_id}
+    )
