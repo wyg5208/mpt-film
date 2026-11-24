@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chango 文字合一字标 v2 · ChangoVideo × ChangoFilm</title>
+<style>
+  :root{
+    --bg:#0B0D12; --panel:#12151D; --panel2:#171B25; --line:#232936;
+    --ink:#E8ECF4; --sub:#9AA4B8; --dim:#6B7488;
+    --teal:#0D9488; --cyan:#22D3EE; --mag:#EC4899; --vio:#8B5CF6;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font-family:Inter,'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.6}
+  a{color:var(--cyan);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+  /* nav */
+  nav{position:sticky;top:0;z-index:50;background:rgba(11,13,18,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:18px;height:58px}
+  nav .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+  nav .brand svg{height:22px;width:auto;display:block}
+  nav .tag{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:2px 10px}
+  nav .links{margin-left:auto;display:flex;gap:18px;font-size:13px}
+  nav .links a{color:var(--sub)} nav .links a:hover{color:var(--ink)}
+  /* hero */
+  header{padding:52px 0 30px}
+  header h1{font-size:34px;font-weight:800;letter-spacing:-.5px}
+  header h1 .gv{background:linear-gradient(90deg,var(--teal),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+  header h1 .gf{background:linear-gradient(90deg,var(--mag),var(--vio));-webkit-background-clip:text;background-clip:text;color:transparent}
+  header p.lead{color:var(--sub);max-width:760px;margin-top:10px;font-size:15px}
+  .stage{margin-top:26px;border:1px solid var(--line);border-radius:var(--radius);background:#07080C;padding:56px 48px;display:flex;flex-direction:column;gap:44px;align-items:flex-start;transition:background .25s}
+  .stage.light{background:#F6F7F9}
+  .stage.dark{background:#12141A}
+  .stage .wm{width:420px;max-width:100%}
+  .stage .wm svg{width:100%;height:auto;display:block}
+  /* controls */
+  .controls{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;margin-top:16px;padding:14px 18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+  .controls label.ctl{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub)}
+  select,input[type=range]{accent-color:var(--cyan)}
+  select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:13px}
+  label.switch{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);cursor:pointer;user-select:none}
+  label.switch input{width:16px;height:16px;accent-color:var(--cyan);cursor:pointer}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--cyan)}
+  .sizeval{font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px;min-width:52px}
+  /* sections */
+  section{padding:44px 0 8px}
+  section h2{font-size:22px;font-weight:800;margin-bottom:6px}
+  section .desc{color:var(--sub);font-size:14px;max-width:820px;margin-bottom:22px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);overflow:hidden}
+  .card .head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);font-size:14px;font-weight:700}
+  .card .head .dot{width:9px;height:9px;border-radius:50%}
+  .card .body{padding:20px 18px}
+  .chip{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:1px 9px;margin-left:auto}
+  /* compare */
+  .cmp-row{display:flex;flex-direction:column;gap:14px}
+  .cmp-box{border:1px solid var(--line);border-radius:10px;padding:18px;background:#07080C}
+  .cmp-box.old{opacity:.85}
+  .cmp-box .cap{font-size:12px;color:var(--dim);margin-bottom:10px;display:flex;justify-content:space-between}
+  .cmp-box img,.cmp-box .inline{width:100%;height:auto;display:block}
+  .cmp-box img{max-height:88px;object-fit:contain;object-position:left center}
+  .stat{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .stat span{font-size:12px;color:var(--sub);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px 10px}
+  .stat b{color:var(--cyan)}
+  /* anatomy */
+  .anatomy-box{border:1px solid var(--line);border-radius:10px;background:#07080C;padding:26px 22px}
+  .anatomy-box svg{width:100%;height:auto;display:block}
+  ul.rules{list-style:none;margin-top:16px;display:flex;flex-direction:column;gap:9px}
+  ul.rules li{font-size:13px;color:var(--sub);padding-left:18px;position:relative}
+  ul.rules li::before{content:"";position:absolute;left:0;top:8px;width:7px;height:7px;border-radius:2px;background:linear-gradient(135deg,var(--teal),var(--cyan))}
+  ul.rules.f li::before{background:linear-gradient(135deg,var(--mag),var(--vio))}
+  ul.rules b{color:var(--ink)} code{font-family:Consolas,monospace;font-size:12px;color:var(--cyan);background:var(--panel2);border-radius:5px;padding:1px 6px}
+  /* sizes */
+  .ladder{display:flex;flex-direction:column;gap:16px}
+  .rung{display:flex;align-items:center;gap:18px}
+  .rung .h{font-size:12px;color:var(--dim);min-width:56px;font-variant-numeric:tabular-nums}
+  .rung svg{display:block}
+  /* assets */
+  .asset-row{display:grid;grid-template-columns:150px 1fr auto;gap:16px;align-items:center;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px;margin-bottom:10px}
+  .asset-row .prev{background:#07080C;border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;align-items:center;justify-content:center;min-height:52px}
+  .asset-row .prev.on-light{background:#F6F7F9}
+  .asset-row .prev img{max-width:100%;max-height:44px;display:block}
+  .asset-row .meta .t{font-size:13.5px;font-weight:700}
+  .asset-row .meta .s{font-size:12px;color:var(--dim);margin-top:2px}
+  .asset-row .dl{display:flex;gap:8px}
+  .asset-row .dl a{font-size:12px;border:1px solid var(--line);border-radius:8px;padding:4px 12px;color:var(--sub)}
+  .asset-row .dl a:hover{color:var(--cyan);border-color:var(--cyan)}
+  footer{margin-top:56px;border-top:1px solid var(--line);padding:26px 0 40px;color:var(--dim);font-size:12.5px}
+  @media (max-width:860px){
+    .grid2{grid-template-columns:1fr}
+    .stage{padding:34px 22px}
+    header h1{font-size:26px}
+    nav .links{display:none}
+    .asset-row{grid-template-columns:1fr;gap:10px}
+    .asset-row .dl{justify-content:flex-start}
+  }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <div class="brand"><span id="navMark"></span>文字合一字标 <span class="tag">v2 · 定稿</span></div>
+    <div class="links">
+      <a href="#compare">新旧对比</a><a href="#anatomy">结构解析</a><a href="#sizes">尺寸阶梯</a><a href="#assets">资产下载</a>
+    </div>
+  </div>
+</nav>
+
+<header class="wrap">
+  <h1>让 LOGO 成为那个 <span class="gv">C</span><span class="gf">。</span></h1>
+  <p class="lead">新版字标把 ChangoVideo 的「A1 胶片 C 环」与 ChangoFilm 的「霓虹快门 C」直接放到首字母 C 的位置，
+  后接 <b>hangoVideo / hangoFilm</b>——图标即字母，字母即图标。一枚字标同时完成品牌识别与名称书写，
+  不再需要「图标 + 全词」的两段式组合。两品牌共享同一套对齐语法，仅保留各自的渐变与字重语义。</p>
+
+  <div class="stage" id="heroStage">
+    <div class="wm" id="wmVideo"></div>
+    <div class="wm" id="wmFilm"></div>
+  </div>
+
+  <div class="controls">
+    <label class="ctl">背景
+      <select id="ctlBg">
+        <option value="deep" selected>深空</option>
+        <option value="dark">深灰</option>
+        <option value="light">浅底</option>
+      </select>
+    </label>
+    <label class="switch"><input type="checkbox" id="ctlMono">单色</label>
+    <label class="switch"><input type="checkbox" id="ctlGrid">结构网格</label>
+    <label class="ctl">宽度 <input type="range" id="ctlSize" min="220" max="560" value="420" step="10"><span class="sizeval" id="sizeVal">420px</span></label>
+    <button id="ctlReset">重置</button>
+  </div>
+</header>
+
+<section id="compare" class="wrap">
+  <h2>新旧对比 · 更精简</h2>
+  <p class="desc">旧版是「独立图标 + 完整单词」的两段式锁定组合；新版把图标收缩到字母尺度并吃掉首字母 C，
+  画布更窄、元素更少，小尺寸下不再出现「图标糊成团 + 文字读不清」的双重负担。</p>
+  <div class="grid2">
+    <div class="card">
+      <div class="head"><span class="dot" style="background:linear-gradient(135deg,#0D9488,#22D3EE)"></span>ChangoVideo<span class="chip">A1 胶片 C 环</span></div>
+      <div class="body cmp-row">
+        <div class="cmp-box old">
+          <div class="cap"><span>旧版 · 图标 + 全词</span><span>540×120</span></div>
+          <img src="../../opensources/changovideo/docs/logo-dark.svg" alt="ChangoVideo 旧版字标">
+        </div>
+        <div class="cmp-box">
+          <div class="cap"><span>新版 · 文字合一</span><span>376×100</span></div>
+          <div class="inline" id="cmpVideo"></div>
+        </div>
+        <div class="stat"><span>画布宽度 <b>540 → 376（−30%）</b></span><span>元素 <b>图标+11字母 → 10字母</b></span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="head"><span class="dot" style="background:linear-gradient(135deg,#EC4899,#8B5CF6)"></span>ChangoFilm<span class="chip">霓虹快门 C</span></div>
+      <div class="body cmp-row">
+        <div class="cmp-box old">
+          <div class="cap"><span>旧版 · 图标 + 全词</span><span>340×100</span></div>
+          <img src="../changofilm-logo/brand/changofilm-lockup-dark.svg" alt="ChangoFilm 旧版字标">
+        </div>
+        <div class="cmp-box">
+          <div class="cap"><span>新版 · 文字合一</span><span>346×100</span></div>
+          <div class="inline" id="cmpFilm"></div>
+        </div>
+        <div class="stat"><span>相对宽度（画布/字号）<b>9.2 → 6.2（−33%）</b></span><span>字号 <b>37 → 56（更大更清晰）</b></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="anatomy" class="wrap">
+  <h2>结构解析 · 共享对齐语法</h2>
+  <p class="desc">mark 不是「摆在文字旁边」，而是按字母排版规则进入文本行：视觉高度取 0.80F，
+  相对大写字高上下各做约 4% 的光学超出（圆形字母的经典 overshoot），垂直中心对齐字高中心，
+  右缘与 h 的竖笔保持约 5px 字距。两品牌唯一不同的是 mark 几何与渐变。</p>
+  <div class="grid2">
+    <div class="card">
+      <div class="head"><span class="dot" style="background:linear-gradient(135deg,#0D9488,#22D3EE)"></span>ChangoVideo 结构</div>
+      <div class="body">
+        <div class="anatomy-box" id="anaVideo"></div>
+        <ul class="rules">
+          <li><b>字号 / 基线</b>：F=56，baseline=70，cap=40.7（Inter 0.727F）</li>
+          <li><b>mark 高度</b>：44.8 = 0.80F，上越 cap 线 2.1、下越基线 2.0</li>
+          <li><b>定位</b>：左缘 x=8；缩放 0.5531（81 单位 → 44.8）</li>
+          <li><b>字距</b>：三角右尖 x≈47.8 → 文本起点 <code>x=53</code></li>
+          <li><b>文字语义</b>：整体 700、letter-spacing −1、单色墨（沿用旧版）</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card">
+      <div class="head"><span class="dot" style="background:linear-gradient(135deg,#EC4899,#8B5CF6)"></span>ChangoFilm 结构</div>
+      <div class="body">
+        <div class="anatomy-box" id="anaFilm"></div>
+        <ul class="rules f">
+          <li><b>字号 / 基线</b>：与 Video 完全一致（家族共享语法）</li>
+          <li><b>mark 高度</b>：44.8 = 0.80F，缩放 0.56（80 单位 → 44.8）</li>
+          <li><b>定位</b>：左缘 x=8；叶片右尖 x≈49.8 → 文本起点 <code>x=54</code></li>
+          <li><b>文字语义</b>：hango 600 + Film 800 渐变（浅底品红实色，沿用旧版）</li>
+          <li><b>开口朝向</b>：快门缺口与播放三角朝右，天然读作字母 C</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sizes" class="wrap">
+  <h2>尺寸阶梯 · 小至 16px 仍可读</h2>
+  <p class="desc">文字合一后不存在独立图标的小尺寸塌陷问题：16px 高度下 mark 与字母同步缩放，
+  C 的开口与播放三角依然可辨，整体按普通字标对待即可。</p>
+  <div class="grid2">
+    <div class="card"><div class="head">ChangoVideo</div><div class="body ladder" id="ladVideo"></div></div>
+    <div class="card"><div class="head">ChangoFilm</div><div class="body ladder" id="ladFilm"></div></div>
+  </div>
+</section>
+
+<section id="assets" class="wrap">
+  <h2>资产下载 · 16 件</h2>
+  <p class="desc">每品牌 4 个变体（浅底 / 深底 / 单色墨版 / 单色反白）× SVG 矢量 + 4× PNG 位图。
+  SVG 为无损母版，PNG 按 viewBox 4 倍宽度渲染（系统字体回退与浏览器一致）。</p>
+  <div id="assetList"></div>
+</section>
+
+<footer>
+  <div class="wrap">Chango 文字合一字标 v2 · 生成于 docs/chango-wordmark/ · 母版几何与 opensources/tools/chango-icon/mark.svg、docs/changofilm-logo/brand/changofilm-mark.svg 完全一致 · 重建：<code>node docs/chango-wordmark/build-wordmark.mjs</code></div>
+</footer>
+
+<script src="wordmark.js"></script>
+<script src="brand/manifest.js"></script>
+<script>
+(function(){
+  "use strict";
+  const WM = window.WORDMARK;
+  const $ = id => document.getElementById(id);
+  const state = { bg:"deep", mono:false, grid:false, size:420 };
+
+  function inkFor(brand){
+    const b = brand==="video"?WM.VIDEO:WM.FILM;
+    return state.bg==="light" ? b.inkLight : b.inkDark;
+  }
+  function render(){
+    const dark = state.bg!=="light";
+    const opts = { dark, mono: state.mono?inkFor("video"):null, grid: state.grid };
+    $("wmVideo").innerHTML = WM.wordmarkSvg("video", opts);
+    $("wmFilm").innerHTML  = WM.wordmarkSvg("film", { ...opts, mono: state.mono?inkFor("film"):null });
+    $("heroStage").className = "stage" + (state.bg==="light"?" light":state.bg==="dark"?" dark":"");
+    document.querySelectorAll(".stage .wm").forEach(el=>el.style.width = state.size+"px");
+    $("sizeVal").textContent = state.size+"px";
+  }
+  /* nav + compare + anatomy + ladder（静态渲染一次） */
+  $("navMark").innerHTML = WM.wordmarkSvg("video",{dark:true});
+  $("navMark").querySelector("svg").style.height = "22px";
+  $("navMark").querySelector("svg").style.width = "auto";
+  $("cmpVideo").innerHTML = WM.wordmarkSvg("video",{dark:true});
+  $("cmpFilm").innerHTML  = WM.wordmarkSvg("film",{dark:true});
+  $("anaVideo").innerHTML = WM.wordmarkSvg("video",{dark:true,grid:true});
+  $("anaFilm").innerHTML  = WM.wordmarkSvg("film",{dark:true,grid:true});
+  for (const [brand,host] of [["video","ladVideo"],["film","ladFilm"]]){
+    $(host).innerHTML = [16,24,32,48,64].map(h=>{
+      const svg = WM.wordmarkSvg(brand,{dark:true});
+      return `<div class="rung"><span class="h">${h}px</span><span style="height:${h}px;display:inline-block">${svg.replace("<svg ",`<svg style="height:${h}px;width:auto" `)}</span></div>`;
+    }).join("");
+  }
+  /* assets */
+  $("assetList").innerHTML = (window.WORDMARK_MANIFEST||[]).map(f=>{
+    const isSvg = f.fmt==="SVG";
+    const lightPrev = /light/.test(f.file) && !/mono-dark/.test(f.file);
+    const prev = isSvg ? `<img src="brand/${f.file}" alt="${f.label}" loading="lazy">`
+                       : `<img src="brand/${f.file}" alt="${f.label}" loading="lazy">`;
+    return `<div class="asset-row">
+      <div class="prev${lightPrev?" on-light":""}">${prev}</div>
+      <div class="meta"><div class="t">${f.label}</div><div class="s">${f.fmt} · ${f.dims} · ${(f.bytes/1024).toFixed(1)} KB · ${f.use}</div></div>
+      <div class="dl"><a href="brand/${f.file}" download>下载</a></div>
+    </div>`;
+  }).join("");
+  /* controls */
+  $("ctlBg").addEventListener("change", e=>{ state.bg=e.target.value; render(); });
+  $("ctlMono").addEventListener("change", e=>{ state.mono=e.target.checked; render(); });
+  $("ctlGrid").addEventListener("change", e=>{ state.grid=e.target.checked; render(); });
+  $("ctlSize").addEventListener("input", e=>{ state.size=+e.target.value; render(); });
+  $("ctlReset").addEventListener("click", ()=>{
+    Object.assign(state,{bg:"deep",mono:false,grid:false,size:420});
+    $("ctlBg").value="deep"; $("ctlMono").checked=false; $("ctlGrid").checked=false; $("ctlSize").value=420;
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
