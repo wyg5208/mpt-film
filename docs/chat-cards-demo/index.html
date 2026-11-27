@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChangoVideo · 聊天起始卡双列改版 DEMO</title>
+<style>
+/* ============ 主题 token：取自产品暗色体系，teal 主色 + 类目/技能色相 ============ */
+:root{
+  --tl-accent:#2dd4bf; --tl-accent-deep:#0d9488; --warn:#f5a524; --tl-voice:#a78bfa; --ok:#34d399; --err:#f87171;
+  --bg:#0c0f14; --bg-2:#10141b; --surface:#161b24; --surface-2:#1c2230; --bg-hover:#222a3a;
+  --border:#262e3f; --border-strong:#3a4560;
+  --text:#e8ecf4; --text-muted:#9aa5bb; --text-faint:#626e86;
+  --on-accent:#06251f; --panel:#0e1219;
+  --shadow-lg:0 12px 40px -12px rgba(0,0,0,.55);
+  --grad-brand:linear-gradient(135deg,#2dd4bf 0%,#38bdf8 55%,#a78bfa 110%);
+  --grad-amber:linear-gradient(135deg,#f5a524,#f87171);
+  --scroll-thumb:#2c3548; --scroll-thumb-hover:#3d4a66;
+  --hue-sat:70%; --hue-lit:62%;
+}
+[data-theme="light"]{
+  --tl-accent:#0d9488; --tl-accent-deep:#0f766e; --warn:#d97706; --tl-voice:#7c3aed; --ok:#059669; --err:#dc2626;
+  --bg:#f3f1ec; --bg-2:#eceae3; --surface:#fbfaf7; --surface-2:#f1efe8; --bg-hover:#e7e4da;
+  --border:#ddd8cc; --border-strong:#bdb6a4;
+  --text:#22283a; --text-muted:#5c6577; --text-faint:#8b93a5;
+  --on-accent:#ffffff; --panel:#f7f5f0;
+  --shadow-lg:0 12px 32px -14px rgba(60,50,20,.28);
+  --scroll-thumb:#cdc7b8; --scroll-thumb-hover:#b3ac99;
+  --hue-sat:62%; --hue-lit:44%;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;
+  overflow:hidden;
+}
+/* 环境层：漂移光斑 + 细网格，让页面有呼吸感 */
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(720px 420px at 12% -8%, color-mix(in srgb,var(--tl-accent) 9%,transparent), transparent 65%),
+    radial-gradient(640px 420px at 96% 108%, color-mix(in srgb,var(--tl-voice) 8%,transparent), transparent 65%),
+    radial-gradient(520px 320px at 78% -10%, color-mix(in srgb,var(--warn) 5%,transparent), transparent 60%);
+  animation:drift 26s ease-in-out infinite alternate;
+}
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(color-mix(in srgb,var(--border) 34%,transparent) 1px,transparent 1px),
+    linear-gradient(90deg,color-mix(in srgb,var(--border) 34%,transparent) 1px,transparent 1px);
+  background-size:44px 44px;
+  mask-image:radial-gradient(900px 600px at 50% 30%,#000 30%,transparent 80%);
+}
+@keyframes drift{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(-24px,18px,0) scale(1.05)}}
+::selection{background:color-mix(in srgb,var(--tl-accent) 32%,transparent)}
+/* 自定义滚动条 */
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover);background-clip:content-box}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea,select{font:inherit;color:inherit}
+svg.ic{width:1em;height:1em;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* ============ 骨架 ============ */
+.app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
+.topbar{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--panel) 86%,transparent);backdrop-filter:blur(10px);flex:none}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:-.01em}
+.brand .mark{width:27px;height:27px;border-radius:8px;background:var(--grad-brand);display:grid;place-items:center;color:#06251f;box-shadow:0 3px 14px -4px color-mix(in srgb,var(--tl-accent) 65%,transparent)}
+.brand .mark svg{width:16px;height:16px;stroke-width:2.1}
+.brand small{font-weight:400;color:var(--text-faint);font-size:11.5px;margin-left:2px}
+.topbar .spacer{flex:1}
+.tbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:9px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text-muted);font-size:12.5px;transition:.16s}
+.tbtn:hover{border-color:var(--border-strong);color:var(--text);background:var(--bg-hover)}
+.tbtn.on{border-color:color-mix(in srgb,var(--tl-accent) 55%,transparent);color:var(--tl-accent);background:color-mix(in srgb,var(--tl-accent) 10%,transparent)}
+.main{flex:1;display:flex;min-height:0}
+
+/* ============ 左侧控制区（常驻，≥7 工具） ============ */
+.rail{width:272px;flex:none;border-right:1px solid var(--border);background:color-mix(in srgb,var(--panel) 80%,transparent);
+  overflow-y:auto;padding:16px 15px 22px;display:flex;flex-direction:column;gap:15px}
+.rail h3{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.ctl{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:11px 12px}
+.ctl .lab{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:7px}
+.ctl .lab b{color:var(--text);font-weight:550;font-size:12.5px}
+.seg{display:flex;background:var(--bg-2);border:1px solid var(--border);border-radius:9px;padding:2px;gap:2px}
+.seg button{flex:1;padding:5px 4px;border-radius:7px;font-size:12px;color:var(--text-muted);transition:.15s;display:flex;align-items:center;justify-content:center;gap:5px}
+.seg button:hover{color:var(--text)}
+.seg button.on{background:var(--surface-2);color:var(--text);font-weight:550;box-shadow:0 1px 5px -2px rgba(0,0,0,.4)}
+.seg button.on .ic{color:var(--tl-accent)}
+input[type=range]{-webkit-appearance:none;width:100%;height:5px;border-radius:4px;background:var(--bg-hover);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--tl-accent);border:2px solid var(--panel);box-shadow:0 0 0 1px color-mix(in srgb,var(--tl-accent) 50%,transparent);cursor:pointer;transition:.15s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15)}
+.switch{position:relative;width:36px;height:20px;flex:none;cursor:pointer}
+.switch input{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0}
+.switch .track{position:absolute;inset:0;border-radius:20px;background:var(--bg-hover);border:1px solid var(--border);transition:.18s;pointer-events:none}
+.switch .knob{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--text-faint);transition:.18s;pointer-events:none}
+.switch input:checked ~ .track{background:color-mix(in srgb,var(--tl-accent) 26%,transparent);border-color:color-mix(in srgb,var(--tl-accent) 55%,transparent)}
+.switch input:checked ~ .knob{left:19px;background:var(--tl-accent)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+select{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12.5px;color:var(--text);outline:none}
+.abtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:7px 10px;border-radius:9px;font-size:12.5px;font-weight:550;transition:.16s;border:1px solid var(--border)}
+.abtn.ghost{background:var(--surface);color:var(--text-muted)}
+.abtn.ghost:hover{color:var(--text);border-color:var(--border-strong);background:var(--bg-hover)}
+.abtn.brand{background:var(--grad-brand);color:#06251f;border:none}
+.abtn.brand:hover{filter:brightness(1.08)}
+.legend{font-size:11.5px;color:var(--text-faint);display:flex;flex-direction:column;gap:6px}
+.legend .li{display:flex;align-items:center;gap:7px}
+.dot{width:9px;height:9px;border-radius:3px;flex:none}
+.rail .note{font-size:11.5px;color:var(--text-faint);line-height:1.6;border-left:2px solid color-mix(in srgb,var(--tl-accent) 45%,transparent);padding-left:9px}
+
+/* ============ 中央舞台 ============ */
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;padding:18px 20px 14px;overflow-y:auto}
+.stage-cap{display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-faint);margin-bottom:10px;flex:none}
+.stage-cap .pill{border:1px solid var(--border);border-radius:99px;padding:2px 10px;background:var(--surface)}
+.pane{width:var(--pane-w,560px);max-width:100%;flex:1;min-height:420px;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-lg);overflow:hidden;container-type:inline-size;transition:width .25s ease}
+.pane-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);background:var(--surface);flex:none;font-size:12px;color:var(--text-muted)}
+.pane-head .ic{color:var(--tl-accent)}
+.pane-head .grow{flex:1}
+.pane-head .tag{font-size:10.5px;border:1px solid var(--border);border-radius:6px;padding:1px 7px;color:var(--text-faint)}
+.chat-scroll{flex:1;min-height:0;overflow-y:auto;padding:14px 14px 8px}
+.chat-inner{max-width:640px;margin:0 auto}
+
+/* 一行头部 */
+.hero{display:flex;align-items:center;gap:10px}
+.hero .mark{width:26px;height:26px;border-radius:8px;background:var(--grad-brand);display:grid;place-items:center;color:#06251f;flex:none}
+.hero .mark svg{width:15px;height:15px;stroke-width:2.1}
+.hero h2{font-size:15px;font-weight:650;letter-spacing:-.02em;white-space:nowrap}
+.hero p{flex:1;min-width:0;font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 分区标题 */
+.sec{display:flex;align-items:center;gap:7px;margin:16px 0 4px;font-size:11px;font-weight:600;letter-spacing:.1em;color:var(--text-faint);text-transform:uppercase}
+.sec .ic{font-size:13px;color:var(--text-muted)}
+.sec .cnt{font-weight:400;letter-spacing:0;border:1px solid var(--border);border-radius:99px;padding:0 7px;font-size:10px}
+.sec .grow{flex:1}
+.sec .more{font-size:11px;color:var(--tl-accent);letter-spacing:0;text-transform:none;display:inline-flex;align-items:center;gap:3px}
+.sec .more:hover{text-decoration:underline}
+.styles-hint{font-size:11px;color:var(--text-faint);line-height:1.55;margin:2px 0 8px;display:flex;gap:6px;align-items:flex-start}
+.styles-hint .ic{font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--tl-accent) 70%,var(--text-faint))}
+
+/* 工作流双列网格 */
+.wf-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;list-style:none;margin-top:6px}
+.wf-grid>li{min-width:0}
+.wf-grid>li.open{grid-column:1/-1}
+.wf-card{display:flex;width:100%;align-items:flex-start;gap:9px;text-align:left;border:1px solid var(--border);background:var(--surface);
+  border-radius:12px;padding:9px 11px;transition:.16s;position:relative}
+.wf-card:hover{border-color:var(--border-strong);background:var(--bg-hover)}
+.wf-grid>li.open .wf-card{border-color:color-mix(in srgb,var(--wf-cat) 50%,transparent);background:var(--surface);box-shadow:0 0 0 1px color-mix(in srgb,var(--wf-cat) 22%,transparent)}
+.wf-ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none;font-size:15px;
+  background:color-mix(in srgb,var(--wf-cat) 13%,transparent);color:var(--wf-cat)}
+.wf-body{min-width:0;flex:1}
+.wf-titlerow{display:flex;align-items:center;gap:5px;min-width:0}
+.wf-title{font-size:13px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{font-size:9.5px;font-weight:550;border-radius:5px;padding:1px 5px;flex:none;line-height:1.5}
+.badge.cat{color:var(--wf-cat);background:color-mix(in srgb,var(--wf-cat) 10%,transparent)}
+.badge.engine{color:var(--text-muted);background:var(--bg-hover)}
+.wf-blurb{font-size:11.5px;color:var(--text-muted);line-height:1.45;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wf-chev{font-size:14px;color:var(--text-faint);transition:.2s;margin-top:2px}
+.wf-card:hover .wf-chev{color:var(--text)}
+li.open .wf-chev{transform:rotate(180deg)}
+/* 展开面板（跨两列，DOM 仍在同一 li 内 —— 与生产 CDP 护栏一致） */
+.wf-panel{margin-top:6px;border:1px solid var(--border);background:var(--surface);border-radius:12px;padding:11px 12px;animation:rise .22s ease-out both}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.steps{list-style:none;display:flex;flex-direction:column}
+.steps li{display:flex;gap:9px;padding-bottom:9px}
+.steps li:last-child{padding-bottom:0}
+.stepnum{display:flex;flex-direction:column;align-items:center;flex:none}
+.stepnum .n{width:19px;height:19px;border-radius:50%;border:1px solid color-mix(in srgb,var(--wf-cat) 45%,transparent);color:var(--wf-cat);font-size:10px;font-weight:600;display:grid;place-items:center}
+.stepnum .line{width:1px;flex:1;background:var(--border);margin-top:3px}
+.stepbody{min-width:0;flex:1;padding-top:1px}
+.stepname{display:flex;align-items:center;gap:6px;font-size:12.5px}
+.stepname .ic{font-size:13px;color:var(--text-muted)}
+.skillchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.skillchip{font-size:10.5px;color:var(--text-muted);background:var(--bg-hover);border-radius:5px;padding:1px 6px}
+.idea-input{width:100%;margin-top:9px;border:1px solid var(--border);background:var(--bg-2);border-radius:9px;padding:7px 10px;font-size:12.5px;outline:none;transition:.15s;color:var(--text)}
+.idea-input::placeholder{color:var(--text-faint)}
+.idea-input:focus{border-color:color-mix(in srgb,var(--wf-cat) 55%,transparent)}
+.panel-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:9px}
+.startbtn{display:inline-flex;align-items:center;gap:6px;background:var(--tl-accent);color:var(--on-accent);font-size:12.5px;font-weight:600;border-radius:9px;padding:6px 13px;transition:.15s}
+.startbtn:hover{filter:brightness(1.08)}
+.linkbtn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);padding:4px 6px;border-radius:7px;transition:.15s}
+.linkbtn:hover{color:var(--text);background:var(--bg-hover)}
+
+/* 风格/技能 chip 双列 */
+.sk-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
+.sk-grid.capped{max-height:320px;overflow-y:auto;padding-right:3px}
+.sk-chip{display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent;background:var(--bg-hover);
+  border-radius:10px;padding:7px 9px;transition:.15s;min-width:0}
+.sk-chip:hover{border-color:var(--border);background:var(--surface);transform:translateY(-1px)}
+.sk-chip:active{transform:translateY(0) scale(.985)}
+.sk-ic{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;flex:none;font-size:13px;
+  background:color-mix(in srgb,hsl(var(--sk-h) var(--hue-sat) var(--hue-lit)) 15%,transparent);color:hsl(var(--sk-h) var(--hue-sat) var(--hue-lit))}
+.sk-name{font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.badge.kind-style{color:var(--tl-voice);background:color-mix(in srgb,var(--tl-voice) 12%,transparent)}
+.badge.kind-workflow{color:var(--tl-accent);background:color-mix(in srgb,var(--tl-accent) 12%,transparent)}
+
+/* 日常用语 + 附件 */
+.everyday-btn{display:flex;width:100%;align-items:center;gap:6px;margin-top:14px;padding:5px 4px;font-size:12.5px;color:var(--text-muted);border-radius:8px;transition:.15s}
+.everyday-btn:hover{color:var(--text)}
+.everyday-btn .ic:last-child{transition:.2s;font-size:12px}
+.everyday-btn[aria-expanded="true"] .ic:last-child{transform:rotate(180deg)}
+.everyday-list{list-style:none;display:flex;flex-direction:column;gap:5px;margin-top:5px;animation:rise .2s ease-out both}
+.everyday-list button{display:flex;width:100%;text-align:left;gap:7px;align-items:flex-start;font-size:12.5px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:7px 10px;transition:.15s}
+.everyday-list button:hover{color:var(--text);border-color:var(--border-strong)}
+.attach-btn{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:5px 4px;font-size:12.5px;color:var(--text-muted);border-radius:8px;transition:.15s}
+.attach-btn:hover{color:var(--text)}
+
+/* 对话气泡（发送后） */
+.turns{display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
+.bubble{max-width:88%;border-radius:13px;padding:9px 12px;font-size:13px;line-height:1.6;animation:rise .22s ease-out both;white-space:pre-wrap;word-break:break-word}
+.bubble.user{align-self:flex-end;background:color-mix(in srgb,var(--tl-accent) 16%,var(--surface));border:1px solid color-mix(in srgb,var(--tl-accent) 30%,transparent)}
+.bubble.agent{align-self:flex-start;background:var(--surface);border:1px solid var(--border)}
+.bubble .who{font-size:10.5px;color:var(--text-faint);margin-bottom:3px;display:flex;align-items:center;gap:5px}
+.bubble .pill-inline{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:550;border-radius:6px;padding:1px 7px;margin:0 2px;
+  background:color-mix(in srgb,var(--tl-voice) 15%,transparent);color:var(--tl-voice);border:1px solid color-mix(in srgb,var(--tl-voice) 32%,transparent)}
+
+/* ============ composer ============ */
+.composer-wrap{flex:none;border-top:1px solid var(--border);background:var(--surface);padding:10px 12px 11px;position:relative}
+.composer{border:1px solid var(--border);background:var(--bg-2);border-radius:13px;padding:8px 10px;transition:.16s}
+.composer:focus-within{border-color:color-mix(in srgb,var(--tl-accent) 50%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--tl-accent) 10%,transparent)}
+.pillrow{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+.pillrow:empty{display:none}
+.cpill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:550;border-radius:7px;padding:2px 7px;
+  background:color-mix(in srgb,var(--tl-voice) 14%,transparent);color:var(--tl-voice);border:1px solid color-mix(in srgb,var(--tl-voice) 34%,transparent);animation:rise .18s ease-out both}
+.cpill button{display:grid;place-items:center;font-size:11px;opacity:.7}
+.cpill button:hover{opacity:1}
+.composer textarea{width:100%;border:none;background:transparent;outline:none;resize:none;font-size:13px;line-height:1.55;color:var(--text);max-height:120px;min-height:38px}
+.composer textarea::placeholder{color:var(--text-faint)}
+.composer-bar{display:flex;align-items:center;gap:7px;margin-top:6px}
+.composer-bar .hint{font-size:11px;color:var(--text-faint);display:flex;align-items:center;gap:5px}
+.composer-bar .grow{flex:1}
+.modelchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-muted);border:1px solid var(--border);border-radius:8px;padding:3px 8px}
+.sendbtn{width:30px;height:30px;border-radius:9px;background:var(--tl-accent);color:var(--on-accent);display:grid;place-items:center;font-size:15px;transition:.15s}
+.sendbtn:hover{filter:brightness(1.1)}
+.sendbtn:disabled{opacity:.4;cursor:default}
+.shake{animation:shake .3s}
+@keyframes shake{0%,100%{transform:none}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+/* @ 提及弹层 */
+.mention{position:absolute;left:12px;right:12px;bottom:calc(100% + 6px);background:var(--surface);border:1px solid var(--border-strong);
+  border-radius:12px;box-shadow:var(--shadow-lg);max-height:264px;overflow-y:auto;z-index:30;animation:rise .16s ease-out both}
+.mention .grouplab{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);padding:8px 12px 4px;position:sticky;top:0;background:var(--surface)}
+.mention .item{display:flex;width:100%;align-items:center;gap:9px;text-align:left;padding:7px 12px;transition:.12s}
+.mention .item:hover,.mention .item.sel{background:var(--bg-hover)}
+.mention .item .sk-ic{width:22px;height:22px;font-size:12px}
+.mention .item .t{font-size:12.5px;font-weight:500}
+.mention .item .d{font-size:11px;color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mention .item .txt{min-width:0;flex:1}
+.mention .empty{padding:12px;font-size:12px;color:var(--text-faint)}
+
+/* ============ 对比说明抽屉 ============ */
+.drawer-scrim{position:fixed;inset:0;background:rgba(4,6,10,.5);backdrop-filter:blur(2px);z-index:40;opacity:0;pointer-events:none;transition:.2s}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:430px;max-width:94vw;background:var(--panel);border-left:1px solid var(--border);
+  z-index:41;transform:translateX(102%);transition:transform .26s cubic-bezier(.3,.8,.3,1);display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.drawer.open{transform:none}
+.drawer-scrim.open{opacity:1;pointer-events:auto}
+.drawer-head{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid var(--border);flex:none}
+.drawer-head h3{font-size:14.5px;font-weight:650;flex:1}
+.drawer-body{overflow-y:auto;padding:16px}
+.cmp{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px}
+.cmp th,.cmp td{border:1px solid var(--border);padding:8px 9px;text-align:left;vertical-align:top;line-height:1.55}
+.cmp th{background:var(--surface);font-weight:600;font-size:11.5px;color:var(--text-muted)}
+.cmp td:first-child{color:var(--text-faint);white-space:nowrap;font-size:11.5px}
+.cmp .hl{color:var(--tl-accent);font-weight:550}
+.cmp .hl2{color:var(--tl-voice);font-weight:550}
+.drawer h4{font-size:12.5px;font-weight:650;margin:14px 0 6px;display:flex;align-items:center;gap:6px}
+.drawer p,.drawer li{font-size:12px;color:var(--text-muted);line-height:1.7}
+.drawer ul{padding-left:18px}
+.callout{border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);background:color-mix(in srgb,var(--warn) 8%,transparent);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.65;color:var(--text-muted);margin-top:12px}
+.callout b{color:var(--warn)}
+
+/* toast */
+.toasts{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:var(--surface-2);border:1px solid var(--border-strong);border-radius:11px;padding:8px 15px;font-size:12.5px;box-shadow:var(--shadow-lg);
+  display:flex;align-items:center;gap:8px;animation:toastin .25s ease-out both;max-width:88vw}
+.toast .ic{color:var(--tl-accent);font-size:14px}
+.toast.out{animation:toastout .25s ease-in both}
+@keyframes toastin{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes toastout{to{opacity:0;transform:translateY(8px)}}
+
+/* 窄容器降级（与生产 <360px 规则一致） */
+@container (max-width:420px){ .hero p{display:none} }
+@container (max-width:360px){ .wf-grid{grid-template-columns:1fr} .wf-grid>li.open{grid-column:auto} }
+@media (max-width:900px){
+  .rail{position:fixed;left:0;top:53px;bottom:0;z-index:35;transform:translateX(-104%);transition:transform .24s;box-shadow:var(--shadow-lg)}
+  .rail.open{transform:none}
+  .stage{padding:12px 10px}
+}
+.railtoggle{display:none}
+@media (max-width:900px){.railtoggle{display:inline-flex}}
+</style>
+</head>
+<body>
+<!-- 图标 sprite（lucide 风格线条图标） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M4 9h16M8 5v4M16 5v4"/><path d="M10.5 12.5l4 2.5-4 2.5z"/></symbol>
+<symbol id="i-clapper" viewBox="0 0 24 24"><path d="M4 8h16v11H4z"/><path d="M4 8l2-4h14l-2 4M8 4l-2 4M14 4l-2 4M20 4l-2 4"/></symbol>
+<symbol id="i-code" viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/></symbol>
+<symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 2c3 2 5 6 5 10l-3 3H10l-3-3c0-4 2-8 5-10z"/><circle cx="12" cy="9" r="1.6"/><path d="M7 15l-2 5 4-2M17 15l2 5-4-2"/></symbol>
+<symbol id="i-tag" viewBox="0 0 24 24"><path d="M20 12l-8 8-9-9V4h7z"/><circle cx="7.5" cy="7.5" r="1.3"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+<symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 10v4l14 5V5L3 10z"/><path d="M17 8a4 4 0 0 1 0 8M7 14v5h3v-4"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><path d="M8 8l12 10M8 16L20 6"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M10 8.5l4 2.5-4 2.5z"/></symbol>
+<symbol id="i-shapes" viewBox="0 0 24 24"><path d="M8 3l4 7H4z"/><circle cx="17" cy="7" r="3.4"/><rect x="4" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="i-pip" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+<symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+<symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+<symbol id="i-presentation" viewBox="0 0 24 24"><path d="M2 3h20M4 3v11h16V3M12 14v4M8 21l4-3 4 3"/><path d="M8 9l3-3 2 2 3-3"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 2l10 6-10 6L2 8z"/><path d="M2 14l10 6 10-6"/></symbol>
+<symbol id="i-clipboard-check" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4a2 2 0 0 1 6 0"/><path d="M9 13l2 2 4-4"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+<symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></symbol>
+<symbol id="i-messages" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 1 1 21 11.5z"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+<symbol id="i-video" viewBox="0 0 24 24"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 10l6-3v10l-6-3"/></symbol>
+<symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4a2 2 0 0 1 6 0M9 11h6M9 15h6"/></symbol>
+<symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></symbol>
+<symbol id="i-filetext" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+<symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+<symbol id="i-desktop" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></symbol>
+<symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+<symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a5 5 0 0 0 5-5A10 10 0 0 0 12 2z"/><circle cx="7.5" cy="11" r="1"/><circle cx="11" cy="7" r="1"/><circle cx="16" cy="8" r="1"/></symbol>
+<symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h6a3 3 0 0 1 3 3v6M6 9v6a3 3 0 0 0 3 3h6"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="i-dice" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></symbol>
+</defs></svg>
+
+<div class="app">
+  <header class="topbar">
+    <button class="tbtn railtoggle" id="railToggle" aria-label="控制区"><svg class="ic"><use href="#i-sliders"/></svg></button>
+    <div class="brand"><span class="mark"><svg class="ic"><use href="#i-logo"/></svg></span>ChangoVideo<small id="demoTag">聊天起始卡 · 双列改版 DEMO</small></div>
+    <div class="spacer"></div>
+    <button class="tbtn" id="cmpBtn"><svg class="ic"><use href="#i-book"/></svg><span data-i="cmpBtn">对比说明</span></button>
+    <button class="tbtn" id="langBtn"><svg class="ic"><use href="#i-globe"/></svg><span id="langLab">EN</span></button>
+    <button class="tbtn" id="themeBtn" aria-label="theme"><svg class="ic" id="themeIc"><use href="#i-sun"/></svg></button>
+  </header>
+
+  <div class="main">
+    <aside class="rail" id="rail">
+      <div>
+        <h3><svg class="ic"><use href="#i-sliders"/></svg><span data-i="ctlTitle">预览控制</span></h3>
+        <div class="ctl">
+          <div class="lab"><b data-i="form">形态</b><span id="formNote" style="font-size:11px" data-i="formNoteD">pill 插入</span></div>
+          <div class="seg" id="formSeg">
+            <button data-v="desktop" class="on"><svg class="ic"><use href="#i-desktop"/></svg><span data-i="desktop">桌面</span></button>
+            <button data-v="web"><svg class="ic"><use href="#i-globe"/></svg>Web</button>
+          </div>
+        </div>
+      </div>
+      <div class="ctl">
+        <div class="lab"><b data-i="adGate">广告 opt-in</b><span style="font-size:11px;color:var(--text-faint)" data-i="adGateNote">引擎卡门控</span></div>
+        <div class="row"><span style="font-size:12px;color:var(--text-muted)" data-i="adGateLab">显示「产品广告」引擎卡</span>
+          <label class="switch"><input type="checkbox" id="optIn"><span class="track"></span><span class="knob"></span></label></div>
+      </div>
+      <div class="ctl">
+        <div class="lab"><b data-i="paneW">面板宽度</b><span id="paneWVal" style="font-size:11px;color:var(--tl-accent)">560px</span></div>
+        <input type="range" id="paneW" min="320" max="720" step="8" value="560">
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-faint);margin-top:4px"><span>320 · <span data-i="narrow">窄窗</span></span><span>720</span></div>
+      </div>
+      <div class="ctl">
+        <div class="lab"><b data-i="hintT">消歧提示</b></div>
+        <div class="row"><span style="font-size:12px;color:var(--text-muted)" data-i="hintLab">技能区说明行</span>
+          <label class="switch"><input type="checkbox" id="hintOn" checked><span class="track"></span><span class="knob"></span></label></div>
+      </div>
+      <div class="ctl">
+        <div class="lab"><b data-i="capT">技能上限</b><span style="font-size:11px;color:var(--text-faint)" data-i="capNote">超出折叠</span></div>
+        <select id="capSel" style="width:100%"><option value="10">10</option><option value="12" selected>12</option><option value="99" data-i="capAll">全部</option></select>
+      </div>
+      <button class="abtn ghost" id="diceBtn"><svg class="ic"><use href="#i-dice"/></svg><span data-i="dice">随机想法</span></button>
+      <button class="abtn ghost" id="resetBtn"><svg class="ic"><use href="#i-reset"/></svg><span data-i="reset">重置演示</span></button>
+      <div class="ctl">
+        <div class="lab"><b data-i="legend">图例</b></div>
+        <div class="legend">
+          <div class="li"><span class="dot" style="background:var(--tl-accent)"></span><span data-i="lgTopic">主题 / 玩法技能</span></div>
+          <div class="li"><span class="dot" style="background:var(--warn)"></span><span data-i="lgCampaign">营销</span></div>
+          <div class="li"><span class="dot" style="background:var(--tl-voice)"></span><span data-i="lgRole">角色 / 风格技能</span></div>
+          <div class="li"><span class="dot" style="background:var(--ok)"></span><span data-i="lgEngine">引擎</span></div>
+        </div>
+      </div>
+      <p class="note" data-i="railNote">这是方案确认用 DEMO：数据与文案取自真实 catalog 与技能目录，交互模拟「只填充不发送」纪律。确认后再改生产代码。</p>
+    </aside>
+
+    <main class="stage">
+      <div class="stage-cap">
+        <span class="pill" id="capForm">桌面形态</span>
+        <span class="pill" id="capCount">5 工作流 · 11 技能</span>
+        <span data-i="stageHint">点击卡片展开管线；点击技能 chip 或输入 @ 试试</span>
+      </div>
+      <div class="pane" id="pane">
+        <div class="pane-head"><svg class="ic"><use href="#i-messages"/></svg><span data-i="paneTitle">创作对话</span><span class="grow"></span><span class="tag" id="paneTag">desktop</span></div>
+        <div class="chat-scroll" id="chatScroll">
+          <div class="chat-inner">
+            <div class="turns" id="turns"></div>
+            <div id="emptyState">
+              <div class="hero">
+                <span class="mark"><svg class="ic"><use href="#i-logo"/></svg></span>
+                <h2 data-i="heroTitle">选一个工作流，或直接说</h2>
+                <p id="heroHint" data-i="heroHint">每张卡片都是一条完整管线——步骤与技能齐备。启动后我会按步骤执行，无需填写任何内容。</p>
+              </div>
+              <div class="sec"><svg class="ic"><use href="#i-flow"/></svg><span data-i="wfSec">工作流</span><span class="cnt" id="wfCnt">5</span></div>
+              <ul class="wf-grid" id="wfGrid"></ul>
+              <div class="sec"><svg class="ic"><use href="#i-palette"/></svg><span data-i="skSec">风格与技能</span><span class="cnt" id="skCnt">11</span><span class="grow"></span><button class="more" id="skMore" hidden></button></div>
+              <p class="styles-hint" id="stylesHint"><svg class="ic"><use href="#i-info"/></svg><span data-i="stylesHint">技能随消息附上做法说明，点一下即填入；工作流是展开即启动的多步管线。</span></p>
+              <div class="sk-grid" id="skGrid"></div>
+              <button class="everyday-btn" id="everydayBtn" aria-expanded="false"><svg class="ic"><use href="#i-messages"/></svg><span data-i="everyday">只想说一句话？日常起始句</span><svg class="ic" style="margin-left:auto"><use href="#i-chev"/></svg></button>
+              <ul class="everyday-list" id="everydayList" hidden></ul>
+              <button class="attach-btn" id="attachBtn"><svg class="ic"><use href="#i-upload"/></svg><span data-i="attach">上传你的文件</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <div class="mention" id="mention" hidden></div>
+          <div class="composer" id="composerShell">
+            <div class="pillrow" id="pillRow"></div>
+            <textarea id="ta" rows="2" data-i-ph="taPh" placeholder="描述你的影片，或说说要改什么…"></textarea>
+            <div class="composer-bar">
+              <span class="hint"><svg class="ic"><use href="#i-at"/></svg><span data-i="atHint">输入 @ 引用技能</span></span>
+              <span class="grow"></span>
+              <span class="modelchip"><svg class="ic"><use href="#i-sparkles"/></svg>GLM-4.6</span>
+              <button class="sendbtn" id="sendBtn" aria-label="send"><svg class="ic"><use href="#i-send"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="drawer-scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head"><svg class="ic" style="color:var(--tl-accent)"><use href="#i-book"/></svg><h3 data-i="cmpTitle">工作流卡片 vs @技能</h3><button class="tbtn" id="drawerClose" aria-label="close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+<div class="toasts" id="toasts"></div>
+<script>
+/* ================= 数据：取自真实 workflow-catalog.mjs 与 skills 目录各 changovideo.json ================= */
+const HUES={copy:212,scissors:18,monitor:188,shapes:262,pip:328,pen:42,film:28,music:286,presentation:228,layers:6,'clipboard-check':152};
+const SKILLS=[
+{id:'replicate',kind:'workflow',order:1,icon:'copy',t:{zh:'视频复刻',en:'Replicate a video'},s:{zh:'给它一条视频，在 ChangoVideo 里重做一遍：可以逐帧一模一样，也可以换成你的内容。',en:'Give it a video and it is remade in ChangoVideo: frame for frame, or with your own content.'}},
+{id:'long-to-short',kind:'workflow',order:2,icon:'scissors',t:{zh:'长视频转短视频',en:'Long video to shorts'},s:{zh:'把讲座、播客、直播这类长视频，切成一条条能单独发的竖版短视频，开头就抓人。',en:'A talk, podcast or livestream cut into vertical clips that each stand alone and hook from the first second.'}},
+{id:'screen-demo',kind:'workflow',order:3,icon:'monitor',t:{zh:'录屏演示',en:'Screen demo'},s:{zh:'把录屏做成精致的产品演示或教程：镜头跟着操作走，等待的地方剪掉，每一步都看得清。',en:'A screen recording made into a polished demo: the camera follows the action, the waiting is gone, every step lands.'}},
+{id:'motion-graphics',kind:'workflow',order:4,icon:'shapes',t:{zh:'高级 MG 动画',en:'Premium motion graphics'},s:{zh:'讲解、宣传、片头这类 MG 动画，按顶级工作室的水准设计和制作，视觉体系为主题量身定做。',en:'An explainer, promo or intro designed and animated at studio level, with a visual system made for its subject.'}},
+{id:'presenter-pip',kind:'workflow',order:5,icon:'pip',t:{zh:'小窗人物口播',en:'Presenter in a window'},s:{zh:'你的口播录像：讲到什么，画面就满屏展示什么，人在小窗里一直在场。',en:'Your talking recording with the content filling the screen as you say it, and you speaking from a small window.'}},
+{id:'wrap-up',kind:'workflow',order:6,icon:'clipboard-check',t:{zh:'影片收尾总结',en:'Wrap up a film'},s:{zh:'把完成的影片按现状读一遍，给出结构化总结：镜头表、时长、素材来源、用到的服务，以及可发布的产物文件。',en:'A finished film read as it stands and said back as a structured summary: shots, duration, sources, services and the files ready to publish.'}},
+{id:'whiteboard',kind:'style',order:6,icon:'pen',t:{zh:'手绘白板风格',en:'Whiteboard explainer'},s:{zh:'边讲边画的白板讲解：配音讲到哪，画面就画到哪。文稿、课件、笔记都能做成讲解视频。',en:'A voice explains while the board is drawn, mark by mark, as it speaks. Turns a document, slides or notes into a lesson.'}},
+{id:'vintage-film',kind:'style',order:7,icon:'film',t:{zh:'复古胶片相册',en:'Vintage film'},s:{zh:'把照片和视频做成回忆短片，像从老胶卷或一盒旧照片里找出来的。',en:'Your photos and clips as a memory film, as if found on an old reel or in a box of prints.'}},
+{id:'lyric-video',kind:'style',order:8,icon:'music',t:{zh:'动态歌词 MV',en:'Lyric video'},s:{zh:'给一首歌和歌词，做出像官方 MV 一样的歌词视频：为这首歌量身定做，每个字都落在歌声上。',en:'Give it a song and its lyrics: a lyric video made for this one song, every word landing on the voice.'}},
+{id:'keynote',kind:'style',order:9,icon:'presentation',t:{zh:'发布会风格',en:'Keynote'},s:{zh:'像科技大厂发布会那样介绍产品：真实的产品上台，一次只讲一件事。',en:'A launch film like a big tech keynote: your real product on stage, one claim at a time.'}},
+{id:'collage',kind:'style',order:10,icon:'layers',t:{zh:'剪贴风 MG',en:'Cut-paper collage'},s:{zh:'用照片、纸张和印刷品剪下来、亲手拼成的 MG 动画。',en:'Motion graphics made of photos, paper and print, cut out and put together by hand.'}}
+].sort((a,b)=>a.order-b.order||a.id.localeCompare(b.id));
+const CATC={topic:'var(--tl-accent)',campaign:'var(--warn)',role:'var(--tl-voice)',engine:'var(--ok)'};
+const STEPIC={brief:'i-clipboard',page:'i-layout',image:'i-image',video:'i-video',tts:'i-mic',music:'i-music',assemble:'i-clapper',copy:'i-filetext'};
+const CARDS=[
+{id:'idea-motion',cat:'topic',icon:'i-clapper',t:{zh:'想法变影片',en:'Idea to motion film'},b:{zh:'分镜、配图、短片与配乐——你的想法变成一部影片。',en:'A storyboard, pictures, clips and a score — your idea becomes a film.'},
+ steps:[{k:'brief',ic:'brief',sk:[['导演','Director']]},{k:'storyboard',ic:'page',sk:[['分镜板','Shot board']]},{k:'images',ic:'image',sk:[]},{k:'clips',ic:'video',sk:[]},{k:'sound',ic:'music',sk:[]},{k:'assemble',ic:'assemble',sk:[['制作执行','Production']]}],
+ guides:[['导演','Director'],['分镜板','Shot board'],['制作执行','Production']]},
+{id:'code-motion',cat:'topic',icon:'i-code',t:{zh:'代码动画宣传',en:'Code animation promo'},b:{zh:'极光或霓虹字体的动画网页，关键静帧与宣传短片。',en:'An animated HTML page in aurora or neon type, its stills and a promo clip.'},
+ steps:[{k:'brief',ic:'brief',sk:[]},{k:'code-page',ic:'page',sk:[['极光渐变','Aurora gradient'],['霓虹描边字','Neon outline type']]},{k:'keyframes',ic:'image',sk:[]},{k:'clips',ic:'video',sk:[]},{k:'assemble',ic:'assemble',sk:[['制作执行','Production']]}],
+ guides:[['极光渐变','Aurora gradient'],['霓虹描边字','Neon outline type'],['制作执行','Production']]},
+{id:'launch-kit',cat:'topic',icon:'i-rocket',t:{zh:'落地页发布套件',en:'Landing page launch kit'},b:{zh:'产品官网风格的落地页、宣传片与发布文案。',en:"A landing page in the product's own look, a promo film and launch copy."},
+ steps:[{k:'brief',ic:'brief',sk:[]},{k:'landing-page',ic:'page',sk:[['官网发布','Website launch'],['设计','Design']]},{k:'page-stills',ic:'image',sk:[]},{k:'promo-clip',ic:'video',sk:[]},{k:'assemble',ic:'assemble',sk:[['制作执行','Production']]},{k:'social-copy',ic:'copy',sk:[['设计','Design']]}],
+ guides:[['官网发布','Website launch'],['设计','Design'],['制作执行','Production']]},
+{id:'sale-kit',cat:'campaign',icon:'i-tag',t:{zh:'促销套件',en:'Sale promo kit'},b:{zh:'产品图、详情页、30 秒促销片与促销文案——只用真实价格。',en:'Product pictures, a detail page, a 30s promo and the sale copy — real prices only.'},
+ steps:[{k:'brief',ic:'brief',sk:[]},{k:'product-images',ic:'image',sk:[['平铺产品','Flat lay']]},{k:'detail-page',ic:'page',sk:[['促销','Sale promo']]},{k:'promo-clip',ic:'video',sk:[['倒计时','Countdown']]},{k:'social-copy',ic:'copy',sk:[['促销','Sale promo']]}],
+ guides:[['促销','Sale promo'],['倒计时','Countdown'],['平铺产品','Flat lay']]},
+{id:'creator-episode',cat:'role',icon:'i-mic',t:{zh:'虚拟创作者节目',en:'Virtual creator episode'},b:{zh:'人设图、bio 页、旁白与一期口播节目。',en:'A persona, a bio page, a voiceover and a talking-head episode.'},
+ steps:[{k:'brief',ic:'brief',sk:[['人设故事','Presenter story']]},{k:'persona-image',ic:'image',sk:[]},{k:'bio-page',ic:'page',sk:[]},{k:'voiceover',ic:'tts',sk:[]},{k:'talking-clip',ic:'video',sk:[['口播复刻','Talking head'],['字幕样式','Caption styling']]},{k:'assemble',ic:'assemble',sk:[]}],
+ guides:[['口播复刻','Talking head'],['人设故事','Presenter story'],['字幕样式','Caption styling']]},
+{id:'product-ad',cat:'engine',icon:'i-megaphone',engine:true,t:{zh:'产品广告',en:'Product ad'},b:{zh:'引擎流：简报、每节拍一张图、短片与影片。',en:'The engine flow: a brief, a picture per beat, clips and a film.'},
+ steps:[{k:'brief',ic:'brief',sk:[['广告复刻','Ad recreate']]},{k:'product-images',ic:'image',sk:[]},{k:'product-clips',ic:'video',sk:[]},{k:'assemble',ic:'assemble',sk:[]}],
+ guides:[['广告复刻','Ad recreate']]}
+];
+const STEPNAME={brief:['简报','Brief'],storyboard:['分镜网页','Storyboard page'],images:['配图','Pictures'],clips:['短片','Clips'],sound:['配乐与旁白','Score & voice'],assemble:['合成导出','Assemble & export'],'code-page':['代码动画网页','Code-animated page'],keyframes:['关键静帧','Key stills'],'landing-page':['落地页','Landing page'],'page-stills':['页面图','Page stills'],'promo-clip':['宣传短片','Promo clip'],'social-copy':['社交文案（markdown）','Social copy (markdown)'],'product-images':['产品图','Product pictures'],'detail-page':['详情页','Detail page'],'persona-image':['人设图','Persona picture'],'bio-page':['bio 页','Bio page'],voiceover:['旁白','Voiceover'],'talking-clip':['口播短片','Talking clip'],'product-clips':['产品短片','Product clips']};
+const EVERYDAY=[['做一支 30 秒的产品宣传片，突出最强卖点','A 30-second product promo leading with its strongest selling point'],['把这段口播切成能单独发的竖版短视频','Cut this talking recording into vertical shorts that stand alone'],['用复古胶片风格把旅行照片做成回忆短片','Turn my travel photos into a memory film in vintage style'],['给我的播客做一支动态歌词 MV','Make a lyric video for my podcast episode'],['做一个落地页发布套件：页面、宣传片与文案','A landing page launch kit: page, promo film and copy'],['复刻这条参考视频，换成我的品牌与产品','Replicate this reference video with my brand and product']];
+const IDEAS=[['一座灯塔守望者给大海写信','A lighthouse keeper writing letters to the sea'],['一支关于城市黎光的 30 秒短片','A 30-second film about a city at dawn'],['给手工皂品牌做一支发布会风格宣传片','A keynote-style launch film for a handmade soap brand'],['把一期播客切成三条竖版短视频','Cut one podcast episode into three vertical shorts'],['用剪贴风做一支咖啡店开业动画','A cut-paper collage animation for a coffee shop opening']];
+/* ================= i18n ================= */
+const I={
+zh:{demoTag:'聊天起始卡 · 双列改版 DEMO',cmpBtn:'对比说明',ctlTitle:'预览控制',form:'形态',formNoteD:'pill 插入',formNoteW:'文本填充',desktop:'桌面',adGate:'广告 opt-in',adGateNote:'引擎卡门控',adGateLab:'显示「产品广告」引擎卡',paneW:'面板宽度',narrow:'窄窗',hintT:'消歧提示',hintLab:'技能区说明行',capT:'技能上限',capNote:'超出折叠',capAll:'全部',dice:'随机想法',reset:'重置演示',legend:'图例',lgTopic:'主题 / 玩法技能',lgCampaign:'营销',lgRole:'角色 / 风格技能',lgEngine:'引擎',railNote:'这是方案确认用 DEMO：数据与文案取自真实 catalog 与技能目录，交互模拟「只填充不发送」纪律。确认后再改生产代码。',stageHint:'点击卡片展开管线；点击技能 chip 或输入 @ 试试',paneTitle:'创作对话',heroTitle:'选一个工作流，或直接说',heroHint:'每张卡片都是一条完整管线——步骤与技能齐备。启动后我会按步骤执行，无需填写任何内容。',wfSec:'工作流',skSec:'风格与技能',stylesHint:'技能随消息附上做法说明，点一下即填入；工作流是展开即启动的多步管线。',everyday:'只想说一句话？日常起始句',attach:'上传你的文件',taPh:'描述你的影片，或说说要改什么…',atHint:'输入 @ 引用技能',kindStyle:'风格',kindWorkflow:'玩法',catTopic:'主题',catCampaign:'营销',catRole:'角色',catEngine:'引擎',engineBadge:'引擎',start:'启动工作流',startEngine:'启动制作',draftBrief:'先起草简报',ideaPh:'你的想法（可选——留空我会选择合理的默认）',meta:'{n} 步 · {m} 个技能',more:'展开全部 {n} 个',collapse:'收起',shuffle:'换一批',skillsGroup:'技能',noMatch:'没有匹配的技能',toastPill:'已插入技能 pill（未发送）',toastFill:'已填充技能 kickoff（未发送）',toastStart:'已填充 kickoff（未发送）',toastGuides:'已安装 {n} 个指南技能 + 填充 kickoff（未发送）',toastDraft:'已填充起草简报句（未发送）',toastAttach:'演示：附件入口（生产会打开文件选择）',toastReset:'已重置',toastIdea:'已填入随机想法',empty:'写点什么，或点一张卡片',agentPill:'收到。我会先读取技能「{s}」的 SKILL.md，按它的做法开工，再向你确认关键事实。',agentWf:'收到。将按「{w}」的 {n} 步管线执行：{steps}。已安装 {m} 个指南技能，每完成一步我会叙述进展。',agentPlain:'收到。我先确认几个关键事实，然后开始制作。',you:'你',agent:'ChangoVideo',capFormD:'桌面形态',capFormW:'Web 形态',cmpTitle:'工作流卡片 vs @技能',cmpWhat:'是什么',cmpClick:'点击后',cmpSend:'发送时',cmpFit:'适合',cmpEntry:'入口',cmpCard:'多步制作管线模板（5+1 条）',cmpCardClick:'展开步骤管线 + 简报表单；启动 = 安装指南技能 + 填充结构化 kickoff',cmpCardSend:'agent 按有序管线逐步执行并叙述进展',cmpCardFit:'从零做一支完整影片 / 套件',cmpCardEntry:'仅起始卡（不在 @ 列表）',cmpSkill:'单一技能：6 个「玩法」+ 5 个「风格」',cmpSkillClick:'插入 pill（桌面）或填充含技能名的文本（Web）',cmpSkillSend:'该技能 SKILL.md 全文附在消息后，agent 跟随这一种做法',cmpSkillFit:'给当前任务指定一种做法或视觉风格',cmpSkillEntry:'@ 列表 / 技能 chip / Skills 按钮',cmpNote:'<b>命名消歧：</b>「工作流」一词只用于卡片分区；技能 kind 徽章叫「风格 / 玩法」，不叫「工作流」。技能区常驻一行提示说明两者差异。',cmpInter:'<b>唯一交集：</b>卡片启动后安装的 openmotion-* 指南会以项目技能身份出现在 @ 中——那是卡片自己的技能集，不是重复入口。功能上两类入口零重叠，无需合并。'},
+en:{demoTag:'Chat start cards · two-column redesign DEMO',cmpBtn:'Compare',ctlTitle:'Preview controls',form:'Form',formNoteD:'pill insert',formNoteW:'text fill',desktop:'Desktop',adGate:'Ad opt-in',adGateNote:'engine gate',adGateLab:'Show the Product ad engine card',paneW:'Pane width',narrow:'narrow',hintT:'Disambiguation',hintLab:'styles hint line',capT:'Skill cap',capNote:'fold beyond',capAll:'All',dice:'Random idea',reset:'Reset demo',legend:'Legend',lgTopic:'Topic / workflow skill',lgCampaign:'Campaign',lgRole:'Role / style skill',lgEngine:'Engine',railNote:'A confirmation DEMO: data and copy come from the real catalog and skill directory; interactions model the fill-never-send discipline. Production code changes only after sign-off.',stageHint:'Click a card to expand its pipeline; click a skill chip or type @',paneTitle:'Creation chat',heroTitle:'Pick a workflow, or just say it',heroHint:'Every card is a full pipeline — steps and skills ready. Start one and I work through it; nothing to fill in.',wfSec:'Workflows',skSec:'Styles & skills',stylesHint:'A skill rides your message as its method; a workflow is a multi-step pipeline you expand and start.',everyday:'Just one sentence? Everyday starters',attach:'Upload your files',taPh:'Describe your film, or say what to change…',atHint:'Type @ to name a skill',kindStyle:'Style',kindWorkflow:'Workflow',catTopic:'Topic',catCampaign:'Campaign',catRole:'Role',catEngine:'Engine',engineBadge:'Engine',start:'Start workflow',startEngine:'Start making',draftBrief:'Draft the brief first',ideaPh:'Your idea (optional — I pick sensible defaults if empty)',meta:'{n} steps · {m} skills',more:'Show all {n}',collapse:'Collapse',shuffle:'Shuffle',skillsGroup:'Skills',noMatch:'No matching skill',toastPill:'Skill pill inserted (not sent)',toastFill:'Skill kickoff filled (not sent)',toastStart:'Kickoff filled (not sent)',toastGuides:'{n} guide skills installed + kickoff filled (not sent)',toastDraft:'Draft-brief sentence filled (not sent)',toastAttach:'Demo: the attach entry (production opens a file picker)',toastReset:'Reset done',toastIdea:'Random idea filled',empty:'Write something, or pick a card',agentPill:'Got it. I will read the SKILL.md of "{s}" first, work its way, then confirm the key facts with you.',agentWf:'Got it. Running "{w}" as a {n}-step pipeline: {steps}. {m} guide skills installed; I narrate progress after each step.',agentPlain:'Got it. Let me confirm a few key facts, then start making.',you:'You',agent:'ChangoVideo',capFormD:'Desktop form',capFormW:'Web form',cmpTitle:'Workflow cards vs @skills',cmpWhat:'What',cmpClick:'On click',cmpSend:'On send',cmpFit:'Best for',cmpEntry:'Entry',cmpCard:'Multi-step pipeline templates (5+1)',cmpCardClick:'Expands the step pipeline + brief form; Start installs guide skills and fills a structured kickoff',cmpCardSend:'The agent executes the ordered pipeline, narrating each step',cmpCardFit:'Making a complete film / kit from scratch',cmpCardEntry:'Start cards only (not in the @ list)',cmpSkill:'Single skills: 6 workflow + 5 style',cmpSkillClick:'Inserts a pill (desktop) or fills text naming the skill (web)',cmpSkillSend:'The skill\'s SKILL.md rides after the message; the agent follows that one method',cmpSkillFit:'Giving the current task a method or a visual style',cmpSkillEntry:'@ list / skill chips / Skills button',cmpNote:'<b>Naming:</b> "workflow" labels only the card section; skill kind badges read "Style / Workflow" (zh 风格/玩法), never confused with the cards. A persistent hint line states the difference.',cmpInter:'<b>Only intersection:</b> the openmotion-* guides a card installs appear in @ as project skills — the card\'s own skill set, not a duplicate entry. The two entries never overlap in function; no merge needed.'}
+};
+/* ================= 状态 ================= */
+const S={lang:'zh',theme:'dark',form:'desktop',optIn:false,paneW:560,hintOn:true,cap:12,open:null,ideas:{},pills:[],turns:[],everyday:false,evOffset:0,skExpanded:false,mention:{open:false,q:'',sel:0}};
+const $=id=>document.getElementById(id);
+const t=k=>I[S.lang][k]??k;
+const L=(o)=>Array.isArray(o)?o[S.lang==='zh'?0:1]:(o[S.lang]??o.en);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const icon=(id,cls='ic')=>`<svg class="${cls}"><use href="#${id}"/></svg>`;
+function toast(msg){const el=document.createElement('div');el.className='toast';el.innerHTML=icon('i-check')+`<span>${esc(msg)}</span>`;const box=$('toasts');box.appendChild(el);while(box.children.length>3)box.firstChild.remove();setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),260)},2600)}
+/* ================= 渲染 ================= */
+function applyStatic(){document.querySelectorAll('[data-i]').forEach(el=>{el.textContent=t(el.dataset.i)});document.querySelectorAll('[data-i-ph]').forEach(el=>{el.placeholder=t(el.dataset.iPh)});$('heroHint').title=t('heroHint');$('demoTag').textContent=t('demoTag');$('langLab').textContent=S.lang==='zh'?'EN':'中文';$('formNote').textContent=t(S.form==='desktop'?'formNoteD':'formNoteW');$('capForm').textContent=t(S.form==='desktop'?'capFormD':'capFormW');$('paneTag').textContent=S.form;$('themeIc').innerHTML=`<use href="#${S.theme==='dark'?'i-sun':'i-moon'}"/>`;document.documentElement.lang=S.lang==='zh'?'zh-CN':'en'}
+function visibleCards(){return CARDS.filter(c=>!c.engine||S.optIn)}
+function renderWorkflows(){const cards=visibleCards();$('wfCnt').textContent=cards.length;
+ $('wfGrid').innerHTML=cards.map(c=>{const open=S.open===c.id;const cat=c.engine?t('catEngine'):t('cat'+c.cat[0].toUpperCase()+c.cat.slice(1));
+  const stepsHtml=c.steps.map((s,i)=>{const nm=L(STEPNAME[s.k]||[s.k,s.k]);const chips=s.sk.map(k=>`<span class="skillchip">${esc(L(k))}</span>`).join('');
+   return `<li><span class="stepnum"><span class="n">${i+1}</span>${i<c.steps.length-1?'<span class="line"></span>':''}</span><span class="stepbody"><span class="stepname">${icon(STEPIC[s.ic]||'i-video')}${esc(nm)}</span>${chips?`<span class="skillchips">${chips}</span>`:''}</span></li>`}).join('');
+  const meta=t('meta').replace('{n}',c.steps.length).replace('{m}',c.guides.length);
+  return `<li class="${open?'open':''}" style="--wf-cat:${CATC[c.cat]}">
+   <button type="button" class="wf-card" aria-expanded="${open}" data-card="${c.id}" title="${esc(meta)}">
+     <span class="wf-ic">${icon(c.icon)}</span>
+     <span class="wf-body"><span class="wf-titlerow"><span class="wf-title">${esc(L(c.t))}</span><span class="badge cat">${esc(cat)}</span>${c.engine?`<span class="badge engine">${esc(t('engineBadge'))}</span>`:''}</span><span class="wf-blurb">${esc(L(c.b))}</span></span>
+     ${icon('i-chev','ic wf-chev')}</button>
+   ${open?`<div class="wf-panel"><ol class="steps">${stepsHtml}</ol>
+     <input class="idea-input" data-idea="${c.id}" placeholder="${esc(t('ideaPh'))}" value="${esc(S.ideas[c.id]||'')}">
+     <div class="panel-actions"><button type="button" class="startbtn" data-start="${c.id}">${icon('i-play')}${esc(t(c.engine?'startEngine':'start'))}</button>
+     ${c.engine?`<button type="button" class="linkbtn" data-draft="1">${icon('i-sparkles')}${esc(t('draftBrief'))}</button>`:''}</div></div>`:''}</li>`}).join('');
+ updateCaps()}
+function renderSkills(){const cap=S.cap;const all=SKILLS;const shown=S.skExpanded?all:all.slice(0,cap);$('skCnt').textContent=all.length;
+ const more=$('skMore');if(all.length>cap){more.hidden=false;more.textContent=S.skExpanded?t('collapse'):t('more').replace('{n}',all.length)}else more.hidden=true;
+ $('skGrid').className='sk-grid'+(S.skExpanded&&all.length>cap?' capped':'');
+ $('skGrid').innerHTML=shown.map(s=>`<button type="button" class="sk-chip" data-skill="${s.id}" style="--sk-h:${HUES[s.icon]}" title="${esc(L(s.s))}">
+   <span class="sk-ic">${icon('i-'+s.icon)}</span><span class="sk-name">${esc(L(s.t))}</span><span class="badge kind-${s.kind}">${esc(t(s.kind==='style'?'kindStyle':'kindWorkflow'))}</span></button>`).join('');
+ $('stylesHint').style.display=S.hintOn?'flex':'none';updateCaps()}
+function renderEveryday(){$('everydayBtn').setAttribute('aria-expanded',S.everyday);const list=$('everydayList');list.hidden=!S.everyday;
+ if(S.everyday){const items=[0,1,2].map(i=>EVERYDAY[(S.evOffset+i)%EVERYDAY.length]);list.innerHTML=items.map((e,i)=>`<li><button type="button" data-ev="${i}">${icon('i-sparkles')}<span>${esc(L(e))}</span></button></li>`).join('')+`<li><button type="button" data-shuffle="1" style="justify-content:center;color:var(--tl-accent)">${icon('i-shuffle')}<span>${esc(t('shuffle'))}</span></button></li>`}}
+function renderPills(){$('pillRow').innerHTML=S.pills.map(p=>`<span class="cpill">${icon('i-sparkles')}${esc(p.title)}<button type="button" data-rmpill="${p.id}" aria-label="remove">${icon('i-x')}</button></span>`).join('')}
+function renderTurns(){$('turns').innerHTML=S.turns.map(turn=>{const pills=turn.pills.map(p=>`<span class="pill-inline">${icon('i-sparkles')}${esc(p.title)}</span>`).join('');
+ return `<div class="bubble ${turn.role}"><span class="who">${turn.role==='agent'?icon('i-logo'):icon('i-messages')}${esc(t(turn.role==='agent'?'agent':'you'))}</span>${pills}${esc(turn.text)}</div>`}).join('');
+ $('emptyState').style.display=S.turns.length?'none':'';}
+function updateCaps(){$('capCount').textContent=`${visibleCards().length} ${S.lang==='zh'?'工作流':'workflows'} · ${SKILLS.length} ${S.lang==='zh'?'技能':'skills'}`}
+function renderAll(){applyStatic();renderWorkflows();renderSkills();renderEveryday();renderPills();renderTurns();if($('drawer').classList.contains('open'))renderDrawer()}
+/* ================= kickoff 与发送 ================= */
+function kickoff(c){const idea=(S.ideas[c.id]||'').trim();const steps=c.steps.map((s,i)=>`${i+1}. ${L(STEPNAME[s.k])}`).join('; ');const guides=c.guides.map(g=>L(g)).join(', ');
+ if(S.lang==='zh'){const thought=idea||'（未提供想法——请选择合理的默认并说明你的假设）';
+  return c.engine?`为本项目启动「${L(c.t)}」引擎工作流：先读取项目保存的简报，告诉我影片将如何跟随它，然后通过广告路径启动制作——任何关于花费的问题由我自己回答。我的想法：${thought}`:`在本项目中运行「${L(c.t)}」工作流，按管线顺序执行：${steps}。使用为它安装的技能（${guides}），每完成一步就叙述进展。我的想法：${thought}`}
+ const thought=idea||'(no idea given — pick sensible defaults and state your assumptions)';
+ return c.engine?`Start the "${L(c.t)}" engine workflow for this project: read the saved brief first, tell me how the film follows it, then start making through the ad path — I answer any spending question myself. My idea: ${thought}`:`Run the "${L(c.t)}" workflow in this project, in pipeline order: ${steps}. Use the skills installed for it (${guides}), narrating progress after each step. My idea: ${thought}`}
+function styleKickoff(s){return S.lang==='zh'?`请用 ${s.id} 技能（${L(s.t)}）来做。先读这个 skill 再开工；我的想法：`:`Use the ${s.id} skill (${L(s.t)}) for this. Read the skill first; my idea: `}
+function addPill(s){if(S.pills.some(p=>p.id===s.id))return;S.pills.push({id:s.id,title:L(s.t)});renderPills()}
+function fillComposer(text){$('ta').value=text;$('ta').focus();autoGrow()}
+function autoGrow(){const ta=$('ta');ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,120)+'px'}
+function send(){const text=$('ta').value.trim();if(!text&&!S.pills.length){$('composerShell').classList.add('shake');setTimeout(()=>$('composerShell').classList.remove('shake'),320);toast(t('empty'));return}
+ const pills=[...S.pills];S.turns.push({role:'user',text,pills});S.pills=[];$('ta').value='';autoGrow();renderPills();renderTurns();scrollBottom();
+ const wf=CARDS.find(c=>text.includes(L(c.t))&&(text.includes(S.lang==='zh'?'工作流':'workflow')));
+ let reply;if(pills.length)reply=t('agentPill').replace('{s}',pills.map(p=>p.title).join('、'));
+ else if(wf)reply=t('agentWf').replace('{w}',L(wf.t)).replace('{n}',wf.steps.length).replace('{steps}',wf.steps.map((s,i)=>`${i+1}. ${L(STEPNAME[s.k])}`).join('; ')).replace('{m}',wf.guides.length);
+ else reply=t('agentPlain');
+ setTimeout(()=>{S.turns.push({role:'agent',text:reply,pills:[]});renderTurns();scrollBottom()},700)}
+function scrollBottom(){const el=$('chatScroll');el.scrollTop=el.scrollHeight}
+/* ================= @ 提及 ================= */
+function mentionMatch(){const ta=$('ta');const upto=ta.value.slice(0,ta.selectionStart);const m=upto.match(/@([^\s@]*)$/);return m?{q:m[1],start:upto.length-m[0].length}:null}
+function renderMention(){const box=$('mention');const mm=mentionMatch();if(!mm){box.hidden=true;S.mention.open=false;return}
+ S.mention.open=true;S.mention.q=mm.q;const q=mm.q.toLowerCase();
+ const list=SKILLS.filter(s=>!q||[L(s.t),s.id,L(s.s)].some(w=>w.toLowerCase().includes(q)));
+ S.mention.sel=Math.min(S.mention.sel,Math.max(0,list.length-1));
+ box.innerHTML=`<div class="grouplab">${esc(t('skillsGroup'))} · @</div>`+(list.length?list.map((s,i)=>`<button type="button" class="item ${i===S.mention.sel?'sel':''}" data-m="${s.id}"><span class="sk-ic" style="--sk-h:${HUES[s.icon]}">${icon('i-'+s.icon)}</span><span class="txt"><span class="t">${esc(L(s.t))}</span> <span class="badge kind-${s.kind}">${esc(t(s.kind==='style'?'kindStyle':'kindWorkflow'))}</span><div class="d">${esc(L(s.s))}</div></span></button>`).join(''):`<div class="empty">${esc(t('noMatch'))}</div>`);
+ box.hidden=false;box._list=list}
+function pickMention(id){const s=SKILLS.find(x=>x.id===id);if(!s)return;const ta=$('ta');const mm=mentionMatch();const end=ta.selectionStart;
+ if(mm){ta.value=ta.value.slice(0,mm.start)+ta.value.slice(end)}
+ if(S.form==='desktop'){addPill(s);toast(t('toastPill'))}else{ta.value=(ta.value?ta.value.replace(/\s*$/,' '):'')+styleKickoff(s);toast(t('toastFill'))}
+ $('mention').hidden=true;S.mention.open=false;ta.focus();autoGrow()}
+/* ================= 对比抽屉 ================= */
+function renderDrawer(){$('drawerBody').innerHTML=`
+ <table class="cmp"><tr><th></th><th class="hl">${esc(t('wfSec'))} · ${S.lang==='zh'?'卡片':'cards'}</th><th class="hl2">@ ${esc(t('skillsGroup'))}</th></tr>
+ <tr><td>${esc(t('cmpWhat'))}</td><td>${esc(t('cmpCard'))}</td><td>${esc(t('cmpSkill'))}</td></tr>
+ <tr><td>${esc(t('cmpClick'))}</td><td>${esc(t('cmpCardClick'))}</td><td>${esc(t('cmpSkillClick'))}</td></tr>
+ <tr><td>${esc(t('cmpSend'))}</td><td>${esc(t('cmpCardSend'))}</td><td>${esc(t('cmpSkillSend'))}</td></tr>
+ <tr><td>${esc(t('cmpFit'))}</td><td>${esc(t('cmpCardFit'))}</td><td>${esc(t('cmpSkillFit'))}</td></tr>
+ <tr><td>${esc(t('cmpEntry'))}</td><td>${esc(t('cmpCardEntry'))}</td><td>${esc(t('cmpSkillEntry'))}</td></tr></table>
+ <div class="callout">${t('cmpNote')}</div>
+ <h4>${icon('i-info')}${S.lang==='zh'?'事实核查':'Verified facts'}</h4>
+ <ul><li>${S.lang==='zh'?'5 条工作流卡不在 @ 列表里；@ 的 11 个官方技能 = 6 玩法 + 5 风格，与卡片管线功能零重叠。':'The 5 workflow cards are not in the @ list; the 11 official skills (6 workflow + 5 style) never overlap the card pipelines.'}</li>
+ <li>${S.lang==='zh'?'@ 选技能只附 SKILL.md 做法，无安装、无管线、无简报表单。':'An @ skill only attaches its SKILL.md method — no install, no pipeline, no brief form.'}</li></ul>
+ <div class="callout" style="border-color:color-mix(in srgb,var(--tl-accent) 40%,transparent);background:color-mix(in srgb,var(--tl-accent) 7%,transparent)">${t('cmpInter')}</div>`}
+function openDrawer(o){$('drawer').classList.toggle('open',o);$('scrim').classList.toggle('open',o);$('drawer').setAttribute('aria-hidden',!o);$('cmpBtn').classList.toggle('on',o);if(o)renderDrawer()}
+/* ================= 事件 ================= */
+$('wfGrid').addEventListener('click',e=>{const card=e.target.closest('[data-card]');const start=e.target.closest('[data-start]');const draft=e.target.closest('[data-draft]');
+ if(start){const c=CARDS.find(x=>x.id===start.dataset.start);fillComposer(kickoff(c));S.open=null;renderWorkflows();toast(c.engine?t('toastStart'):t('toastGuides').replace('{n}',c.guides.length));return}
+ if(draft){fillComposer(S.lang==='zh'?'先根据我的产品材料起草一份广告简报，再分镜 15 秒与 30 秒两个版本。':'Draft an ad brief from my product materials, then storyboard a 15s and a 30s cut.');toast(t('toastDraft'));return}
+ if(card){const id=card.dataset.card;S.open=S.open===id?null:id;renderWorkflows();if(S.open){const inp=document.querySelector(`[data-idea="${id}"]`);if(inp)inp.focus()}}});
+$('wfGrid').addEventListener('input',e=>{const inp=e.target.closest('[data-idea]');if(inp)S.ideas[inp.dataset.idea]=inp.value});
+$('skGrid').addEventListener('click',e=>{const chip=e.target.closest('[data-skill]');if(!chip)return;const s=SKILLS.find(x=>x.id===chip.dataset.skill);
+ if(S.form==='desktop'){addPill(s);toast(t('toastPill'))}else{fillComposer(($('ta').value?$('ta').value.replace(/\s*$/,' '):'')+styleKickoff(s));toast(t('toastFill'))}});
+$('skMore').addEventListener('click',()=>{S.skExpanded=!S.skExpanded;renderSkills()});
+$('everydayBtn').addEventListener('click',()=>{S.everyday=!S.everyday;renderEveryday()});
+$('everydayList').addEventListener('click',e=>{const sh=e.target.closest('[data-shuffle]');if(sh){S.evOffset=(S.evOffset+3)%EVERYDAY.length;renderEveryday();return}
+ const ev=e.target.closest('[data-ev]');if(ev){const items=[0,1,2].map(i=>EVERYDAY[(S.evOffset+i)%EVERYDAY.length]);fillComposer(L(items[+ev.dataset.ev]));toast(t('toastStart'))}});
+$('attachBtn').addEventListener('click',()=>toast(t('toastAttach')));
+$('pillRow').addEventListener('click',e=>{const rm=e.target.closest('[data-rmpill]');if(rm){S.pills=S.pills.filter(p=>p.id!==rm.dataset.rmpill);renderPills()}});
+$('sendBtn').addEventListener('click',send);
+$('ta').addEventListener('input',()=>{autoGrow();renderMention()});
+$('ta').addEventListener('keydown',e=>{if(S.mention.open){const list=$('mention')._list||[];
+ if(e.key==='ArrowDown'){e.preventDefault();S.mention.sel=(S.mention.sel+1)%Math.max(1,list.length);renderMention();return}
+ if(e.key==='ArrowUp'){e.preventDefault();S.mention.sel=(S.mention.sel-1+Math.max(1,list.length))%Math.max(1,list.length);renderMention();return}
+ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(list[S.mention.sel])pickMention(list[S.mention.sel].id);return}
+ if(e.key==='Escape'){$('mention').hidden=true;S.mention.open=false;return}}
+ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+$('mention').addEventListener('mousedown',e=>{e.preventDefault();const it=e.target.closest('[data-m]');if(it)pickMention(it.dataset.m)});
+document.addEventListener('click',e=>{if(S.mention.open&&!e.target.closest('.composer-wrap')){$('mention').hidden=true;S.mention.open=false}});
+$('formSeg').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;S.form=b.dataset.v;[...$('formSeg').children].forEach(x=>x.classList.toggle('on',x===b));S.pills=[];renderAll();toast(S.form==='desktop'?t('formNoteD'):t('formNoteW'))});
+$('optIn').addEventListener('change',e=>{S.optIn=e.target.checked;if(!S.optIn&&S.open==='product-ad')S.open=null;renderWorkflows()});
+$('paneW').addEventListener('input',e=>{S.paneW=+e.target.value;$('pane').style.setProperty('--pane-w',S.paneW+'px');$('paneWVal').textContent=S.paneW+'px'});
+$('hintOn').addEventListener('change',e=>{S.hintOn=e.target.checked;renderSkills()});
+$('capSel').addEventListener('change',e=>{S.cap=+e.target.value;S.skExpanded=false;renderSkills()});
+$('diceBtn').addEventListener('click',()=>{const idea=L(IDEAS[Math.floor(Math.random()*IDEAS.length)]);if(S.open){S.ideas[S.open]=idea;renderWorkflows()}else fillComposer(idea);toast(t('toastIdea'))});
+$('resetBtn').addEventListener('click',()=>{Object.assign(S,{optIn:false,open:null,ideas:{},pills:[],turns:[],everyday:false,evOffset:0,skExpanded:false,cap:12,paneW:560,hintOn:true});$('optIn').checked=false;$('hintOn').checked=true;$('capSel').value='12';$('paneW').value=560;$('pane').style.setProperty('--pane-w','560px');$('paneWVal').textContent='560px';$('ta').value='';autoGrow();renderAll();toast(t('toastReset'))});
+$('themeBtn').addEventListener('click',()=>{S.theme=S.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=S.theme;applyStatic()});
+$('langBtn').addEventListener('click',()=>{S.lang=S.lang==='zh'?'en':'zh';renderAll()});
+$('cmpBtn').addEventListener('click',()=>openDrawer(!$('drawer').classList.contains('open')));
+$('drawerClose').addEventListener('click',()=>openDrawer(false));
+$('scrim').addEventListener('click',()=>openDrawer(false));
+$('railToggle').addEventListener('click',()=>$('rail').classList.toggle('open'));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){openDrawer(false);$('rail').classList.remove('open')}});
+renderAll();
+</script>
+</body>
+</html>
