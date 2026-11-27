@@ -78,3 +78,11 @@ temp-clip-*.mp4
 .tmp-p*-tests.ps1
 .tmp-p*-tests.tap
 
+# 根目录测试残留（TAP 日志与清单），不纳入版本控制
+/.tmp-*.tap
+/.tmp-list-*.txt
+
+# chat-cards-demo 冒烟验证产物（脚本、提取数据、截图），仅保留 index.html 入库
+/docs/chat-cards-demo/_*
+/docs/chat-cards-demo/shots/
+
