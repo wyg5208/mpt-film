@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-28
+
+### 新增
+
+- 素材库页新增"公共素材"TAB：跨所有项目共享的文档空间（`storage/material_docs`），任意任务均可浏览并引用其中的 TXT/MD 文件与文件夹。
+- "任务素材""公共素材"两 TAB 内支持通过 UI 直接创建/编辑/删除 TXT/MD 文件与空文件夹；后端新增服务 `app/services/material_docs.py`（public/task 两作用域 CRUD，安全纪律对齐 material_upload/file_security）与 REST 端点 `app/controllers/v1/materials.py`（tree/file/folder，统一 verify_token 鉴权）。
+- 前端新增 `features/library/useMaterialDocs.ts` API 封装与可复用 `FileManager.tsx` 文件管理器组件，i18n 向 zh/en 各注入 19 个新键并平铺至全部语言包。
+
+### 变更
+
+- `app/router.py` 在 plans 路由之后挂载 materials 路由，不改动既有渲染流水线。
+
 ## [1.12.1] - 2026-11-24
 
 ### 新增

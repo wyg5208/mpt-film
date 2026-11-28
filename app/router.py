@@ -15,6 +15,7 @@ from app.controllers.v1 import (
     catalogs,
     cache,
     llm,
+    materials,
     media,
     oauth,
     plans,
@@ -46,3 +47,5 @@ root_api_router.include_router(catalogs.router)
 root_api_router.include_router(cache.router)
 # 脚本方案草稿库（专业短剧主页面）+ 本地引擎就绪度探针。
 root_api_router.include_router(plans.router)
+# 素材库文件管理：公共素材共享空间 + 任务/公共两作用域的 TXT/MD 与文件夹 CRUD。
+root_api_router.include_router(materials.router)

@@ -1342,3 +1342,177 @@ body.cf-motion-off .log-dot.running {
   background: var(--panel);
   color: var(--text);
 }
+
+/* ---------- 素材库文件管理器（公共素材 / 任务文档） ---------- */
+.material-tab-panel {
+  margin-top: 12px;
+}
+
+.file-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.fm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.fm-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.fm-crumb {
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.fm-crumb:hover {
+  background: var(--cf-field-bg, rgba(127, 127, 127, 0.12));
+}
+
+.fm-crumb.active {
+  font-weight: 600;
+}
+
+.fm-crumb-sep {
+  color: var(--muted, #888);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fm-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fm-inline input {
+  min-width: 220px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--cf-field-bg, var(--panel));
+  color: var(--text);
+}
+
+.fm-inline select {
+  min-width: 200px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--cf-field-bg, var(--panel));
+  color: var(--text);
+}
+
+.fm-ref-label {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.fm-ref-done {
+  margin: 4px 0;
+}
+
+.fm-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--cf-field-bg, rgba(127, 127, 127, 0.06));
+}
+
+.fm-editor-head input {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.fm-textarea {
+  min-height: 240px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.fm-editor-foot {
+  display: flex;
+  gap: 8px;
+}
+
+.fm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.fm-row:hover {
+  background: var(--cf-field-bg, rgba(127, 127, 127, 0.08));
+}
+
+.fm-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.fm-dir {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  font-weight: 600;
+}
+
+.fm-size {
+  font-size: 12px;
+  white-space: nowrap;
+}

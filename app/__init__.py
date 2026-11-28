@@ -1,3 +1,3 @@
 """ChangoFilm 应用包元数据。"""
 
-__version__ = "1.12.1"
+__version__ = "1.13.0"

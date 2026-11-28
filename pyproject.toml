@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "changofilm"
-version = "1.12.1"
+version = "1.13.0"
 description = "ChangoFilm: a local-first studio for professional series short dramas, with WebUI and CLI."
 readme = "docs/pypi-description.md"
 requires-python = ">=3.11"

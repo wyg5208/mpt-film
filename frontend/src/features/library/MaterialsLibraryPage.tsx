@@ -10,6 +10,7 @@ import { navigate } from "../../app/router";
 import { VideoPreview } from "../tasks/VideoPreview";
 import { SignedDownloadLink, useSignedUrl } from "./SignedMedia";
 import { formatSize } from "../../components/ui";
+import { FileManager } from "./FileManager";
 
 type TaskSummary = {
   task_id: string;
@@ -137,6 +138,9 @@ function FileRow({ file }: { file: TaskFile }) {
 export function MaterialsLibraryPage() {
   const { t } = useI18n();
   const [activeId, setActiveId] = useState("");
+  // 顶部两个 TAB：task = 按任务浏览产物 + 该任务的文档空间；public = 跨项目共享的
+  // 公共素材空间（所有项目都能浏览并引用其中的 TXT/MD 与文件夹）。
+  const [tab, setTab] = useState<"task" | "public">("task");
 
   const { data: tasksData, isLoading: tasksLoading } = useQuery({
     queryKey: ["tasks"],
@@ -190,56 +194,88 @@ export function MaterialsLibraryPage() {
 
   return (
     <div className="library-page">
-      <p className="muted">{t("Materials Library Hint")}</p>
-      <div className="materials-select-wrap">
-        <span className="muted">{t("Select Task")}</span>
-        <select
-          className="materials-select"
-          data-testid="materials-task-select"
-          value={effectiveId}
-          disabled={!selectorTasks.length}
-          onChange={(e) => setActiveId(e.target.value)}
+      <div className="tabs" data-testid="materials-tabs">
+        <button
+          className={tab === "task" ? "tab active" : "tab"}
+          onClick={() => setTab("task")}
         >
-          {selectorTasks.map((task) => (
-            <option key={task.task_id} value={task.task_id}>
-              {task.subject}
-            </option>
-          ))}
-        </select>
-        {effectiveId && (
-          <button
-            className="btn ghost"
-            onClick={() => navigate(`/jobs/${effectiveId}`)}
-          >
-            {t("Detail")}
-          </button>
-        )}
+          {t("Task Materials Tab")}
+        </button>
+        <button
+          className={tab === "public" ? "tab active" : "tab"}
+          onClick={() => setTab("public")}
+        >
+          {t("Public Materials Tab")}
+        </button>
       </div>
 
-      {(tasksLoading || dirsLoading) && <p className="muted">{t("Loading…")}</p>}
-      {!selectorTasks.length && !tasksLoading && !dirsLoading && (
-        <p className="muted">{t("No tasks yet.")}</p>
-      )}
-      {error && <div className="error">{t("Materials Load Error")}</div>}
-
-      {effectiveId && filesLoading && <p className="muted">{t("Loading…")}</p>}
-      {effectiveId && !filesLoading && !error && !files.length && (
-        <p className="muted">{t("Materials Library Empty")}</p>
-      )}
-
-      {groups.map((group) => (
-        <section className="file-group" key={group.category}>
-          <div className="file-group-title">
-            {t(CATEGORY_LABEL[group.category])}
-            <span className="muted file-size"> · {group.files.length}</span>
+      {tab === "public" ? (
+        <div className="material-tab-panel">
+          <p className="muted">{t("Public Materials Hint")}</p>
+          <FileManager scope="public" taskId="" tasks={selectorTasks} />
+        </div>
+      ) : (
+        <>
+          <p className="muted">{t("Materials Library Hint")}</p>
+          <div className="materials-select-wrap">
+            <span className="muted">{t("Select Task")}</span>
+            <select
+              className="materials-select"
+              data-testid="materials-task-select"
+              value={effectiveId}
+              disabled={!selectorTasks.length}
+              onChange={(e) => setActiveId(e.target.value)}
+            >
+              {selectorTasks.map((task) => (
+                <option key={task.task_id} value={task.task_id}>
+                  {task.subject}
+                </option>
+              ))}
+            </select>
+            {effectiveId && (
+              <button
+                className="btn ghost"
+                onClick={() => navigate(`/jobs/${effectiveId}`)}
+              >
+                {t("Detail")}
+              </button>
+            )}
           </div>
-          <div className="file-list">
-            {group.files.map((file) => (
-              <FileRow key={file.path} file={file} />
-            ))}
-          </div>
-        </section>
-      ))}
+
+          {(tasksLoading || dirsLoading) && <p className="muted">{t("Loading…")}</p>}
+          {!selectorTasks.length && !tasksLoading && !dirsLoading && (
+            <p className="muted">{t("No tasks yet.")}</p>
+          )}
+          {error && <div className="error">{t("Materials Load Error")}</div>}
+
+          {effectiveId && filesLoading && <p className="muted">{t("Loading…")}</p>}
+          {effectiveId && !filesLoading && !error && !files.length && (
+            <p className="muted">{t("Materials Library Empty")}</p>
+          )}
+
+          {groups.map((group) => (
+            <section className="file-group" key={group.category}>
+              <div className="file-group-title">
+                {t(CATEGORY_LABEL[group.category])}
+                <span className="muted file-size"> · {group.files.length}</span>
+              </div>
+              <div className="file-list">
+                {group.files.map((file) => (
+                  <FileRow key={file.path} file={file} />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {effectiveId && (
+            <section className="file-group">
+              <div className="file-group-title">{t("Material Docs Title")}</div>
+              <p className="muted">{t("Material Docs Hint")}</p>
+              <FileManager key={effectiveId} scope="task" taskId={effectiveId} />
+            </section>
+          )}
+        </>
+      )}
     </div>
   );
 }
